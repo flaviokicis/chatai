@@ -1,0 +1,11 @@
+{
+  "python.defaultInterpreterPath": "/Users/jessica/me/chatai/backend/.venv/bin/python",
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["backend/tests"],
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": ["backend"],
+  "python.envFile": "${workspaceFolder}/backend/.env",
+  "files.exclude": {
+    "**/__pycache__": true
+  }
+}
