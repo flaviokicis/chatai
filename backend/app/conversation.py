@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional, List
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, Field
-from langchain_core.language_models.chat_models import BaseChatModel
 
 
 class ConversationState(BaseModel):
-    intention: Optional[str] = None
-    is_sports_court_led: Optional[bool] = None
-    sport: Optional[str] = None
-    covered_from_rain: Optional[bool] = None
-    dimensions: Optional[str] = None
-    pending_field: Optional[str] = None
+    intention: str | None = None
+    is_sports_court_led: bool | None = None
+    sport: str | None = None
+    covered_from_rain: bool | None = None
+    dimensions: str | None = None
+    pending_field: str | None = None
 
     def is_complete(self) -> bool:
         if not self.intention:
@@ -32,16 +33,25 @@ class ConversationState(BaseModel):
 class UpdateChecklist(BaseModel):
     """Extract or update known checklist fields. Leave fields null if unknown."""
 
-    intention: Optional[str] = Field(default=None, description="User intention in plain language")
-    is_sports_court_led: Optional[bool] = Field(default=None, description="Whether the user intends to buy LED lights for a sports court")
-    sport: Optional[str] = Field(default=None, description="Sport for the court, e.g. basketball, tennis")
-    covered_from_rain: Optional[bool] = Field(default=None, description="True if covered from rain (indoor/covered), False if open/outdoor")
-    dimensions: Optional[str] = Field(default=None, description="Court dimensions like '28 x 15 m' or '94 x 50 ft'")
+    intention: str | None = Field(default=None, description="User intention in plain language")
+    is_sports_court_led: bool | None = Field(
+        default=None, description="Whether the user intends to buy LED lights for a sports court"
+    )
+    sport: str | None = Field(
+        default=None, description="Sport for the court, e.g. basketball, tennis"
+    )
+    covered_from_rain: bool | None = Field(
+        default=None,
+        description="True if covered from rain (indoor/covered), False if open/outdoor",
+    )
+    dimensions: str | None = Field(
+        default=None, description="Court dimensions like '28 x 15 m' or '94 x 50 ft'"
+    )
 
 
 class ConversationManager:
     def __init__(self) -> None:
-        self._store: Dict[str, ConversationState] = {}
+        self._store: dict[str, ConversationState] = {}
         self._logger = logging.getLogger("uvicorn.error")
 
     def get_state(self, user_id: str) -> ConversationState:
@@ -68,7 +78,9 @@ class ConversationManager:
         ):
             state.pending_field = None
 
-    def classify_and_update(self, state: ConversationState, message: str, llm: BaseChatModel) -> None:
+    def classify_and_update(
+        self, state: ConversationState, message: str, llm: BaseChatModel
+    ) -> None:
         tools = [UpdateChecklist]
         llm_with_tools = llm.bind_tools(tools)
         state_summary = {
@@ -95,11 +107,11 @@ class ConversationManager:
             "When the user's message is a bare confirmation/denial (e.g., yes/no), update the field ONLY if the target field is boolean per the tool schema. "
             "For non-boolean targets, do not set values on a generic yes/no; require explicit content from the user. "
             "Never infer; only set what is explicitly answered.\n\n"
-             f"User message: {message}"
+            f"User message: {message}"
         )
 
         result = llm_with_tools.invoke(prompt)
-        tool_calls: List[Dict[str, object]] = getattr(result, "tool_calls", [])
+        tool_calls: list[dict[str, object]] = getattr(result, "tool_calls", [])
         if not tool_calls:
             forced_prompt = (
                 prompt
@@ -127,21 +139,19 @@ class ConversationManager:
                     "covered_from_rain": state.covered_from_rain,
                     "dimensions": state.dimensions,
                 }
-                changes: Dict[str, Dict[str, object]] = {}
-                for key in before:
-                    if before[key] != after[key]:
-                        changes[key] = {"from": before[key], "to": after[key]}
+                changes: dict[str, dict[str, object]] = {}
+        for key, before_value in before.items():
+            if before_value != after[key]:
+                changes[key] = {"from": before_value, "to": after[key]}
                 if changes:
-                    self._logger.info(
-                        "Tool call UpdateChecklist applied changes: %s", changes
-                    )
+                    self._logger.info("Tool call UpdateChecklist applied changes: %s", changes)
                 else:
                     self._logger.info(
                         "Tool call UpdateChecklist made no effective changes (args=%s)",
                         args,
                     )
 
-    def next_question(self, state: ConversationState) -> Optional[str]:
+    def next_question(self, state: ConversationState) -> str | None:
         if not state.intention:
             state.pending_field = "intention"
             return "What is your intention?"
@@ -167,5 +177,3 @@ class ConversationManager:
             return "All good, transfering to human"
         nq = self.next_question(state)
         return nq or "All good, transfering to human"
-
-

@@ -1,0 +1,21 @@
+{
+  "question_graph": [
+    {
+      "key": "intention",
+      "prompt": "What are you looking to accomplish today?",
+      "priority": 10
+    },
+    {
+      "key": "budget",
+      "prompt": "Do you have a budget range in mind?",
+      "priority": 20
+    },
+    {
+      "key": "timeframe",
+      "prompt": "What is your ideal timeline?",
+      "priority": 30
+    }
+  ]
+}
+
+

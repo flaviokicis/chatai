@@ -18,6 +18,7 @@ source .venv/bin/activate
 uv sync
 cp env.example .env
 # Edit .env and set TWILIO_AUTH_TOKEN and optionally PUBLIC_BASE_URL
+cp config.json config.local.json # optional: override per environment
 ```
 
 ## Run
@@ -25,7 +26,7 @@ cp env.example .env
 ```bash
 cd /Users/jessica/me/chatai/backend
 source .venv/bin/activate
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+CONFIG_JSON_PATH=./config.local.json uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
 - Local health check: `http://localhost:8080/health`
@@ -49,6 +50,105 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 - The webhook validates `X-Twilio-Signature`. Requests failing validation return `403`.
 - For JSON payloads, raw body validation is used automatically.
 - Keep handler fast; do heavy work in background tasks or a queue.
+
+## Multitenant configuration (temporary JSON-backed)
+
+This project is multitenant. On startup we load a tenant configuration provider that can be swapped later without code changes.
+
+- Abstract provider: `app/config/provider.py` (`ConfigProvider`, `TenantAgentConfig`)
+- JSON implementation: `app/config/loader.py` loads a JSON file into a `ConfigProvider`
+- Default config location: `./config.json` (override with env `CONFIG_JSON_PATH`)
+
+Schema (temporary):
+
+```json
+{
+  "default": {
+    "enabled_agents": ["sales_qualifier"],
+    "channels": [
+      {
+        "channel_type": "whatsapp",
+        "channel_id": "whatsapp:+15551112222",
+        "enabled_agents": ["sales_qualifier"],
+        "default_instance_id": "sq_default",
+        "agent_instances": [
+          {
+            "instance_id": "sq_default",
+            "agent_type": "sales_qualifier",
+            "params": {
+              "question_graph": [
+                {
+                  "key": "intention",
+                  "prompt": "What is your intention?",
+                  "priority": 10
+                }
+              ]
+            },
+            "handoff": { "target": "sales_slack" }
+          }
+        ]
+      }
+    ]
+  },
+  "tenants": {
+    "TENANT_ID": {
+      "enabled_agents": ["sales_qualifier"],
+      "channels": [
+        {
+          "channel_type": "whatsapp",
+          "channel_id": "whatsapp:+15559998888",
+          "enabled_agents": ["sales_qualifier"],
+          "default_instance_id": "sq_default",
+          "agent_instances": [
+            {
+              "instance_id": "sq_default",
+              "agent_type": "sales_qualifier",
+              "params": {
+                "question_graph": [
+                  {
+                    "key": "intention",
+                    "prompt": "What is your intention?",
+                    "priority": 10
+                  }
+                ]
+              },
+              "handoff": { "target": "sales_slack" }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+Notes:
+
+- `channel_type` + `channel_id` uniquely identify a channel instance. For WhatsApp, `channel_id` can be the Twilio WhatsApp sender like `whatsapp:+15551112222`.
+- Per-channel `enabled_agents` override tenant defaults, allowing multiple WhatsApp inboxes per tenant with different agents.
+- Each channel may define `agent_instances` and a `default_instance_id`. An agent instance carries human configuration (e.g., question graph, prompts, validation, and handoff routing).
+- For now we only support the `sales_qualifier` agent. In production, this JSON will be replaced with a Postgres-backed configuration while preserving the `ConfigProvider` interface.
+
+## Playground JSONs
+
+Sample question graph payloads are available under `backend/playground/`:
+
+- `sales_qualifier_question_graph_basic.json`: minimal 3-question flow
+- `sales_qualifier_question_graph_full.json`: fuller sales qualifier checklist with dependencies
+
+You can quickly test by pointing `CONFIG` to a file containing one of these payloads merged under your desired structure, or by using them as the `params` for a `sales_qualifier` agent instance.
+
+### Testing and validation of configuration
+
+- There are unit tests for configuration parsing and validation: see `tests/test_config.py`.
+- When adding new configuration fields, always add/update tests first. Invalid configuration should cause tests to fail before runtime errors.
+- The loader performs basic validation and raises `ValueError` on schema shape violations.
+
+## Agent design guidance
+
+- Prefer thin, logic-focused agents. State management, extraction, and next-question policy are provided by base components.
+- Use `QuestionnaireAgent` and `QuestionnaireExtractor` for checklist-style agents. Provide only your `QuestionGraph` via configuration.
+- Use shared tool schemas `UpdateAnswers` and `EscalateToHuman` from `app/core/tool_schemas.py`.
 
 ## Test-driven development (TDD)
 

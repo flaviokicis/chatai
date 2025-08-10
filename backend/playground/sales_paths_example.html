@@ -1,0 +1,39 @@
+
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>sales_paths_example</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>window.mermaid.initialize({ startOnLoad: true });</script>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji"; padding: 16px; }
+      .mermaid { background: white; border-radius: 8px; padding: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>sales_paths_example</h1>
+    <div class="mermaid">flowchart TD
+  %% sales_paths_example
+  subgraph GLOBAL[\"Global Questions\"]
+    intention[\"What are you looking to accomplish today?\n(intention)\"]
+    budget[\"Do you have a budget range in mind?\n(budget)\"]
+    timeframe[\"What is your ideal timeline?\n(timeframe)\"]
+  end
+  disamb{\"Which best describes your project?\"}
+  subgraph PATH_tennis_court[\"Path: tennis_court\"]
+    court_type[\"Is it indoor or outdoor?\n(court_type)\"]
+    dimensions[\"Do you know the court dimensions?\n(dimensions)\"]
+    lighting_level[\"Target lighting level (lux)?\n(lighting_level)\"]
+  end
+  disamb --> PATH_tennis_court
+  subgraph PATH_soccer_court[\"Path: soccer_court\"]
+    field_size[\"Approximate field size?\n(field_size)\"]
+    surface[\"Surface type (grass/turf)?\n(surface)\"]
+    lighting_level[\"Target lighting level (lux)?\n(lighting_level)\"]
+  end
+  disamb --> PATH_soccer_court
+</div>
+  </body>
+</html>

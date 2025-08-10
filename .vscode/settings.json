@@ -5,6 +5,20 @@
   "python.terminal.activateEnvironment": true,
   "python.analysis.extraPaths": ["backend"],
   "python.envFile": "${workspaceFolder}/backend/.env",
+
+  "ruff.configuration": "${workspaceFolder}/backend/pyproject.toml",
+  "ruff.logLevel": "warning",
+  "ruff.organizeImports": true,
+
+  "editor.codeActionsOnSave": {
+    "source.fixAll.ruff": "explicit",
+    "source.organizeImports.ruff": "explicit"
+  },
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+
   "files.exclude": {
     "**/__pycache__": true
   }

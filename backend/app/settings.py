@@ -1,5 +1,4 @@
 from functools import lru_cache
-from typing import Optional
 
 from dotenv import load_dotenv
 from pydantic import Field
@@ -10,9 +9,10 @@ load_dotenv()
 
 class Settings(BaseSettings):
     twilio_auth_token: str = Field(..., alias="TWILIO_AUTH_TOKEN")
-    public_base_url: Optional[str] = Field(default=None, alias="PUBLIC_BASE_URL")
+    public_base_url: str | None = Field(default=None, alias="PUBLIC_BASE_URL")
     google_api_key: str = Field(..., alias="GOOGLE_API_KEY")
     llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
+    redis_url: str | None = Field(default=None, alias="REDIS_URL")
 
     model_config = SettingsConfigDict(
         env_file=".env",

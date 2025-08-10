@@ -1,22 +1,24 @@
-from typing import Optional, Dict, Any
 import logging
+import os
+from typing import Any
 
-from fastapi import FastAPI, Request, Header, HTTPException, status
+from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse, Response
+from langchain.chat_models import init_chat_model
 from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 
-from .settings import get_settings
+from .config.loader import load_json_config
 from .conversation import ConversationManager
-import os
-from langchain.chat_models import init_chat_model
+from .settings import get_settings
 
 app = FastAPI(title="Chatai Twilio Webhook", version="0.1.0")
 logger = logging.getLogger("uvicorn.error")
 conversation_manager = ConversationManager()
+app.state.config_provider = None  # type: ignore[attr-defined]
 
 
-def build_validation_url(request: Request, public_base_url: Optional[str]) -> str:
+def build_validation_url(request: Request, public_base_url: str | None) -> str:
     if public_base_url:
         base = public_base_url.rstrip("/")
         if request.url.query:
@@ -32,6 +34,14 @@ def _init_llm() -> None:
     app.state.llm = init_chat_model(settings.llm_model, model_provider="google_genai")
     app.state.llm_model = settings.llm_model
     logger.info("LLM initialized: model=%s provider=%s", settings.llm_model, "google_genai")
+    # Load multitenant config from JSON if provided
+    config_path = os.environ.get("CONFIG_JSON_PATH") or os.getenv("CONFIG_JSON_PATH")
+    if config_path:
+        app.state.config_provider = load_json_config(config_path)
+        logger.info("Config provider initialized from %s", config_path)
+    else:
+        app.state.config_provider = load_json_config("config.json")
+        logger.info("Config provider initialized from default config.json")
 
 
 @app.get("/health", response_class=PlainTextResponse)
@@ -42,7 +52,7 @@ async def health() -> str:
 @app.post("/webhooks/twilio/whatsapp")
 async def twilio_whatsapp_webhook(
     request: Request,
-    x_twilio_signature: Optional[str] = Header(default=None, alias="X-Twilio-Signature"),
+    x_twilio_signature: str | None = Header(default=None, alias="X-Twilio-Signature"),
 ) -> Response:
     if not x_twilio_signature:
         raise HTTPException(
@@ -76,7 +86,7 @@ async def twilio_whatsapp_webhook(
         return PlainTextResponse("ok")
 
     form = await request.form()
-    params: Dict[str, Any] = {k: str(v) for k, v in form.items()}
+    params: dict[str, Any] = {k: str(v) for k, v in form.items()}
 
     is_valid = validator.validate(validation_url, params, x_twilio_signature)
     if not is_valid:

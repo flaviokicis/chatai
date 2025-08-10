@@ -1,0 +1,57 @@
+{
+  "question_graph": [
+    {
+      "key": "intention",
+      "prompt": "What is your primary goal today?",
+      "priority": 10
+    },
+    {
+      "key": "is_sports_court_led",
+      "prompt": "Is your intention to buy LED lights for a sports court?",
+      "priority": 20
+    },
+    {
+      "key": "facility_type",
+      "prompt": "What type of facility is this for (e.g., gym, tennis court, warehouse)?",
+      "priority": 30
+    },
+    {
+      "key": "indoor_outdoor",
+      "prompt": "Is the space indoor or outdoor?",
+      "priority": 40,
+      "dependencies": ["facility_type"]
+    },
+    {
+      "key": "dimensions",
+      "prompt": "Do you know approximate dimensions or size of the area?",
+      "priority": 50
+    },
+    {
+      "key": "existing_lighting",
+      "prompt": "Do you currently have lighting installed? If yes, what type?",
+      "priority": 60
+    },
+    {
+      "key": "budget",
+      "prompt": "Do you have a budget range in mind?",
+      "priority": 70
+    },
+    {
+      "key": "timeframe",
+      "prompt": "What is your ideal timeline for this project?",
+      "priority": 80
+    },
+    {
+      "key": "location",
+      "prompt": "Where is the project located (city, state/country)?",
+      "priority": 90
+    },
+    {
+      "key": "contact_email",
+      "prompt": "What is the best email to reach you?",
+      "priority": 100
+    }
+  ]
+}
+
+
