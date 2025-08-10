@@ -26,5 +26,7 @@ class QuestionnaireExtractor:
             f"Current known answers: {summary}\n"
             f"Previous question field key (may be null): {pending_field}\n"
             "Always respond by calling the UpdateAnswers tool with extracted values or EscalateToHuman when needed."
+            "You need to EscalateToHuman if the conversation can't continue or if there's some kind of loop that cannot be resolved."
+            "Feel free to EscalateToHuman if you feel like the customer is asking for or insisting on an information that is not available or not relevant to the specific goals of this conversation."
         )
         return self._llm.extract(prompt, tools)

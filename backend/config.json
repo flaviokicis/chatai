@@ -5,7 +5,53 @@
       {
         "channel_type": "whatsapp",
         "channel_id": "whatsapp:+15551112222",
-        "enabled_agents": ["sales_qualifier"]
+        "enabled_agents": ["sales_qualifier"],
+        "default_instance_id": "sq_default",
+        "agent_instances": [
+          {
+            "instance_id": "sq_default",
+            "agent_type": "sales_qualifier",
+            "params": {
+              "question_graph": {
+                "global": [
+                  { "key": "intention", "prompt": "What are you looking to accomplish today?", "priority": 10 },
+                  { "key": "budget", "prompt": "Do you have a budget range in mind?", "priority": 90 },
+                  { "key": "timeframe", "prompt": "What is your ideal timeline?", "priority": 100 }
+                ],
+                "paths": {
+                  "tennis_court": {
+                    "entry_predicates": [
+                      { "type": "keyword", "any": ["tennis", "court", "racket"] },
+                      { "type": "regex", "pattern": "(tennis|court)\\b" }
+                    ],
+                    "questions": [
+                      { "key": "court_type", "prompt": "Is it indoor or outdoor?", "priority": 20 },
+                      { "key": "dimensions", "prompt": "Do you know the court dimensions?", "priority": 30 },
+                      { "key": "lighting_level", "prompt": "Target lighting level (lux)?", "priority": 40 }
+                    ]
+                  },
+                  "soccer_court": {
+                    "entry_predicates": [
+                      { "type": "keyword", "any": ["soccer", "football", "pitch"] }
+                    ],
+                    "questions": [
+                      { "key": "field_size", "prompt": "Approximate field size?", "priority": 20 },
+                      { "key": "surface", "prompt": "Surface type (grass/turf)?", "priority": 30 },
+                      { "key": "lighting_level", "prompt": "Target lighting level (lux)?", "priority": 40 }
+                    ]
+                  }
+                },
+                "disambiguation": {
+                  "prompt": "Which best describes your project?",
+                  "choices": ["tennis_court", "soccer_court"],
+                  "priority": 15
+                },
+                "path_selection": { "lock_threshold": 2, "allow_switch_before_lock": true }
+              }
+            },
+            "handoff": { "target": "sales_slack" }
+          }
+        ]
       }
     ]
   },

@@ -1,21 +1,31 @@
+from __future__ import annotations
+
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import PlainTextResponse, Response
 from langchain.chat_models import init_chat_model
-from twilio.request_validator import RequestValidator
 from twilio.twiml.messaging_response import MessagingResponse
 
-from .config.loader import load_json_config
-from .conversation import ConversationManager
-from .settings import get_settings
+from app.agents.base import BaseAgentDeps
+from app.agents.sales_qualifier.factory import build_sales_qualifier_agent
+from app.config.loader import load_json_config
+from app.core.langchain_adapter import LangChainToolsLLM
+from app.core.messages import InboundMessage
+from app.core.state import InMemoryStore
+from app.services.human_handoff import LoggingHandoff
+from app.settings import get_settings
+from app.whatsapp.twilio import TwilioWhatsAppHandler
 
-app = FastAPI(title="Chatai Twilio Webhook", version="0.1.0")
+if TYPE_CHECKING:
+    from app.config.provider import AgentInstanceConfig, ChannelAgentConfig
+
+app = FastAPI(title="Chatai Twilio Webhook", version="0.2.0")
 logger = logging.getLogger("uvicorn.error")
-conversation_manager = ConversationManager()
 app.state.config_provider = None  # type: ignore[attr-defined]
+app.state.store = InMemoryStore()  # type: ignore[attr-defined]
 
 
 def build_validation_url(request: Request, public_base_url: str | None) -> str:
@@ -31,7 +41,8 @@ def build_validation_url(request: Request, public_base_url: str | None) -> str:
 def _init_llm() -> None:
     settings = get_settings()
     os.environ["GOOGLE_API_KEY"] = settings.google_api_key
-    app.state.llm = init_chat_model(settings.llm_model, model_provider="google_genai")
+    chat = init_chat_model(settings.llm_model, model_provider="google_genai")
+    app.state.llm = LangChainToolsLLM(chat)
     app.state.llm_model = settings.llm_model
     logger.info("LLM initialized: model=%s provider=%s", settings.llm_model, "google_genai")
     # Load multitenant config from JSON if provided
@@ -61,48 +72,61 @@ async def twilio_whatsapp_webhook(
         )
 
     settings = get_settings()
-    validator = RequestValidator(settings.twilio_auth_token)
+    twilio = TwilioWhatsAppHandler(settings)
 
-    content_type = request.headers.get("content-type", "").lower()
-    validation_url = build_validation_url(request, settings.public_base_url)
-    logger.info(
-        "Twilio webhook received: path=%s content_type=%s using_public_base_url=%s computed_url=%s",
-        request.url.path,
-        content_type,
-        bool(settings.public_base_url),
-        validation_url,
-    )
-
-    if content_type.startswith("application/json"):
-        raw_body = await request.body()
-        is_valid = validator.validate(validation_url, raw_body.decode("utf-8"), x_twilio_signature)
-        if not is_valid:
-            logger.warning(
-                "Twilio signature validation failed (json). remote=%s signature_present=%s",
-                request.client.host if request.client else "",
-                bool(x_twilio_signature),
-            )
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
+    params = await twilio.validate_and_parse(request, x_twilio_signature)
+    if not params:
+        # JSON payloads are currently acknowledged with 200 OK and no further processing
         return PlainTextResponse("ok")
 
-    form = await request.form()
-    params: dict[str, Any] = {k: str(v) for k, v in form.items()}
-
-    is_valid = validator.validate(validation_url, params, x_twilio_signature)
-    if not is_valid:
-        logger.warning(
-            "Twilio signature validation failed (form). remote=%s signature_present=%s",
-            request.client.host if request.client else "",
-            bool(x_twilio_signature),
-        )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid signature")
-
     from_number = params.get("From", "")
+    to_number = params.get("To", "")
     body_text = params.get("Body", "")
-    logger.info("Incoming WhatsApp message from %s: %s", from_number, body_text)
+    logger.info("Incoming WhatsApp message from %s to %s: %s", from_number, to_number, body_text)
 
-    # LLM-driven classification with tool calling; flow control remains deterministic.
-    reply_text = conversation_manager.handle(from_number or "unknown", body_text, app.state.llm)
+    # Resolve channel config and agent instance
+    cfg = app.state.config_provider
+    channel_id = to_number
+    channel_cfg: ChannelAgentConfig | None = None
+    if cfg and channel_id:
+        channel_cfg = cfg.get_channel_config(
+            tenant_id="default", channel_type="whatsapp", channel_id=channel_id
+        )
+
+    if not channel_cfg or not channel_cfg.agent_instances:
+        logger.warning("No channel config/agent instances found for %s", channel_id)
+        message_text = "Sorry, no agent is configured for this WhatsApp number."
+        twiml = MessagingResponse()
+        twiml.message(message_text)
+        return Response(content=str(twiml), media_type="application/xml")
+
+    # Pick default instance or first
+    instance_id = channel_cfg.default_instance_id or channel_cfg.agent_instances[0].instance_id
+    instance: AgentInstanceConfig | None = next(
+        (i for i in channel_cfg.agent_instances if i.instance_id == instance_id), None
+    )
+    if not instance:
+        instance = channel_cfg.agent_instances[0]
+
+    # Build agent dependencies
+    deps = BaseAgentDeps(store=app.state.store, llm=app.state.llm, handoff=LoggingHandoff())
+
+    # Currently only sales_qualifier is supported
+    if instance.agent_type != "sales_qualifier":
+        logger.warning("Unsupported agent_type=%s", instance.agent_type)
+        twiml = MessagingResponse()
+        twiml.message("No suitable agent available.")
+        return Response(content=str(twiml), media_type="application/xml")
+
+    agent = build_sales_qualifier_agent(
+        user_id=from_number or "unknown", deps=deps, instance=instance
+    )
+
+    inbound = InboundMessage(
+        user_id=from_number or "unknown", text=body_text, channel="whatsapp", metadata={}
+    )
+    result = agent.handle(inbound)
+    reply_text = (result.outbound.text if result.outbound else "") or ""
 
     twiml = MessagingResponse()
     twiml.message(reply_text)

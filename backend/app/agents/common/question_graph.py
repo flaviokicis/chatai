@@ -99,18 +99,38 @@ class QuestionGraph:
 
 
 def build_question_graph_from_params(params: dict[str, object]) -> QuestionGraph:
-    items = params.get("question_graph", []) if isinstance(params, dict) else []
-    questions: list[Question] = []
-    if isinstance(items, list):
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            key = str(item.get("key", "")).strip()
-            prompt = str(item.get("prompt", "")).strip()
-            if not key or not prompt:
-                continue
-            priority = int(item.get("priority", 100))
-            deps_raw = item.get("dependencies", [])
-            deps = [str(d) for d in deps_raw] if isinstance(deps_raw, list) else []
-            questions.append(Question(key=key, prompt=prompt, priority=priority, dependencies=deps))
-    return QuestionGraph(questions)
+    def _parse_list(items: list[dict[str, object]] | object) -> list[Question]:
+        questions: list[Question] = []
+        if isinstance(items, list):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                key = str(item.get("key", "")).strip()
+                prompt = str(item.get("prompt", "")).strip()
+                if not key or not prompt:
+                    continue
+                priority = int(item.get("priority", 100))
+                deps_raw = item.get("dependencies", [])
+                deps = [str(d) for d in deps_raw] if isinstance(deps_raw, list) else []
+                questions.append(
+                    Question(key=key, prompt=prompt, priority=priority, dependencies=deps)
+                )
+        return questions
+
+    if not isinstance(params, dict):
+        return QuestionGraph([])
+
+    cfg = params.get("question_graph")
+    # Multi-path shape: { global: [...], paths: { name: { questions: [...] } } }
+    if isinstance(cfg, dict) and ("global" in cfg or "paths" in cfg):
+        all_questions: list[Question] = []
+        all_questions.extend(_parse_list(cfg.get("global", [])))
+        paths = cfg.get("paths", {})
+        if isinstance(paths, dict):
+            for section in paths.values():
+                if isinstance(section, dict):
+                    all_questions.extend(_parse_list(section.get("questions", [])))
+        return QuestionGraph(all_questions)
+
+    # Flat list fallback
+    return QuestionGraph(_parse_list(cfg))

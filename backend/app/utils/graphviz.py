@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import json as _json
+import os
+import urllib.request
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from app.agents.common.question_graph import (
     QuestionGraph,
@@ -11,14 +15,15 @@ from app.agents.common.question_graph import (
 
 
 def _escape(label: str) -> str:
-    return label.replace('"', '\\"')
+    # For Mermaid inside a text node, avoid escaping quotes or <br/>. Keep as-is.
+    return label
 
 
 def _mermaid_nodes_edges(graph: QuestionGraph, indent: str = "") -> str:
     lines: list[str] = []
     # Nodes
     for key, q in graph.items():
-        safe_label = _escape(f"{q.prompt}\\n({key})")
+        safe_label = _escape(f"{q.prompt}<br/>({key})")
         lines.append(f'{indent}{key}["{safe_label}"]')
     # Edges from dependencies
     for key, q in graph.items():
@@ -57,6 +62,14 @@ def build_graph_from_json_payload(
     return build_question_graph_from_params(payload), None, None
 
 
+def _zero_dependency_keys(graph: QuestionGraph) -> list[str]:
+    return [k for k, q in graph.items() if not q.dependencies]
+
+
+def _sanitize_id(raw: str) -> str:
+    return "".join(ch if (ch.isalnum() or ch == "_") else "_" for ch in raw)
+
+
 def render_mermaid_from_json(payload: dict[str, Any], title: str | None = None) -> str:
     global_qg, path_qgs, disamb = build_graph_from_json_payload(payload)
 
@@ -83,19 +96,46 @@ def render_mermaid_from_json(payload: dict[str, Any], title: str | None = None) 
     # Paths
     for name, qg in path_qgs.items():
         label = _escape(str(name))
-        lines.append(f'  subgraph PATH_{name}["Path: {label}"]')
+        sid = _sanitize_id(str(name))
+        entry = f"PATH_{sid}__ENTRY"
+        lines.append(f'  subgraph PATH_{sid}["Path: {label}"]')
+        # Entry node for the path to attach edges to
+        lines.append(f'    {entry}(("{label}"))')
         ne = _mermaid_nodes_edges(qg, indent="    ")
         if ne:
             lines.append(ne)
+        # Entry connects to zero-dependency questions for this path
+        lines.extend(f"    {entry} --> {k}" for k in _zero_dependency_keys(qg))
         lines.append("  end")
         if disamb:
-            lines.append(f"  disamb --> PATH_{name}")
+            lines.append(f"  disamb --> {entry}")
 
     return "\n".join(lines) + "\n"
 
 
-def render_html_mermaid(payload: dict[str, Any], title: str | None = None) -> str:
-    mermaid_src = render_mermaid_from_json(payload, title)
+def render_html_mermaid_via_kroki(payload: dict[str, Any], title: str | None = None) -> str:
+    """
+    Render using the Kroki HTTP API to generate SVG server-side. Useful to bypass
+    browser Mermaid issues and to validate syntax before opening the file.
+    """
+    diagram_src = render_mermaid_from_json(payload, title)
+    api_url = os.environ.get("KROKI_URL", "https://kroki.io") + "/mermaid/svg"
+    parsed = urlparse(api_url)
+    if parsed.scheme not in {"http", "https"}:
+        msg = f"Unsupported URL scheme for KROKI_URL: {parsed.scheme}"
+        raise ValueError(msg)
+    req = urllib.request.Request(  # noqa: S310 - scheme validated above
+        api_url,
+        data=_json.dumps({"diagram_source": diagram_src}).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:  # noqa: S310 - scheme validated above
+            svg = resp.read().decode("utf-8")
+    except Exception as exc:  # pragma: no cover - network fallback
+        svg = f"<pre>Failed to render via Kroki: {exc}\n\n{diagram_src}</pre>"
+
     return f"""
 <!doctype html>
 <html>
@@ -103,16 +143,14 @@ def render_html_mermaid(payload: dict[str, Any], title: str | None = None) -> st
     <meta charset=\"utf-8\" />
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <title>{_escape(title or "Question Graph")}</title>
-    <script src=\"https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js\"></script>
-    <script>window.mermaid.initialize({{ startOnLoad: true }});</script>
     <style>
       body {{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, \"Apple Color Emoji\", \"Segoe UI Emoji\"; padding: 16px; }}
-      .mermaid {{ background: white; border-radius: 8px; padding: 12px; }}
+      #diagram {{ background: white; border-radius: 8px; padding: 12px; }}
     </style>
   </head>
   <body>
     <h1>{_escape(title or "Question Graph")}</h1>
-    <div class=\"mermaid\">{_escape(mermaid_src)}</div>
+    <div id=\"diagram\">{svg}</div>
   </body>
 </html>
 """
@@ -121,4 +159,4 @@ def render_html_mermaid(payload: dict[str, Any], title: str | None = None) -> st
 def render_html_file_from_json_path(path: str | Path, title: str | None = None) -> str:
     p = Path(path)
     payload = json.loads(p.read_text(encoding="utf-8"))
-    return render_html_mermaid(payload, title or p.stem)
+    return render_html_mermaid_via_kroki(payload, title or p.stem)
