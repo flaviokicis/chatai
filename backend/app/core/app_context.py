@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+    from app.config.provider import ConfigProvider
+    from app.core.llm import LLMClient
+    from app.core.session import SessionPolicy
+    from app.core.state import ConversationStore
+
+
+@dataclass(slots=True)
+class AppContext:
+    config_provider: ConfigProvider | None
+    store: ConversationStore
+    llm: LLMClient | None
+    llm_model: str
+    session_policy: SessionPolicy | None = None
+
+
+def set_app_context(app: FastAPI, ctx: AppContext) -> None:
+    # Store one typed context object under app.state
+    app.state.ctx = ctx  # type: ignore[attr-defined]
+
+
+def get_app_context(app: FastAPI) -> AppContext:
+    # Retrieve and cast from app.state
+    return cast("AppContext", app.state.ctx)  # type: ignore[attr-defined]

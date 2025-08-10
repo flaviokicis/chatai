@@ -4,13 +4,14 @@
     "channels": [
       {
         "channel_type": "whatsapp",
-        "channel_id": "whatsapp:+15551112222",
+        "channel_id": "whatsapp:+14155238886",
         "enabled_agents": ["sales_qualifier"],
         "default_instance_id": "sq_default",
         "agent_instances": [
           {
             "instance_id": "sq_default",
             "agent_type": "sales_qualifier",
+            "llm": { "provider": "google_genai", "model": "gemini-2.5-flash" },
             "params": {
               "question_graph": {
                 "global": [
@@ -61,7 +62,7 @@
       "channels": [
         {
           "channel_type": "whatsapp",
-          "channel_id": "whatsapp:+15559998888",
+          "channel_id": "whatsapp:+14155238886",
           "enabled_agents": ["sales_qualifier"]
         }
       ]

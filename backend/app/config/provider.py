@@ -5,11 +5,18 @@ from typing import Any, Protocol
 
 
 @dataclass(slots=True)
+class LLMInstanceConfig:
+    provider: str | None = None
+    model: str | None = None
+
+
+@dataclass(slots=True)
 class AgentInstanceConfig:
     instance_id: str
     agent_type: str
     params: dict[str, Any]
     handoff: dict[str, Any]
+    llm: LLMInstanceConfig | None = None
 
 
 @dataclass(slots=True)
@@ -72,16 +79,25 @@ class JSONConfigProvider:
                     continue
                 params = inst.get("params", {})
                 handoff = inst.get("handoff", {})
+                llm_raw = inst.get("llm", {})
                 if not isinstance(params, dict):
                     params = {}
                 if not isinstance(handoff, dict):
                     handoff = {}
+                llm: LLMInstanceConfig | None = None
+                if isinstance(llm_raw, dict):
+                    provider_raw = llm_raw.get("provider")
+                    model_raw = llm_raw.get("model")
+                    provider = str(provider_raw).strip() if isinstance(provider_raw, str) else None
+                    model = str(model_raw).strip() if isinstance(model_raw, str) else None
+                    llm = LLMInstanceConfig(provider=provider or None, model=model or None)
                 instances.append(
                     AgentInstanceConfig(
                         instance_id=instance_id,
                         agent_type=agent_type,
                         params={str(k): v for k, v in params.items()},
                         handoff={str(k): v for k, v in handoff.items()},
+                        llm=llm,
                     )
                 )
         return instances

@@ -23,6 +23,10 @@ class Agent(ABC):
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
 
+    def get_agent_type(self) -> str:
+        """Return the concrete agent type for routing/analytics consistency."""
+        return self.agent_type
+
     @abstractmethod
     def handle(self, message: InboundMessage) -> AgentResult:
         raise NotImplementedError

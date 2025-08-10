@@ -64,7 +64,7 @@ class QuestionGraph:
             except Exception as exc:
                 logging.getLogger(__name__).debug(
                     "Skipping question %s due to error evaluating applicability/missing: %s",
-                    getattr(q, "key", "<unknown>"),
+                    q.key,
                     exc,
                 )
                 continue
