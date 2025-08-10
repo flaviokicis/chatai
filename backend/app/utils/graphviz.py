@@ -55,8 +55,8 @@ def build_graph_from_json_payload(
                 path_to_qg[str(name)] = build_question_graph_from_params(
                     {"question_graph": questions}
                 )
-        disamb = cfg.get("disambiguation") if isinstance(cfg.get("disambiguation"), dict) else None
-        return global_qg, path_to_qg, disamb
+        # No special disambiguation step; rely on questions and LLM to infer path if needed
+        return global_qg, path_to_qg, None
 
     # flat list fallback
     return build_question_graph_from_params(payload), None, None
@@ -71,7 +71,7 @@ def _sanitize_id(raw: str) -> str:
 
 
 def render_mermaid_from_json(payload: dict[str, Any], title: str | None = None) -> str:
-    global_qg, path_qgs, disamb = build_graph_from_json_payload(payload)
+    global_qg, path_qgs, _ = build_graph_from_json_payload(payload)
 
     if not path_qgs:
         return _mermaid_for_flat_graph(global_qg, title)
@@ -88,11 +88,6 @@ def render_mermaid_from_json(payload: dict[str, Any], title: str | None = None) 
         lines.append(ne)
     lines.append("  end")
 
-    # Disambiguation node (optional)
-    if disamb:
-        safe_label = _escape(f"{disamb.get('prompt', 'Select Path')}")
-        lines.append(f'  disamb{{"{safe_label}"}}')
-
     # Paths
     for name, qg in path_qgs.items():
         label = _escape(str(name))
@@ -107,8 +102,6 @@ def render_mermaid_from_json(payload: dict[str, Any], title: str | None = None) 
         # Entry connects to zero-dependency questions for this path
         lines.extend(f"    {entry} --> {k}" for k in _zero_dependency_keys(qg))
         lines.append("  end")
-        if disamb:
-            lines.append(f"  disamb --> {entry}")
 
     return "\n".join(lines) + "\n"
 

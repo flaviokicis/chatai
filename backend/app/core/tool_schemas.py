@@ -18,3 +18,17 @@ class UpdateAnswers(BaseModel):
         default_factory=dict,
         description="Key-value updates for answers map",
     )
+
+
+class SelectPath(BaseModel):
+    path: str | None = Field(
+        default=None,
+        description="Name of the selected path or null if none applies",
+    )
+
+
+class UnknownAnswer(BaseModel):
+    field: str | None = Field(
+        default=None,
+        description="Field key that the user explicitly does not know; if null, assume the pending field",
+    )

@@ -1,0 +1,135 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.625rem;
+  /* Brand-driven light theme */
+  --background: #fafaf9; /* surface: stone-50 */
+  --foreground: #0f172a; /* ink 900 */
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #427053; /* brand 600 */
+  --primary-foreground: #ffffff;
+  --secondary: #f1f5f9; /* slate-100-ish */
+  --secondary-foreground: #0f172a;
+  --muted: #f1f5f9; /* subtle surfaces */
+  --muted-foreground: #475569; /* ink 700 */
+  --accent: #86efac; /* mint */
+  --accent-foreground: #0f172a;
+  --destructive: #ef4444; /* red-500 */
+  --border: #e7e5e4; /* stone-200 */
+  --input: #e7e5e4;
+  --ring: #34d399; /* emerald-400 */
+  /* Charts (approximate, friendly) */
+  --chart-1: #5D8D6E; /* brand 500 */
+  --chart-2: #87B095; /* brand 400 */
+  --chart-3: #abceb6; /* brand 300 */
+  --chart-4: #86efac; /* mint */
+  --chart-5: #2a583c; /* brand 700 */
+  /* Sidebar */
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #427053;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f1f5f9;
+  --sidebar-accent-foreground: #0f172a;
+  --sidebar-border: #e7e5e4;
+  --sidebar-ring: #34d399;
+}
+
+.dark {
+  --background: #0f172a; /* ink 900 */
+  --foreground: #f8fafc;
+  --card: #111827; /* near slate-900 */
+  --card-foreground: #f8fafc;
+  --popover: #111827;
+  --popover-foreground: #f8fafc;
+  --primary: #2a583c; /* brand 700 */
+  --primary-foreground: #e5efe8;
+  --secondary: #0b1220; /* very dark surface */
+  --secondary-foreground: #e5e7eb;
+  --muted: #0b1220;
+  --muted-foreground: #94a3b8;
+  --accent: #19442b; /* brand 800 */
+  --accent-foreground: #e5efe8;
+  --destructive: #b91c1c;
+  --border: rgba(255,255,255,0.08);
+  --input: rgba(255,255,255,0.12);
+  --ring: #64d8c0; /* cooler ring for dark */
+  --chart-1: #abceb6;
+  --chart-2: #87b095;
+  --chart-3: #5d8d6e;
+  --chart-4: #34d399;
+  --chart-5: #2a583c;
+  --sidebar: #111827;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-primary: #2a583c;
+  --sidebar-primary-foreground: #e5efe8;
+  --sidebar-accent: #0b1220;
+  --sidebar-accent-foreground: #e5e7eb;
+  --sidebar-border: rgba(255,255,255,0.08);
+  --sidebar-ring: #64d8c0;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  
+  /* Prevent layout shifts */
+  main {
+    @apply transition-none;
+  }
+  
+  /* Ensure consistent scrollbar behavior */
+  html {
+    scrollbar-gutter: stable;
+  }
+}

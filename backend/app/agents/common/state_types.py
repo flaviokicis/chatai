@@ -13,6 +13,10 @@ class AnswersState(Protocol):
 class AnswersBlob(BaseModel):
     answers: dict[str, Any] = Field(default_factory=dict)
     pending_field: str | None = None
+    # Path-aware extensions (optional; ignored if not using paths)
+    active_path: str | None = None
+    path_votes: dict[str, int] = Field(default_factory=dict)
+    path_locked: bool = False
 
     @classmethod
     def from_unknown(cls, state: object) -> AnswersBlob:

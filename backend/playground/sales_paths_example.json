@@ -28,11 +28,6 @@
         ]
       }
     },
-    "disambiguation": {
-      "prompt": "Which best describes your project?",
-      "choices": ["tennis_court", "soccer_court"],
-      "priority": 15
-    },
     "path_selection": {
       "lock_threshold": 2,
       "allow_switch_before_lock": true

@@ -16,15 +16,12 @@
               "question_graph": {
                 "global": [
                   { "key": "intention", "prompt": "What are you looking to accomplish today?", "priority": 10 },
+                  { "key": "use_case", "prompt": "Which best describes your project: a tennis court or a soccer field?", "priority": 15 },
                   { "key": "budget", "prompt": "Do you have a budget range in mind?", "priority": 90 },
                   { "key": "timeframe", "prompt": "What is your ideal timeline?", "priority": 100 }
                 ],
                 "paths": {
                   "tennis_court": {
-                    "entry_predicates": [
-                      { "type": "keyword", "any": ["tennis", "court", "racket"] },
-                      { "type": "regex", "pattern": "(tennis|court)\\b" }
-                    ],
                     "questions": [
                       { "key": "court_type", "prompt": "Is it indoor or outdoor?", "priority": 20 },
                       { "key": "dimensions", "prompt": "Do you know the court dimensions?", "priority": 30 },
@@ -32,9 +29,6 @@
                     ]
                   },
                   "soccer_court": {
-                    "entry_predicates": [
-                      { "type": "keyword", "any": ["soccer", "football", "pitch"] }
-                    ],
                     "questions": [
                       { "key": "field_size", "prompt": "Approximate field size?", "priority": 20 },
                       { "key": "surface", "prompt": "Surface type (grass/turf)?", "priority": 30 },
@@ -42,7 +36,6 @@
                     ]
                   }
                 },
-                
                 "path_selection": { "lock_threshold": 2, "allow_switch_before_lock": true }
               }
             },

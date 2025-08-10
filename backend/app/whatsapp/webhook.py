@@ -145,4 +145,5 @@ async def handle_twilio_whatsapp_webhook(
         policy=WindowedSessionPolicy(duration=timedelta(hours=24)),
     )
     reply_text = (result.outbound.text if result.outbound else "") or ""
+    logger.info("Sending WhatsApp reply: %r", reply_text)
     return build_twiml_response(reply_text)

@@ -97,6 +97,11 @@ class QuestionGraph:
     def items(self) -> Iterator[tuple[str, Question]]:
         return iter(self._questions.items())
 
+    def merge_with(self, other: QuestionGraph) -> QuestionGraph:
+        combined: dict[str, Question] = dict(self._questions)
+        combined.update(other._questions)
+        return QuestionGraph(list(combined.values()))
+
 
 def build_question_graph_from_params(params: dict[str, object]) -> QuestionGraph:
     def _parse_list(items: list[dict[str, object]] | object) -> list[Question]:
@@ -123,14 +128,10 @@ def build_question_graph_from_params(params: dict[str, object]) -> QuestionGraph
     cfg = params.get("question_graph")
     # Multi-path shape: { global: [...], paths: { name: { questions: [...] } } }
     if isinstance(cfg, dict) and ("global" in cfg or "paths" in cfg):
-        all_questions: list[Question] = []
-        all_questions.extend(_parse_list(cfg.get("global", [])))
-        paths = cfg.get("paths", {})
-        if isinstance(paths, dict):
-            for section in paths.values():
-                if isinstance(section, dict):
-                    all_questions.extend(_parse_list(section.get("questions", [])))
-        return QuestionGraph(all_questions)
+        # Build only the global graph here; path-specific graphs are built by utilities
+        global_questions: list[Question] = []
+        global_questions.extend(_parse_list(cfg.get("global", [])))
+        return QuestionGraph(global_questions)
 
     # Flat list fallback
     return QuestionGraph(_parse_list(cfg))

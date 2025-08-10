@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from .llm import LLMClient
@@ -26,7 +27,19 @@ class LangChainToolsLLM(LLMClient):
                 break
         if chosen is None:
             chosen = tool_calls[0]
-        args = chosen.get("args", {}) or {}
-        if isinstance(args, dict) and "__tool_name__" not in args:
+        args_raw = chosen.get("args", {}) or {}
+        args: dict[str, Any] | None
+        if isinstance(args_raw, str):
+            try:
+                parsed = json.loads(args_raw)
+                args = parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                args = {}
+        elif isinstance(args_raw, dict):
+            args = args_raw
+        else:
+            args = {}
+
+        if "__tool_name__" not in args:
             args["__tool_name__"] = str(chosen.get("name", ""))
-        return args if isinstance(args, dict) else {}
+        return args

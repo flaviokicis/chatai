@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     redis_port: int | None = Field(default=None, alias="REDIS_PORT")
     redis_db: int | None = Field(default=None, alias="REDIS_DB")
     redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
+    # Optional debug flag via environment (DEBUG=true) in addition to dev_config.py
+    debug: bool = Field(default=False, alias="DEBUG")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -45,3 +47,24 @@ class Settings(BaseSettings):
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
+
+
+def is_debug_enabled() -> bool:
+    """Return True if debug logging is enabled.
+
+    Priority:
+    1) app.dev_config.debug (if present)
+    2) Settings().debug (env var DEBUG)
+    """
+    try:
+        from app import dev_config as _dev  # type: ignore
+
+        val = getattr(_dev, "debug", None)
+        if isinstance(val, bool):
+            return val
+    except Exception:
+        pass
+    try:
+        return bool(get_settings().debug)
+    except Exception:
+        return False
