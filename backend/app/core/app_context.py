@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from app.core.llm import LLMClient
     from app.core.session import SessionPolicy
     from app.core.state import ConversationStore
+    from app.services.rate_limiter import RateLimiter
 
 
 @dataclass(slots=True)
@@ -19,6 +20,7 @@ class AppContext:
     llm: LLMClient | None
     llm_model: str
     session_policy: SessionPolicy | None = None
+    rate_limiter: RateLimiter | None = None
 
 
 def set_app_context(app: FastAPI, ctx: AppContext) -> None:

@@ -32,6 +32,8 @@ class ChannelAgentConfig:
 class TenantAgentConfig:
     enabled_agents: list[str]
     channels: list[ChannelAgentConfig]
+    # Optional per-tenant rate-limit policy
+    rate_limit: dict[str, int] | None = None
 
 
 class ConfigProvider(Protocol):
@@ -42,6 +44,7 @@ class ConfigProvider(Protocol):
     def get_channel_config(
         self, tenant_id: str, channel_type: str, channel_id: str
     ) -> ChannelAgentConfig | None: ...
+    def get_rate_limit_params(self, tenant_id: str) -> dict[str, int] | None: ...
 
 
 class JSONConfigProvider:
@@ -136,7 +139,24 @@ class JSONConfigProvider:
         raw = self._get_raw_tenant(tenant_id)
         enabled_agents = self._parse_enabled_agents(raw)
         channels = self._parse_channels(raw.get("channels", []))
-        return TenantAgentConfig(enabled_agents=enabled_agents, channels=channels)
+        rate_limit = None
+        rl = raw.get("rate_limit") if isinstance(raw, dict) else None
+        if isinstance(rl, dict):
+            # Keep only expected ints if present
+            window_seconds = rl.get("window_seconds")
+            max_per_user = rl.get("max_requests_per_user")
+            max_per_tenant = rl.get("max_requests_per_tenant")
+            parsed: dict[str, int] = {}
+            if isinstance(window_seconds, int):
+                parsed["window_seconds"] = window_seconds
+            if isinstance(max_per_user, int):
+                parsed["max_requests_per_user"] = max_per_user
+            if isinstance(max_per_tenant, int):
+                parsed["max_requests_per_tenant"] = max_per_tenant
+            rate_limit = parsed or None
+        return TenantAgentConfig(
+            enabled_agents=enabled_agents, channels=channels, rate_limit=rate_limit
+        )
 
     def get_enabled_agents(
         self, tenant_id: str, channel_type: str | None, channel_id: str | None
@@ -155,4 +175,21 @@ class JSONConfigProvider:
         for ch in cfg.channels:
             if ch.channel_type == channel_type and ch.channel_id == channel_id:
                 return ch
+        return None
+
+    def get_rate_limit_params(self, tenant_id: str) -> dict[str, int] | None:  # type: ignore[override]
+        cfg = self.get_tenant_config(tenant_id)
+        if cfg.rate_limit:
+            return cfg.rate_limit
+        # fall back to default tenant if exists in root data
+        root_default = self._data.get("default") if isinstance(self._data, dict) else None
+        if isinstance(root_default, dict):
+            rl = root_default.get("rate_limit")
+            if isinstance(rl, dict):
+                out: dict[str, int] = {}
+                for k in ("window_seconds", "max_requests_per_user", "max_requests_per_tenant"):
+                    v = rl.get(k)
+                    if isinstance(v, int):
+                        out[k] = v
+                return out or None
         return None

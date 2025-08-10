@@ -22,8 +22,6 @@ class SalesQualifierAgent(QuestionnaireAgent):
     @dataclass(slots=True)
     class SalesPathConfig:
         graphs: dict[str, Any] | None = None
-        predicates: dict[str, list] | None = None
-        settings: dict[str, Any] | None = None
 
     def __init__(
         self,
@@ -37,11 +35,6 @@ class SalesQualifierAgent(QuestionnaireAgent):
         # Override extractor with domain alias to be explicit about intent
         self.extractor = SalesExtractor(deps.llm)
         self._path_graphs = path.graphs if path and path.graphs else {}
-        self._path_settings = (
-            path.settings
-            if path and path.settings
-            else {"lock_threshold": 2, "allow_switch_before_lock": True}
-        )
 
     def _update_context_from_message(
         self, blob: AnswersBlob, message: InboundMessage

@@ -1,17 +1,16 @@
 from __future__ import annotations
 
+import logging
 from contextlib import suppress
 from typing import TYPE_CHECKING
 
+from app.core.messages import AgentResult, InboundMessage, OutboundMessage
 from app.core.session import SessionPolicy, StableSessionPolicy
-
-if TYPE_CHECKING:
-    from app.core.messages import InboundMessage
+from app.services.rate_limiter import RateLimitParams
 
 if TYPE_CHECKING:
     from app.core.agent_base import Agent
     from app.core.app_context import AppContext
-    from app.core.messages import AgentResult
 
 
 def _resolve_session_policy(app_context: AppContext) -> SessionPolicy:
@@ -29,6 +28,46 @@ def run_agent_turn(
     """Run one agent turn and record history using provided or resolved session policy."""
     policy = policy or _resolve_session_policy(app_context)
     session_id = policy.session_id(app_context, agent, inbound)
+
+    # Hard cap inbound text length for safety/cost control
+    max_input_chars = 500
+    if inbound.text and len(inbound.text) > max_input_chars:
+        inbound.text = inbound.text[:max_input_chars]  # type: ignore[attr-defined]
+
+    # Centralized rate limiting (per-tenant, per-user)
+    try:
+        limiter = getattr(app_context, "rate_limiter", None)
+        provider = getattr(app_context, "config_provider", None)
+        tenant_id = "default"
+        try:
+            meta = getattr(inbound, "metadata", {})
+            if isinstance(meta, dict) and isinstance(meta.get("tenant_id"), str):
+                tenant_id = meta["tenant_id"]  # type: ignore[index]
+        except Exception:
+            tenant_id = "default"
+        if limiter is not None:
+            limits_raw = provider.get_rate_limit_params(tenant_id) if provider else None
+            params = RateLimitParams(
+                window_seconds=int((limits_raw or {}).get("window_seconds", 60)),
+                max_requests_per_user=int((limits_raw or {}).get("max_requests_per_user", 20)),
+                max_requests_per_tenant=int((limits_raw or {}).get("max_requests_per_tenant", 200)),
+            )
+            allowed, _rem_u, _rem_t = limiter.allow(
+                tenant_id=tenant_id, user_id=inbound.user_id, params=params
+            )
+            if not allowed:
+                return AgentResult(
+                    outbound=OutboundMessage(
+                        text="You have reached the message limit. Please try again in a minute."
+                    ),
+                    handoff=None,
+                    state_diff={},
+                )
+    except Exception:
+        # Never block the turn on rate limiter failures
+        logging.getLogger("uvicorn.error").warning(
+            "Rate limiter check failed; proceeding without limiting", exc_info=True
+        )
 
     history = None
     if hasattr(app_context.store, "get_message_history"):

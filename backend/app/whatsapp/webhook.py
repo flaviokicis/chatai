@@ -107,11 +107,17 @@ async def handle_twilio_whatsapp_webhook(
     sender_number = params.get("From", "")
     receiver_number = params.get("To", "")
     message_text = params.get("Body", "")
+    MAX_INPUT_CHARS = 500
+    if len(message_text) > MAX_INPUT_CHARS:
+        message_text = message_text[:MAX_INPUT_CHARS]
     logger.info(
         "Incoming WhatsApp message from %s to %s: %s", sender_number, receiver_number, message_text
     )
 
     app_context = get_app_context(request.app)  # type: ignore[arg-type]
+    # Per-tenant discovery: for now the WhatsApp number belongs to a single tenant
+    # If multi-tenant routing is added, replace this with real lookup.
+    tenant_id = "default"
     channel_config, available_channels = get_channel_config_for_channel(
         app_context, receiver_number
     )
@@ -137,6 +143,9 @@ async def handle_twilio_whatsapp_webhook(
     inbound = InboundMessage(
         user_id=sender_number or "unknown", text=message_text, channel="whatsapp", metadata={}
     )
+
+    # Pass tenant_id via metadata for centralized rate limiting in run_agent_turn
+    inbound.metadata["tenant_id"] = tenant_id
     # Apply WhatsApp-specific 24h windowed session policy only here
     result = run_agent_turn(
         app_context,

@@ -11,7 +11,16 @@ def load_json_config(path: str | Path) -> ConfigProvider:
     p = Path(path)
     if not p.exists():
         # minimal default config
-        data: dict[str, Any] = {"default": {"enabled_agents": ["sales_qualifier"]}}
+        data: dict[str, Any] = {
+            "default": {
+                "enabled_agents": ["sales_qualifier"],
+                "rate_limit": {
+                    "window_seconds": 60,
+                    "max_requests_per_user": 20,
+                    "max_requests_per_tenant": 200,
+                },
+            }
+        }
         return JSONConfigProvider(data)
     with p.open("r", encoding="utf-8") as f:
         data = json.load(f)

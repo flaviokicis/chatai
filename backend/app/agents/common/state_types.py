@@ -15,7 +15,6 @@ class AnswersBlob(BaseModel):
     pending_field: str | None = None
     # Path-aware extensions (optional; ignored if not using paths)
     active_path: str | None = None
-    path_votes: dict[str, int] = Field(default_factory=dict)
     path_locked: bool = False
 
     @classmethod

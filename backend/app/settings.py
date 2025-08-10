@@ -6,6 +6,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
 
+try:
+    # Optional dev config; ignore if missing
+    from app import dev_config as _dev  # type: ignore
+except Exception:  # pragma: no cover - optional
+    _dev = None  # type: ignore[assignment]
+
 
 class Settings(BaseSettings):
     twilio_auth_token: str = Field(..., alias="TWILIO_AUTH_TOKEN")
@@ -56,14 +62,10 @@ def is_debug_enabled() -> bool:
     1) app.dev_config.debug (if present)
     2) Settings().debug (env var DEBUG)
     """
-    try:
-        from app import dev_config as _dev  # type: ignore
-
+    if _dev is not None:
         val = getattr(_dev, "debug", None)
         if isinstance(val, bool):
             return val
-    except Exception:
-        pass
     try:
         return bool(get_settings().debug)
     except Exception:

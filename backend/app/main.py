@@ -13,6 +13,11 @@ from app.core.langchain_adapter import LangChainToolsLLM
 from app.core.session import StableSessionPolicy
 from app.core.state import InMemoryStore, RedisStore
 from app.router import api_router
+from app.services.rate_limiter import (
+    InMemoryRateLimiterBackend,
+    RateLimiter,
+    RedisRateLimiterBackend,
+)
 from app.settings import get_settings
 
 app = FastAPI(title="Chatai Twilio Webhook", version="0.2.0")
@@ -64,6 +69,18 @@ def _init_llm() -> None:
 
     # Configure default session policy (stable); channels may override
     ctx.session_policy = StableSessionPolicy()
+
+    # Initialize rate limiter backend based on Redis availability (re-use redis_url)
+    try:
+        if redis_url:
+            ctx.rate_limiter = RateLimiter(RedisRateLimiterBackend(redis_url))
+            logger.info("Rate limiter initialized with Redis backend")
+        else:
+            ctx.rate_limiter = RateLimiter(InMemoryRateLimiterBackend())
+            logger.info("Rate limiter initialized in-memory")
+    except Exception as exc:  # pragma: no cover - startup log only
+        logger.warning("Rate limiter initialization failed (%s); disabling rate limiting", exc)
+        ctx.rate_limiter = None
 
 
 @app.get("/health", response_class=PlainTextResponse)

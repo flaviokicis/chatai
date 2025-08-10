@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -73,8 +74,6 @@ class QuestionnaireAgent(BaseAgent):
         )
         if is_debug_enabled():
             try:
-                import logging
-
                 logging.getLogger("uvicorn.error").info(
                     "[dev_debug] extractor tool=%s updates_keys=%s pending_before=%s",
                     (args.get("__tool_name__") if isinstance(args, dict) else "<none>"),
@@ -84,7 +83,9 @@ class QuestionnaireAgent(BaseAgent):
                     pending_field,
                 )
             except Exception:
-                pass
+                logging.getLogger("uvicorn.error").debug(
+                    "[dev_debug] logging failed while reporting extractor info", exc_info=True
+                )
         if args.get("__tool_name__") == "EscalateToHuman":
             reason = str(args.get("reason", "llm_escalation"))
             summary = {"answers": answers}
@@ -110,15 +111,15 @@ class QuestionnaireAgent(BaseAgent):
         )
         if is_debug_enabled():
             try:
-                import logging
-
                 logging.getLogger("uvicorn.error").info(
                     "[dev_debug] applied updates=%s pending_after=%s",
                     list(updates.keys()) if isinstance(updates, dict) else [],
                     pending_field,
                 )
             except Exception:
-                pass
+                logging.getLogger("uvicorn.error").debug(
+                    "[dev_debug] logging failed while reporting applied updates", exc_info=True
+                )
         blob.answers = answers
         blob.pending_field = pending_field
 
@@ -135,4 +136,21 @@ class QuestionnaireAgent(BaseAgent):
         q = effective.get_by_prompt(next_prompt)
         blob.pending_field = q.key if q else None
         self._save_blob(blob)
-        return AgentResult(outbound=OutboundMessage(text=next_prompt), handoff=None, state_diff={})
+
+        # Light naturalization: vary wording slightly via LLM rewrite (best-effort)
+        varied_text = next_prompt
+        try:
+            maybe_rewrite = getattr(self.deps.llm, "rewrite", None)
+            if callable(maybe_rewrite):
+                rewritten = maybe_rewrite(
+                    instruction=(
+                        "Keep the original meaning. Avoid repetition, keep it concise and friendly, and do not use 'please' redundantly."
+                    ),
+                    text=next_prompt,
+                )
+                if isinstance(rewritten, str) and rewritten.strip():
+                    varied_text = rewritten
+        except Exception:
+            varied_text = next_prompt
+
+        return AgentResult(outbound=OutboundMessage(text=varied_text), handoff=None, state_diff={})

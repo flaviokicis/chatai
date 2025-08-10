@@ -24,6 +24,8 @@ class QuestionnaireExtractor:
         tools: list[type[object]] = [UpdateAnswers, EscalateToHuman, UnknownAnswer]
         summary = {k: answers.get(k) for k in qg}
         allowed_keys = list(qg)
+        # The prompt is a plain string assembled for an LLM. Bandit S608 warns about SQL-style string
+        # assembly, which is not applicable here. This is intentional and safe for our use.
         prompt = (
             "You are a polite, gentle assistant that updates a structured checklist during a customer conversation. "
             "Be strictly conservative: extract a field only if the user's latest message EXPLICITLY provides it. "
