@@ -15,24 +15,24 @@
             "params": {
               "question_graph": {
                 "global": [
-                  { "key": "intention", "prompt": "What are you looking to accomplish today?", "priority": 10 },
-                  { "key": "use_case", "prompt": "Which best describes your project: a tennis court or a soccer field?", "priority": 15 },
-                  { "key": "budget", "prompt": "Do you have a budget range in mind?", "priority": 90 },
-                  { "key": "timeframe", "prompt": "What is your ideal timeline?", "priority": 100 }
+                  { "key": "intention", "prompt": "Hi there! What are you looking to accomplish today?", "priority": 10 },
+                  { "key": "use_case", "prompt": "Thanks! Which best describes your project: a tennis court or a soccer field?", "priority": 15 },
+                  { "key": "budget", "prompt": "Do you have a budget range in mind, please?", "priority": 90 },
+                  { "key": "timeframe", "prompt": "And what is your ideal timeline, please?", "priority": 100 }
                 ],
                 "paths": {
                   "tennis_court": {
                     "questions": [
-                      { "key": "court_type", "prompt": "Is it indoor or outdoor?", "priority": 20 },
-                      { "key": "dimensions", "prompt": "Do you know the court dimensions?", "priority": 30 },
-                      { "key": "lighting_level", "prompt": "Target lighting level (lux)?", "priority": 40 }
+                      { "key": "court_type", "prompt": "Could you please let me know if it's indoor or outdoor?", "priority": 20 },
+                      { "key": "dimensions", "prompt": "Do you happen to know the court dimensions?", "priority": 30 },
+                      { "key": "lighting_level", "prompt": "What target lighting level (lux) are you aiming for, if any?", "priority": 40 }
                     ]
                   },
                   "soccer_court": {
                     "questions": [
-                      { "key": "field_size", "prompt": "Approximate field size?", "priority": 20 },
-                      { "key": "surface", "prompt": "Surface type (grass/turf)?", "priority": 30 },
-                      { "key": "lighting_level", "prompt": "Target lighting level (lux)?", "priority": 40 }
+                      { "key": "field_size", "prompt": "What is the approximate field size, please?", "priority": 20 },
+                      { "key": "surface", "prompt": "What is the surface type (grass/turf), please?", "priority": 30 },
+                      { "key": "lighting_level", "prompt": "What target lighting level (lux) are you aiming for, if any?", "priority": 40 }
                     ]
                   }
                 },
