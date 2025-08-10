@@ -33,6 +33,20 @@ typecheck:
 
 ci: lint fmt typecheck test
 
+# Run the Flow Core CLI (manual mode by default)
+.PHONY: flow
+flow:
+	. .venv/bin/activate && uv run python -m app.flow_core.cli ./playground/flow_example.json
+
+# Run the Flow Core CLI with LLM (Gemini) filling answers via tools
+.PHONY: flow-llm
+flow-llm:
+	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --model gemini-2.5-flash ./playground/flow_example.json
+
+.PHONY: flow-llm-raw
+flow-llm-raw:
+	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --no-rewrite --model gemini-2.5-flash ./playground/flow_example.json
+
 # Render Mermaid HTML from a question graph JSON
 # Usage: make render-graph GRAPH=playground/some_graph.json
 .PHONY: render-graph  # Deprecated alias to kroki

@@ -1,0 +1,39 @@
+{
+  "schema_version": "v1",
+  "id": "flow.sales_example",
+  "entry": "d.start",
+  "policies": { "path_selection": { "lock_threshold": 2, "allow_switch_before_lock": true } },
+  "nodes": [
+    { "id": "d.start", "kind": "Decision", "label": "Start" },
+    { "id": "q.intention", "kind": "Question", "key": "intention", "prompt": "Hi there! What are you looking to accomplish today?" },
+    { "id": "q.use_case", "kind": "Question", "key": "use_case", "prompt": "Thanks! Which best describes your project: a tennis court or a soccer field?", "meta": { "allowed_values": ["tennis_court", "soccer_court"] } },
+    { "id": "q.budget", "kind": "Question", "key": "budget", "prompt": "Do you have a budget range in mind?" },
+    { "id": "q.timeframe", "kind": "Question", "key": "timeframe", "prompt": "And what is your ideal timeline?" },
+    { "id": "q.court_type", "kind": "Question", "key": "court_type", "prompt": "Could you please let me know if it's indoor or outdoor?" },
+    { "id": "q.dimensions", "kind": "Question", "key": "dimensions", "prompt": "Do you happen to know the court dimensions?" },
+    { "id": "q.lighting_level", "kind": "Question", "key": "lighting_level", "prompt": "What target lighting level (lux) are you aiming for, if any?" },
+    { "id": "q.field_size", "kind": "Question", "key": "field_size", "prompt": "What is the approximate field size?" },
+    { "id": "q.surface", "kind": "Question", "key": "surface", "prompt": "What is the surface type (grass/turf)?" },
+    { "id": "t.done", "kind": "Terminal", "reason": "complete" }
+  ],
+  "edges": [
+    { "source": "d.start", "target": "q.intention", "priority": 0 },
+    { "source": "q.intention", "target": "q.use_case", "guard": { "fn": "answers_has", "args": { "key": "intention" } }, "priority": 0 },
+
+    { "source": "q.use_case", "target": "q.court_type", "guard": { "fn": "answers_equals", "args": { "key": "use_case", "value": "tennis_court", "allowed_values": ["tennis_court", "soccer_court"] } }, "priority": 0 },
+    { "source": "q.use_case", "target": "q.field_size", "guard": { "fn": "answers_equals", "args": { "key": "use_case", "value": "soccer_court", "allowed_values": ["tennis_court", "soccer_court"] } }, "priority": 1 },
+
+    { "source": "q.court_type", "target": "q.dimensions", "priority": 0 },
+    { "source": "q.dimensions", "target": "q.lighting_level", "priority": 0 },
+    { "source": "q.lighting_level", "target": "q.budget", "priority": 0 },
+
+    { "source": "q.field_size", "target": "q.surface", "priority": 0 },
+    { "source": "q.surface", "target": "q.lighting_level", "priority": 0 },
+    { "source": "q.lighting_level", "target": "q.budget", "priority": 0 },
+
+    { "source": "q.budget", "target": "q.timeframe", "priority": 0 },
+    { "source": "q.timeframe", "target": "t.done", "priority": 0 }
+  ]
+}
+
+

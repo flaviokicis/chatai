@@ -137,20 +137,8 @@ class QuestionnaireAgent(BaseAgent):
         blob.pending_field = q.key if q else None
         self._save_blob(blob)
 
-        # Light naturalization: vary wording slightly via LLM rewrite (best-effort)
-        varied_text = next_prompt
-        try:
-            maybe_rewrite = getattr(self.deps.llm, "rewrite", None)
-            if callable(maybe_rewrite):
-                rewritten = maybe_rewrite(
-                    instruction=(
-                        "Keep the original meaning. Avoid repetition, keep it concise and friendly, and do not use 'please' redundantly."
-                    ),
-                    text=next_prompt,
-                )
-                if isinstance(rewritten, str) and rewritten.strip():
-                    varied_text = rewritten
-        except Exception:
-            varied_text = next_prompt
+        # Naturalize prompt centrally
+        from app.core.naturalize import naturalize_prompt
 
+        varied_text = naturalize_prompt(self.deps.llm, next_prompt)
         return AgentResult(outbound=OutboundMessage(text=varied_text), handoff=None, state_diff={})
