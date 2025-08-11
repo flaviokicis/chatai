@@ -24,7 +24,7 @@ class LangChainToolsLLM(LLMClient):
             return {}
 
         chosen = None
-        for name in ("UpdateAnswers", "EscalateToHuman"):
+        for name in ("UpdateAnswersFlow", "RequestHumanHandoff"):
             chosen = next((tc for tc in tool_calls if tc.get("name") == name), None)
             if chosen:
                 break

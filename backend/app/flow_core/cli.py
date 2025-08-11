@@ -8,13 +8,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 
+from app import dev_config
 from app.core.langchain_adapter import LangChainToolsLLM
-from app.core.naturalize import clarify_and_reask, naturalize_prompt
+from app.core.naturalize import naturalize_prompt
 
 from .compiler import compile_flow
-from .engine import Engine
+from .engine import LLMFlowEngine
 from .ir import Flow
-from .responders import CompositeResponder, LLMResponder, ManualResponder, ResponderContext
+from .llm_responder import LLMFlowResponder
+from .responders import ManualResponder
 
 
 def run_cli() -> None:
@@ -41,90 +43,113 @@ def run_cli() -> None:
     args = parser.parse_args()
 
     data = json.loads(args.json_path.read_text(encoding="utf-8"))
+    # Normalize legacy payloads to current schema version
+    if isinstance(data, dict) and data.get("schema_version") != "v2":
+        data["schema_version"] = "v2"
     flow = Flow.model_validate(data)
     compiled = compile_flow(flow)
-    eng = Engine(compiled)
-    state = eng.start()
 
     print(f"Flow: {flow.id}")
-    # Decide responder
+
+    # Setup LLM and responder
     llm_client = None
     if args.llm:
         # Ensure .env is loaded so GOOGLE_API_KEY is available for Gemini
         load_dotenv()
         if not os.environ.get("GOOGLE_API_KEY"):
-            print("ERROR: GOOGLE_API_KEY is not set in environment or .env file.")
-            raise SystemExit(1)
+            print("[warn] GOOGLE_API_KEY not set; falling back to manual responder.")
+            args.llm = False
+
+    if args.llm:
         # Initialize Gemini via LangChain init_chat_model to reuse existing adapter
         chat = init_chat_model(args.model, model_provider="google_genai")
         llm_client = LangChainToolsLLM(chat)
-        responder = CompositeResponder(LLMResponder(llm_client), ManualResponder())
+        responder = LLMFlowResponder(llm_client)
+        rewrite_status = "on" if (not args.no_rewrite) else "off"
+        print(f"[mode] LLM mode: model={args.model}, rewrite={rewrite_status}")
     else:
         responder = ManualResponder()
+        print("[mode] Manual mode (no LLM)")
+
+    # Create engine and initialize context
+    engine = LLMFlowEngine(compiled, llm_client, strict_mode=not args.llm)
+    ctx = engine.initialize_context()
 
     while True:
-        out = eng.step(state)
-        if out.kind == "terminal":
-            print(f"[terminal] {out.message}")
+        # Process with engine
+        response = engine.process(ctx)
+
+        if response.kind == "terminal":
+            print(f"[terminal] {response.message}")
             break
-        display_text = out.message or ""
-        if not args.no_rewrite:
-            if llm_client is None:
-                # initialize a minimal client just for rewrite
-                load_dotenv()
-                if not os.environ.get("GOOGLE_API_KEY"):
-                    print("ERROR: GOOGLE_API_KEY is not set in environment or .env file.")
-                    raise SystemExit(1)
-                chat = init_chat_model(args.model, model_provider="google_genai")
-                llm_client = LangChainToolsLLM(chat)
+
+        display_text = response.message or ""
+        if args.llm and (not args.no_rewrite) and llm_client is not None:
             display_text = naturalize_prompt(llm_client, display_text)
-        print(f"[prompt:{out.node_id}] {display_text}")
-        # In LLM mode, we still allow user to supply a message; otherwise, they can press enter
+
+        print(f"[prompt:{response.node_id}] {display_text}")
+
+        # Get user input
         user = input("> ").strip()
         if user == ":quit":
             break
-        # If the node encodes allowed path values, pass them down to the responder
-        node = compiled.nodes.get(state.current_node_id) if state.current_node_id else None
-        allowed_values: list[str] | None = None
-        if node and isinstance(getattr(node, "meta", {}), dict):
-            meta = node.meta
-            vals = meta.get("allowed_values") if isinstance(meta, dict) else None
-            if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
-                allowed_values = vals  # type: ignore[assignment]
-        # Assemble a small text history for the LLM (oldest to newest)
-        # For the CLI, keep it local per run
-        history: list[dict[str, str]] = []
-        # We could persist/display prior turns; for now, include only the last assistant prompt
-        history.append({"role": "assistant", "content": display_text})
-        ctx = ResponderContext(allowed_values=allowed_values, history=history)
-        r = responder.respond(
-            out.message or "",
-            state.pending_field,
-            state.answers,
-            user,
-            ctx,
-        )
-        # Apply updates
-        for k, v in r.updates.items():
-            state.answers[k] = v
-        # Feed last answer value as event for guard evaluation if single-field update
-        if state.pending_field and state.pending_field in r.updates:
-            # Pass allowed_values and tool to allow guard/context-sensitive behavior
-            eng.step(
-                state,
-                {
-                    "answer": r.updates[state.pending_field],
-                    "allowed_values": allowed_values or [],
-                    "tool_name": r.tool_name,
-                },
+
+        if args.llm and responder:
+            # Use LLM responder
+            node = compiled.nodes.get(ctx.current_node_id) if ctx.current_node_id else None
+            allowed_values: list[str] | None = None
+            if node is not None:
+                # Get allowed values from QuestionNode
+                vals = getattr(node, "allowed_values", None)
+                if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
+                    allowed_values = vals
+                else:
+                    # Backward-compat: read from meta.allowed_values if present
+                    meta = getattr(node, "meta", None)
+                    if isinstance(meta, dict):
+                        mvals = meta.get("allowed_values")
+                        if isinstance(mvals, list) and all(isinstance(v, str) for v in mvals):
+                            allowed_values = mvals  # type: ignore[assignment]
+
+            # Use LLMFlowResponder
+            r = responder.respond(
+                display_text,
+                ctx.pending_field,
+                ctx,
+                user,
+                allowed_values,
             )
-        # Show assistant message if provided by the LLM responder
-        if r.assistant_message:
-            print(f"[assistant] {r.assistant_message}")
-        # If it's a clarification and we are rewriting, enrich the prompt with a brief acknowledgement
-        elif (not args.no_rewrite) and llm_client is not None and r.tool_name == "UnknownAnswer":
-            followup = clarify_and_reask(llm_client, display_text, user)
-            print(f"[prompt:{out.node_id}] {followup}")
+
+            # Debug logging
+            if dev_config.debug:
+                print(f"[DEBUG] Tool chosen: {r.tool_name}")
+                print(f"[DEBUG] Updates: {r.updates}")
+                print(f"[DEBUG] Metadata: {r.metadata}")
+                print(f"[DEBUG] Current answers: {ctx.answers}")
+                print(f"[DEBUG] Pending field: {ctx.pending_field}")
+
+            # Apply updates to context
+            for k, v in r.updates.items():
+                ctx.answers[k] = v
+
+            # Show assistant message for all tools, including confirmations
+            if r.message:
+                print(f"[assistant] {r.message}")
+
+            # Forward responder outcome to engine; let engine handle all tools uniformly
+            engine_event: dict[str, object] = {"tool_name": r.tool_name or ""}
+            if ctx.pending_field and ctx.pending_field in r.updates:
+                engine_event["answer"] = r.updates[ctx.pending_field]
+            if r.message:
+                engine_event["ack_message"] = r.message
+            if r.metadata:
+                engine_event.update(r.metadata)
+            engine.process(ctx, user, engine_event)
+        # Manual mode - directly update context
+        elif ctx.pending_field and user:
+            ctx.answers[ctx.pending_field] = user
+            # Process the answer with engine
+            engine.process(ctx, user, {"answer": user})
 
 
 if __name__ == "__main__":

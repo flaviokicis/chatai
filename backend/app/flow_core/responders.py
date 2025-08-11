@@ -5,9 +5,8 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:  # avoid import cycles at runtime
     from app.core.llm import LLMClient
-from app.core.tool_schemas import EscalateToHuman, UnknownAnswer, UpdateAnswers
-
 from .normalize import choose_option
+from .tool_schemas import RequestHumanHandoff, UnknownAnswer, UpdateAnswersFlow
 
 
 @dataclass(slots=True)
@@ -55,8 +54,8 @@ class ManualResponder(Responder):
             if allowed_values:
                 chosen = _choose_from_allowed(user_message, allowed_values)
                 if chosen is not None:
-                    return Response(updates={pending_field: chosen}, tool_name="UpdateAnswers")
-            return Response(updates={pending_field: user_message}, tool_name="UpdateAnswers")
+                    return Response(updates={pending_field: chosen}, tool_name="UpdateAnswersFlow")
+            return Response(updates={pending_field: user_message}, tool_name="UpdateAnswersFlow")
         return Response(updates={})
 
 
@@ -98,9 +97,9 @@ class LLMResponder(Responder):
 
         instruction = (
             "Given the user's latest message and the current question, choose the best tool.\n"
-            "Prefer UpdateAnswers with a short value for the pending field if you can extract it.\n"
+            "Prefer UpdateAnswersFlow with a short value for the pending field if you can extract it.\n"
             "Use UnknownAnswer if the user doesn't know OR if the user asks a question about the prompt (clarification). "
-            "Use EscalateToHuman only when necessary.\n\n"
+            "Use RequestHumanHandoff only when necessary.\n\n"
             "Also write the next assistant message to send to the user, acknowledging context when relevant, then restating or answering succinctly.\n\n"
             f"Latest user message: {user_message}\n"
             f"Conversation window (oldest to newest):\n{history_block}\n\n"
@@ -116,13 +115,15 @@ class LLMResponder(Responder):
                 "\n\nWhen updating the pending field, you MUST choose a value exactly from this list: "
                 f"{allowed_values}."
             )
-        args = self._llm.extract(instruction, [UpdateAnswers, UnknownAnswer, EscalateToHuman])
+        args = self._llm.extract(
+            instruction, [UpdateAnswersFlow, UnknownAnswer, RequestHumanHandoff]
+        )
         tool = args.get("__tool_name__") if isinstance(args, dict) else None
-        # Backward-compat: accept bare {updates: {...}} without explicit tool name
+        # Fallback: accept bare {updates: {...}} without explicit tool name
         if tool is None and isinstance(args, dict) and isinstance(args.get("updates"), dict):
-            tool = "UpdateAnswers"
+            tool = "UpdateAnswersFlow"
         assistant_message = args.get("assistant_message") if isinstance(args, dict) else None
-        if tool == "UpdateAnswers":
+        if tool == "UpdateAnswersFlow":
             updates = args.get("updates") if isinstance(args, dict) else None
             if (
                 isinstance(updates, dict)
@@ -146,7 +147,7 @@ class LLMResponder(Responder):
                 tool_name=tool,
                 assistant_message=assistant_message if isinstance(assistant_message, str) else None,
             )
-        if tool == "EscalateToHuman":
+        if tool == "RequestHumanHandoff":
             return Response(
                 updates={},
                 escalate=True,

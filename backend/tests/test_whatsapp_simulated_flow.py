@@ -109,11 +109,10 @@ def test_whatsapp_like_flow(monkeypatch, config_json):
     ctx = get_app_context(app)
     ctx.config_provider = load_json_config(config_json)
 
-    # Replace LLM with deterministic sequence: first no updates, then intention update
+    # Replace LLM with deterministic sequence: intention update on first call
     ctx.llm = SeqLLM(
         [
-            {},
-            {"__tool_name__": "UpdateAnswers", "updates": {"intention": "buy leds"}},
+            {"__tool_name__": "UpdateAnswersFlow", "updates": {"intention": "buy leds"}},
         ]
     )
 
@@ -251,17 +250,15 @@ def test_ambiguous_paths_escalate_to_human(monkeypatch, tmp_path):
 
         def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
             # If asked to select path, always choose none in this test
-            if any(getattr(t, "__name__", "") == "SelectPath" for t in tools):
-                return {"__tool_name__": "SelectPath", "path": None}
+            if any(getattr(t, "__name__", "") == "SelectFlowPath" for t in tools):
+                return {"__tool_name__": "SelectFlowPath", "path": None}
             self._i += 1
             if self._i == 1:
-                return {}
+                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"intention": "buy leds"}}
             if self._i == 2:
-                return {"__tool_name__": "UpdateAnswers", "updates": {"intention": "buy leds"}}
+                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"budget": "10k"}}
             if self._i == 3:
-                return {"__tool_name__": "UpdateAnswers", "updates": {"budget": "10k"}}
-            if self._i == 4:
-                return {"__tool_name__": "UpdateAnswers", "updates": {"timeframe": "3 months"}}
+                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"timeframe": "3 months"}}
             return {}
 
     ctx.llm = ThreeStepLLM()
@@ -397,15 +394,13 @@ def test_paths_selection_and_questions_flow(monkeypatch, tmp_path):
 
         def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
             # When asked to select a path, immediately choose tennis_court
-            if any(getattr(t, "__name__", "") == "SelectPath" for t in tools):
-                return {"__tool_name__": "SelectPath", "path": "tennis_court"}
+            if any(getattr(t, "__name__", "") == "SelectFlowPath" for t in tools):
+                return {"__tool_name__": "SelectFlowPath", "path": "tennis_court"}
             self._i += 1
             if self._i == 1:
-                return {}
+                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"intention": "tennis court"}}
             if self._i == 2:
-                return {"__tool_name__": "UpdateAnswers", "updates": {"intention": "tennis court"}}
-            if self._i == 3:
-                return {"__tool_name__": "UpdateAnswers", "updates": {"court_type": "indoor"}}
+                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"court_type": "indoor"}}
             return {}
 
     ctx.llm = PathLLM()

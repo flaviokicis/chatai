@@ -37,12 +37,27 @@ def test_build_question_graph_and_agent_handle() -> None:
         handoff={},
     )
     store = InMemoryStore()
-    llm = DummyLLM({"updates": {"intention": "buy leds"}})
+
+    # First turn: LLM extracts the user's intention
+    llm = DummyLLM(
+        {
+            "__tool_name__": "UpdateAnswersFlow",
+            "updates": {"intention": "buy leds"},
+            "assistant_message": "Got it!",
+        }
+    )
     deps = BaseAgentDeps(store=store, llm=llm, handoff=LoggingHandoff())
 
     agent = build_sales_qualifier_agent("user-1", deps, instance)
 
-    res = agent.handle(InboundMessage(user_id="user-1", text="hello", channel="test", metadata={}))
-    # Should ask the next question after applying extraction
-    assert res.outbound is not None
-    assert "sports court" in res.outbound.text.lower()
+    # First interaction - should ask the first question
+    res1 = agent.handle(InboundMessage(user_id="user-1", text="hello", channel="test", metadata={}))
+    assert res1.outbound is not None
+    assert "what is your intention" in res1.outbound.text.lower()
+
+    # Second interaction - user provides intention, should progress to next question
+    res2 = agent.handle(
+        InboundMessage(user_id="user-1", text="I want to buy LEDs", channel="test", metadata={})
+    )
+    assert res2.outbound is not None
+    assert "sports court" in res2.outbound.text.lower()

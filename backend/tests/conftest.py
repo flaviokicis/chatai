@@ -52,9 +52,6 @@ def make_agent(store: InMemoryStore, handoff: LoggingHandoff, compiled_flow):
     def _make(results: list[dict[str, Any]]):
         llm = SeqLLM(results)
         deps = BaseAgentDeps(store=store, llm=llm, handoff=handoff)
-        from app.flow_core.responders import LLMResponder
-
-        responder = LLMResponder(llm)
-        return FlowAgent("u", deps, compiled_flow=compiled_flow, responder=responder)
+        return FlowAgent("u", deps, compiled_flow=compiled_flow)
 
     return _make

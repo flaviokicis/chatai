@@ -148,7 +148,7 @@ You can quickly test by pointing `CONFIG` to a file containing one of these payl
 
 - Prefer thin, logic-focused agents. State management, extraction, and next-question policy are provided by base components.
 - Use Flow Core (`app.flow_core`) for all state machine logic. Agents should delegate progression to Engine and keep only domain glue logic.
-- Use shared tool schemas `UpdateAnswers` and `EscalateToHuman` from `app/core/tool_schemas.py`.
+- Use shared tool schemas from `app/flow_core/tool_schemas.py`.
 
 ## Test-driven development (TDD)
 

@@ -152,15 +152,23 @@ def test_input_truncation_to_500_chars(monkeypatch, config_with_limits):
     to_num = "whatsapp:+14155238886"
     long_body = "A" * 600
 
+    # First request - should get initial question without LLM extraction
+    client.post(
+        "/webhooks/twilio/whatsapp",
+        data={"From": from_num, "To": to_num, "Body": "Hello"},
+        headers=headers,
+    )
+
+    # Second request with long body - should trigger LLM extraction with truncation
     client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": to_num, "Body": long_body},
         headers=headers,
     )
 
-    # The LLMResponder prompt includes the latest message verbatim
-    assert "Latest user message:" in llm.last_prompt
-    idx = llm.last_prompt.find("Latest user message:")
+    # The LLMFlowResponder prompt includes the user message verbatim
+    assert "- User's message:" in llm.last_prompt
+    idx = llm.last_prompt.find("- User's message:")
     assert idx >= 0
     snippet = llm.last_prompt[idx:].split("\n", 1)[0]
     # Extract the part after the colon and space
