@@ -158,7 +158,7 @@ def test_input_truncation_to_500_chars(monkeypatch, config_with_limits):
         headers=headers,
     )
 
-    # The QuestionnaireExtractor prompt includes the latest message verbatim
+    # The LLMResponder prompt includes the latest message verbatim
     assert "Latest user message:" in llm.last_prompt
     idx = llm.last_prompt.find("Latest user message:")
     assert idx >= 0

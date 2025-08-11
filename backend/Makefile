@@ -54,7 +54,6 @@ render-graph: render-graph-kroki
 
 .PHONY: render-graph-kroki
 render-graph-kroki:
-	@if [ -z "$(GRAPH)" ]; then echo "GRAPH=<path/to/json> is required" && exit 1; fi
-	. .venv/bin/activate && uv run python -c 'import sys, pathlib, json; from app.utils.graphviz import render_html_mermaid_via_kroki; p=sys.argv[1]; payload=json.load(open(p)); html=render_html_mermaid_via_kroki(payload, pathlib.Path(p).stem); out=pathlib.Path(p).with_suffix(".kroki.html"); out.write_text(html, encoding="utf-8"); print(out.resolve())' $(GRAPH)
+	@echo "Graph rendering via Kroki is not available in this refactor (QuestionGraph removed)."
 
 

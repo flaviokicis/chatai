@@ -42,9 +42,35 @@ def guard_path_locked(ctx: dict[str, Any]) -> bool:
     return bool(ctx.get("path_locked")) and isinstance(ctx.get("active_path"), str)
 
 
+def guard_deps_missing(ctx: dict[str, Any]) -> bool:
+    """Return True if all dependencies are satisfied and the target key is missing.
+
+    Expects in ctx:
+    - answers: dict[str, Any]
+    - key: str
+    - dependencies: list[str]
+    """
+    answers = ctx.get("answers")
+    key = ctx.get("key")
+    deps = ctx.get("dependencies")
+    if not isinstance(answers, dict) or not isinstance(key, str):
+        return False
+    if not isinstance(deps, list):
+        deps = []
+    # All dependencies must be present (non-empty)
+    for dep in deps:
+        if not isinstance(dep, str):
+            return False
+        if answers.get(dep) in (None, ""):
+            return False
+    # And the key itself must be missing
+    return answers.get(key) in (None, "")
+
+
 DEFAULT_GUARDS: dict[str, GuardFunction] = {
     "always": guard_always,
     "answers_has": guard_answers_has,
     "answers_equals": guard_answers_equals,
     "path_locked": guard_path_locked,
+    "deps_missing": guard_deps_missing,
 }

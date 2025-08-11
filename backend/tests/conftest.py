@@ -1,17 +1,14 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from typing import Any
 
 import pytest
 
-from app.agents.base import BaseAgentDeps
-from app.agents.common.question_graph import Question, QuestionGraph
-from app.agents.common.questionnaire_agent import QuestionnaireAgent
+from app.agents.base import BaseAgentDeps, FlowAgent
 from app.core.llm import LLMClient
 from app.core.state import InMemoryStore
+from app.flow_core.builders import build_flow_from_questions
+from app.flow_core.compiler import compile_flow
 from app.services.human_handoff import LoggingHandoff
 
 
@@ -29,13 +26,15 @@ class SeqLLM(LLMClient):
 
 
 @pytest.fixture
-def question_graph() -> QuestionGraph:
-    return QuestionGraph(
+def compiled_flow():
+    flow = build_flow_from_questions(
         [
-            Question(key="a", prompt="Ask A?", priority=10),
-            Question(key="b", prompt="Ask B?", priority=20, dependencies=["a"]),
-        ]
+            {"key": "a", "prompt": "Ask A?", "priority": 10},
+            {"key": "b", "prompt": "Ask B?", "priority": 20, "dependencies": ["a"]},
+        ],
+        flow_id="test",
     )
+    return compile_flow(flow)
 
 
 @pytest.fixture
@@ -49,12 +48,13 @@ def handoff() -> LoggingHandoff:
 
 
 @pytest.fixture
-def make_agent(
-    store: InMemoryStore, handoff: LoggingHandoff, question_graph: QuestionGraph
-) -> Callable[[list[dict[str, Any]]], QuestionnaireAgent]:
-    def _make(results: list[dict[str, Any]]) -> QuestionnaireAgent:
+def make_agent(store: InMemoryStore, handoff: LoggingHandoff, compiled_flow):
+    def _make(results: list[dict[str, Any]]):
         llm = SeqLLM(results)
         deps = BaseAgentDeps(store=store, llm=llm, handoff=handoff)
-        return QuestionnaireAgent("u", deps, question_graph)
+        from app.flow_core.responders import LLMResponder
+
+        responder = LLMResponder(llm)
+        return FlowAgent("u", deps, compiled_flow=compiled_flow, responder=responder)
 
     return _make

@@ -1,21 +1,17 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+# Deprecated: flow_core now handles prompt selection. This module remains for
+# backward compatibility but is not used. Intentionally minimal to avoid import errors.
 
-if TYPE_CHECKING:
-    from .question_graph import QuestionGraph
+__all__ = ["QuestionnairePolicy"]
 
 
-class QuestionnairePolicy:
-    def __init__(self, question_graph: QuestionGraph) -> None:
-        self.qg = question_graph
+class QuestionnairePolicy:  # pragma: no cover - legacy stub
+    def __init__(self, *_args, **_kwargs) -> None:
+        pass
 
-    def next_prompt(self, state: object) -> str | None:
-        next_q = self.qg.next_missing(state)
-        if not next_q:
-            return None
-        return next_q.prompt
+    def next_prompt(self, _state: object) -> str | None:
+        return None
 
-    def should_escalate(self, state: object) -> bool:
-        # Default heuristic; override in specialized policies if needed
+    def should_escalate(self, _state: object) -> bool:
         return False

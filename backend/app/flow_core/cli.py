@@ -14,7 +14,7 @@ from app.core.naturalize import clarify_and_reask, naturalize_prompt
 from .compiler import compile_flow
 from .engine import Engine
 from .ir import Flow
-from .responders import CompositeResponder, LLMResponder, ManualResponder
+from .responders import CompositeResponder, LLMResponder, ManualResponder, ResponderContext
 
 
 def run_cli() -> None:
@@ -96,13 +96,13 @@ def run_cli() -> None:
         history: list[dict[str, str]] = []
         # We could persist/display prior turns; for now, include only the last assistant prompt
         history.append({"role": "assistant", "content": display_text})
+        ctx = ResponderContext(allowed_values=allowed_values, history=history)
         r = responder.respond(
             out.message or "",
             state.pending_field,
             state.answers,
             user,
-            allowed_values,
-            history,
+            ctx,
         )
         # Apply updates
         for k, v in r.updates.items():

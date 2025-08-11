@@ -7,6 +7,8 @@ if TYPE_CHECKING:  # avoid import cycles at runtime
     from app.core.llm import LLMClient
 from app.core.tool_schemas import EscalateToHuman, UnknownAnswer, UpdateAnswers
 
+from .normalize import choose_option
+
 
 @dataclass(slots=True)
 class Response:
@@ -17,6 +19,12 @@ class Response:
     assistant_message: str | None = None
 
 
+@dataclass(slots=True)
+class ResponderContext:
+    allowed_values: list[str] | None = None
+    history: list[dict[str, str]] | None = None
+
+
 class Responder:
     def respond(
         self,
@@ -24,27 +32,13 @@ class Responder:
         pending_field: str | None,
         answers: dict[str, Any],
         user_message: str,
-        allowed_values: list[str] | None = None,
-        history: list[dict[str, str]] | None = None,
+        ctx: ResponderContext | None = None,
     ) -> Response:  # pragma: no cover - interface
         raise NotImplementedError
 
 
 def _choose_from_allowed(user_message: str, allowed_values: list[str]) -> str | None:
-    text = " ".join(user_message.lower().split())
-    best: tuple[int, str] | None = None
-    for val in allowed_values:
-        v = val.lower().replace("_", " ")
-        score = 0
-        if v in text:
-            score += 3
-        # token overlap
-        v_tokens = [t for t in v.split() if t]
-        match_tokens = sum(1 for t in v_tokens if t in text)
-        score += match_tokens
-        if score > 0 and (best is None or score > best[0]):
-            best = (score, val)
-    return best[1] if best else None
+    return choose_option(user_message, allowed_values)
 
 
 class ManualResponder(Responder):
@@ -54,9 +48,9 @@ class ManualResponder(Responder):
         pending_field: str | None,
         answers: dict[str, Any],
         user_message: str,
-        allowed_values: list[str] | None = None,
-        history: list[dict[str, str]] | None = None,
+        ctx: ResponderContext | None = None,
     ) -> Response:
+        allowed_values = ctx.allowed_values if ctx else None
         if pending_field:
             if allowed_values:
                 chosen = _choose_from_allowed(user_message, allowed_values)
@@ -89,12 +83,12 @@ class LLMResponder(Responder):
         pending_field: str | None,
         answers: dict[str, Any],
         user_message: str,
-        allowed_values: list[str] | None = None,
-        history: list[dict[str, str]] | None = None,
+        ctx: ResponderContext | None = None,
     ) -> Response:
         summary = {k: answers.get(k) for k in answers}
         # Include recent history (bounded) to give the model context
         history_lines: list[str] = []
+        history = ctx.history if ctx else None
         if history:
             for msg in history[-10:]:
                 role = msg.get("role", "user")
@@ -108,6 +102,7 @@ class LLMResponder(Responder):
             "Use UnknownAnswer if the user doesn't know OR if the user asks a question about the prompt (clarification). "
             "Use EscalateToHuman only when necessary.\n\n"
             "Also write the next assistant message to send to the user, acknowledging context when relevant, then restating or answering succinctly.\n\n"
+            f"Latest user message: {user_message}\n"
             f"Conversation window (oldest to newest):\n{history_block}\n\n"
             f"Question: {prompt_text}\n"
             f"Pending field: {pending_field}\n"
@@ -115,6 +110,7 @@ class LLMResponder(Responder):
             f"User message: {user_message}\n"
             "Respond by calling exactly one tool and include an 'assistant_message' field in tool args with the text to send."
         )
+        allowed_values = ctx.allowed_values if ctx else None
         if allowed_values and pending_field:
             instruction += (
                 "\n\nWhen updating the pending field, you MUST choose a value exactly from this list: "
@@ -122,6 +118,9 @@ class LLMResponder(Responder):
             )
         args = self._llm.extract(instruction, [UpdateAnswers, UnknownAnswer, EscalateToHuman])
         tool = args.get("__tool_name__") if isinstance(args, dict) else None
+        # Backward-compat: accept bare {updates: {...}} without explicit tool name
+        if tool is None and isinstance(args, dict) and isinstance(args.get("updates"), dict):
+            tool = "UpdateAnswers"
         assistant_message = args.get("assistant_message") if isinstance(args, dict) else None
         if tool == "UpdateAnswers":
             updates = args.get("updates") if isinstance(args, dict) else None
@@ -173,17 +172,13 @@ class CompositeResponder(Responder):
         pending_field: str | None,
         answers: dict[str, Any],
         user_message: str,
-        allowed_values: list[str] | None = None,
+        ctx: ResponderContext | None = None,
     ) -> Response:
-        primary_res = self._primary.respond(
-            prompt_text, pending_field, answers, user_message, allowed_values, history
-        )
+        primary_res = self._primary.respond(prompt_text, pending_field, answers, user_message, ctx)
         # Do not fallback if the primary explicitly indicated an UnknownAnswer
         if primary_res.tool_name == "UnknownAnswer":
             return primary_res
         if (not primary_res.updates) and pending_field and user_message:
             # Fallback to manual value capture for the pending field
-            return self._fallback.respond(
-                prompt_text, pending_field, answers, user_message, allowed_values
-            )
+            return self._fallback.respond(prompt_text, pending_field, answers, user_message, ctx)
         return primary_res

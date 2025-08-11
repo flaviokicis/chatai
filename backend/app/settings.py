@@ -14,9 +14,9 @@ except Exception:  # pragma: no cover - optional
 
 
 class Settings(BaseSettings):
-    twilio_auth_token: str = Field(..., alias="TWILIO_AUTH_TOKEN")
+    twilio_auth_token: str = Field(default="test", alias="TWILIO_AUTH_TOKEN")
     public_base_url: str | None = Field(default=None, alias="PUBLIC_BASE_URL")
-    google_api_key: str = Field(..., alias="GOOGLE_API_KEY")
+    google_api_key: str = Field(default="test", alias="GOOGLE_API_KEY")
     llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
     redis_url: str | None = Field(default=None, alias="REDIS_URL")
     # Optional components to compose a URL when REDIS_URL is not provided
