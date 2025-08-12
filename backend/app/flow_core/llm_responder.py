@@ -111,6 +111,12 @@ class LLMFlowResponder:
         # Call LLM with tools
         try:
             result = self._llm.extract(instruction, tools)
+            # Drop any assistant_message key returned by the model
+            if isinstance(result, dict) and "assistant_message" in result:
+                try:
+                    del result["assistant_message"]
+                except Exception:
+                    result["assistant_message"] = ""
             if dev_config.debug:
                 print(f"[DEBUG] LLM result: {result}")
         except Exception as e:
@@ -152,7 +158,14 @@ class LLMFlowResponder:
         # Detect conversation patterns
         patterns = self._detect_patterns(ctx, user_message)
 
-        instruction = f"""You are helping a user through a conversational flow. Analyze their message and respond appropriately.
+        # Previously answered fields and most recent
+        previously_answered = [k for k, v in ctx.answers.items() if v not in (None, "")]
+        most_recent_answer_key = previously_answered[-1] if previously_answered else None
+        most_recent_answer_val = (
+            ctx.answers.get(most_recent_answer_key) if most_recent_answer_key else None
+        )
+
+        instruction = f"""You are helping a user through a conversational flow. Analyze their message and choose the correct tool.
 
 Current Context:
 - Question: {prompt}
@@ -160,6 +173,8 @@ Current Context:
 - User's message: {user_message}
 - Conversation style: {ctx.conversation_style or "adaptive"}
 - Previous clarifications: {ctx.clarification_count}
+- Previously answered fields: {previously_answered or "none"}
+- Most recent previous answer: {most_recent_answer_key} = {most_recent_answer_val}
 
 Collected Information:
 {answers_summary}
@@ -178,17 +193,25 @@ Detected Patterns:
         instruction += """
 
         Choose the most appropriate tool based on the user's intent:
-        - Use UpdateAnswersFlow when you can extract a clear answer
-        - Use ClarifyQuestion if the user is asking about the question
-        - Use SkipQuestion if the user wants to skip (check if allowed)
-        - Use RevisitQuestion if the user wants to change a previous answer
-        - Use RequestHumanHandoff for complex issues or explicit requests
-        - Use UnknownAnswer if the user doesn't know
+        - UpdateAnswersFlow: use when you can extract a concise answer for the CURRENT pending field.
+          Guidance for extraction: ignore greetings and filler words; use the meaningful noun phrase or value the user provided. Keep the value short.
+        - ClarifyQuestion: use if the user is asking about the meaning/purpose/options/format of the CURRENT question.
+        - SkipQuestion: use if the user explicitly wants to skip (and skipping is allowed by policy).
+        - RevisitQuestion: use when the user is correcting or changing any PREVIOUS answer (not the current question).
+          Provide:
+          * question_key: choose from previously answered fields (prefer the most recent) if the message suggests a correction.
+          * revisit_value: extract the new value from the user's message when possible.
+          If you cannot extract a clear new value, set revisit_value to null.
 
-        Assistant message guidance:
-        - If you select UpdateAnswersFlow, ONLY acknowledge the captured value. Do NOT ask any follow-up questions. Do NOT include phrases like "What else can I help you with?" The system will ask the next question. Keep it to one concise sentence.
-        - If you select ClarifyQuestion, explain the ambiguous term in plain language and give a short, generic example format of a valid answer using placeholders (e.g., "<A> × <B>", "<value>"). Do not assume units or domain context; invite the user to answer in whatever terms or units they prefer.
-        - Otherwise, keep messages concise and avoid asking new questions—the system controls question flow.
+        CRITICAL DECISION RULES:
+        - If the user's message includes correction signals like "meant", "actually", "sorry", "not ...", "change", "switch", "update" then DO NOT use UnknownAnswer; use RevisitQuestion instead.
+        - Use RequestHumanHandoff only for explicit escalate requests or truly complex issues.
+        - Use UnknownAnswer ONLY when the user explicitly indicates they do not know the answer to the CURRENT question or directly asks for clarification, and no correction is being made.
+        - Examples of UnknownAnswer signals: "don't know", "not sure", "no idea", "?" or a direct question about the prompt.
+
+        Output formatting:
+        - Do NOT include any assistant_message field in tool arguments.
+        - Only include fields defined for the tool (e.g., updates, validated, question_key, revisit_value, etc.).
         """
 
         # Prepend any agent-provided custom instructions at the very top
@@ -243,8 +266,8 @@ Detected Patterns:
         """Process the tool response from the LLM."""
         tool_name = result.get("__tool_name__", "")
 
-        # Extract common fields
-        message = result.get("assistant_message", "")
+        # Extract common fields (assistant_message is not used by engine anymore)
+        message = ""
         confidence = result.get("confidence", 1.0)
 
         # Handle each tool type
@@ -289,14 +312,22 @@ Detected Patterns:
 
         if tool_name == "RevisitQuestion":
             question_key = result.get("question_key")
+            revisit_value = result.get("revisit_value")
+
+            # If we have both key and value, we can update immediately
+            updates = {}
+            if question_key and revisit_value:
+                updates[question_key] = revisit_value
+
             # Find the node for this question
             target_node = self._find_node_for_key(ctx, question_key)
+
             return FlowResponse(
-                updates={},
+                updates=updates,
                 message=message,
                 tool_name=tool_name,
                 navigation=target_node,
-                metadata={"revisit_key": question_key},
+                metadata={"revisit_key": question_key, "revisit_value": revisit_value},
             )
 
         if tool_name == "SelectFlowPath" or tool_name == "SelectPath":

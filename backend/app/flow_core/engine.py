@@ -161,14 +161,9 @@ class LLMFlowEngine:
         # Generate the prompt (potentially contextual)
         prompt = self._generate_contextual_prompt(node, ctx)
         # Add light cohesion: if we just captured a value this turn, prepend a short acknowledgement
-        ack_prefix = None
-        if user_message and ctx.turn_count > 0 and ctx.pending_field:
-            # Only acknowledge when user replied while this question was pending
-            ack_prefix = None  # kept for future expansion; keep output stable for now
-
         return EngineResponse(
             kind="prompt",
-            message=prompt if not ack_prefix else f"{ack_prefix} {prompt}",
+            message=prompt,
             node_id=node.id,
             suggested_actions=self._suggest_actions(node, ctx),
         )
@@ -188,20 +183,33 @@ class LLMFlowEngine:
         - NavigateFlow: jump to target node
         """
         tool_name = str(event.get("tool_name") or "")
-        ack = str(event.get("ack_message") or "")
 
+        # Tool-provided messages are ignored at this layer to avoid double messaging.
+        # The final outbound will be rewritten later with full context.
         def _with_ack(res: EngineResponse) -> EngineResponse:
-            if not ack:
-                return res
-            if res.kind == "prompt":
-                if res.message:
-                    res.message = f"{ack} {res.message}"
-                else:
-                    res.message = ack
             return res
 
         if tool_name == "UnknownAnswer":
-            # Mark as skipped and advance
+            # Handle "I don't know" responses intelligently:
+            # 1. For optional questions (default): skip and advance to next
+            # 2. For required questions: escalate to human for assistance
+
+            # Check if question is required (default: False for conversational flexibility)
+            node_required = getattr(node, "required", False)
+            escalate_on_unknown = node_required or bool(
+                getattr(node, "meta", {}).get("escalate_on_unknown", False)
+            )
+
+            if escalate_on_unknown:
+                # Required question - escalate so user gets help
+                return EngineResponse(
+                    kind="escalate",
+                    message="Let me connect you with someone who can help with this.",
+                    node_id=node.id,
+                    metadata={"reason": (event or {}).get("reason", "unknown")},
+                )
+
+            # Optional question - skip and continue the flow
             ctx.get_node_state(node.id).status = NodeStatus.SKIPPED
             return self._advance_from_node(ctx, node, event)
 
@@ -214,21 +222,52 @@ class LLMFlowEngine:
             return self._advance_from_node(ctx, node, event)
 
         if tool_name == "RevisitQuestion":
+            # Get the revisit details
+            revisit_key = event.get("revisit_key") or event.get("question_key")
+            revisit_value = event.get("revisit_value")
+            revisit_updated = bool(event.get("revisit_updated"))
+
+            # Update the answer if a value was provided
+            if isinstance(revisit_key, str) and revisit_value is not None:
+                ctx.answers[revisit_key] = revisit_value
+                revisit_updated = True
+
+            # If the value was updated, remain on the current node and regenerate the prompt
+            if revisit_updated:
+                return EngineResponse(
+                    kind="prompt",
+                    message=self._generate_contextual_prompt(node, ctx),
+                    node_id=node.id,
+                )
+
+            # If no value was provided, we need to navigate to the question to get the new value
+            # Preferred: explicit target node id
             target = event.get("target_node") or event.get("navigation")
+
+            # Fallback: find target node by provided question key
+            if not target and isinstance(revisit_key, str) and revisit_key:
+                # Search the compiled flow for a question node with this key
+                for candidate in self._flow.nodes.values():
+                    if candidate.__class__.__name__ == "QuestionNode":
+                        if getattr(candidate, "key", None) == revisit_key:
+                            target = candidate.id
+                            break
+
             if isinstance(target, str) and target:
                 ctx.current_node_id = target
                 return _with_ack(self.process(ctx, None, None))
-            # If no target provided, remain on current node
+
+            # If no target could be determined, remain on current node
             return EngineResponse(
                 kind="prompt",
-                message=ack or self._generate_contextual_prompt(node, ctx),
+                message=self._generate_contextual_prompt(node, ctx),
                 node_id=node.id,
             )
 
         if tool_name == "RequestHumanHandoff":
             return EngineResponse(
                 kind="escalate",
-                message=ack or "Transferring you to a human for further assistance.",
+                message="Transferring you to a human for further assistance.",
                 node_id=node.id,
                 metadata={"reason": event.get("reason", "unspecified")},
             )
@@ -237,7 +276,7 @@ class LLMFlowEngine:
             # Stay on the same node; provide informational ack if any
             return EngineResponse(
                 kind="prompt",
-                message=ack or self._generate_contextual_prompt(node, ctx),
+                message=self._generate_contextual_prompt(node, ctx),
                 node_id=node.id,
             )
 
@@ -245,7 +284,7 @@ class LLMFlowEngine:
             ctx.is_complete = True
             return EngineResponse(
                 kind="terminal",
-                message=ack or "All questions have been answered. Thank you!",
+                message="All questions have been answered. Thank you!",
                 node_id=node.id,
             )
 
@@ -256,7 +295,7 @@ class LLMFlowEngine:
                 return _with_ack(self.process(ctx, None, None))
             return EngineResponse(
                 kind="prompt",
-                message=ack or self._generate_contextual_prompt(node, ctx),
+                message=self._generate_contextual_prompt(node, ctx),
                 node_id=node.id,
             )
 
@@ -325,7 +364,9 @@ class LLMFlowEngine:
                 ack_text = str(ack).strip()
                 if ack_text:
                     if res.message:
-                        res.message = f"{ack_text} {res.message}"
+                        # Format as separate sentences with proper spacing
+                        ack_clean = ack_text.rstrip(".!?")
+                        res.message = f"{ack_clean}. {res.message}"
                     else:
                         res.message = ack_text
             return res
@@ -678,10 +719,9 @@ class LLMFlowEngine:
 
     def _generate_revisit_prompt(self, node: QuestionNode, ctx: FlowContext) -> str:
         """Generate prompt for revisiting a question."""
-        prev_answer = ctx.answers.get(node.key)
-        if prev_answer:
-            return f"Earlier you mentioned '{prev_answer}' for this. Would you like to change it? {node.prompt}"
-        return f"Let's revisit this question: {node.prompt}"
+        # Do not add extra framing here; return the base prompt so that
+        # the rewrite layer controls all user-facing phrasing.
+        return node.prompt
 
     def _make_casual(self, prompt: str, ctx: FlowContext) -> str:
         """Make prompt more casual."""

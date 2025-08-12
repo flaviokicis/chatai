@@ -80,6 +80,8 @@ def run_agent_turn(
 
     result = agent.handle(inbound)
 
+    # Flow core is now pure - no channel-specific rewriting here
+
     if history and hasattr(history, "add_ai_message") and result.outbound:
         with suppress(Exception):
             history.add_ai_message(result.outbound.text)

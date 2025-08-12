@@ -8,15 +8,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 
-from app import dev_config
+from app.core.channel_adapter import CLIAdapter, ConversationalRewriter
 from app.core.langchain_adapter import LangChainToolsLLM
-from app.core.naturalize import naturalize_prompt
 
 from .compiler import compile_flow
-from .engine import LLMFlowEngine
 from .ir import Flow
-from .llm_responder import LLMFlowResponder
-from .responders import ManualResponder
+from .runner import FlowTurnRunner
 
 
 def run_cli() -> None:
@@ -40,6 +37,16 @@ def run_cli() -> None:
         action="store_true",
         help="Do not use rewrite LLM; show raw prompt text",
     )
+    parser.add_argument(
+        "--no-delays",
+        action="store_true",
+        help="Disable delays between multi-messages for faster interaction",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug output showing internal flow state",
+    )
     args = parser.parse_args()
 
     data = json.loads(args.json_path.read_text(encoding="utf-8"))
@@ -51,7 +58,7 @@ def run_cli() -> None:
 
     print(f"Flow: {flow.id}")
 
-    # Setup LLM and responder
+    # Setup LLM and runner
     llm_client = None
     if args.llm:
         # Ensure .env is loaded so GOOGLE_API_KEY is available for Gemini
@@ -64,92 +71,87 @@ def run_cli() -> None:
         # Initialize Gemini via LangChain init_chat_model to reuse existing adapter
         chat = init_chat_model(args.model, model_provider="google_genai")
         llm_client = LangChainToolsLLM(chat)
-        responder = LLMFlowResponder(llm_client)
+        runner = FlowTurnRunner(compiled, llm_client, strict_mode=False)
         rewrite_status = "on" if (not args.no_rewrite) else "off"
-        print(f"[mode] LLM mode: model={args.model}, rewrite={rewrite_status}")
+        delay_status = "off" if args.no_delays else "on"
+        debug_status = "on" if args.debug else "off"
+        print(
+            f"[mode] LLM mode: model={args.model}, rewrite={rewrite_status}, delays={delay_status}, debug={debug_status}"
+        )
     else:
-        responder = ManualResponder()
+        runner = FlowTurnRunner(compiled, None, strict_mode=True)
         print("[mode] Manual mode (no LLM)")
 
-    # Create engine and initialize context
-    engine = LLMFlowEngine(compiled, llm_client, strict_mode=not args.llm)
-    ctx = engine.initialize_context()
+    # Setup channel adapter and rewriter
+    cli_adapter = CLIAdapter(enable_delays=not args.no_delays, debug_mode=args.debug)
+    rewriter = ConversationalRewriter(llm_client if not args.no_rewrite else None)
+
+    # Initialize context
+    ctx = runner.initialize_context()
+
+    # Flag to track if we need to get initial prompt
+    need_prompt = True
 
     while True:
-        # Process with engine
-        response = engine.process(ctx)
+        # Get prompt if needed (first iteration or after processing user input)
+        if need_prompt:
+            result = runner.process_turn(ctx)
 
-        if response.kind == "terminal":
-            print(f"[terminal] {response.message}")
-            break
+            if result.terminal:
+                print(f"[terminal] {result.assistant_message}")
+                break
 
-        display_text = response.message or ""
-        if args.llm and (not args.no_rewrite) and llm_client is not None:
-            display_text = naturalize_prompt(llm_client, display_text)
+            if result.escalate:
+                print(f"[escalate] {result.assistant_message}")
+                break
 
-        print(f"[prompt:{response.node_id}] {display_text}")
+            # Show the prompt using shared rewriter system
+            display_text = result.assistant_message or ""
+            if display_text:
+                # Build chat history from flow context
+                chat_history = rewriter.build_chat_history(
+                    flow_context_history=getattr(ctx, "history", None)
+                )
+
+                # Rewrite into multi-message format
+                messages = rewriter.rewrite_message(
+                    display_text, chat_history, enable_rewrite=not args.no_rewrite
+                )
+
+                # Display with debug info
+                debug_info = None
+                if args.debug:
+                    debug_info = {
+                        "node_id": ctx.current_node_id,
+                        "pending_field": getattr(ctx, "pending_field", None),
+                        "answers_count": len(getattr(ctx, "answers", {})),
+                        "turn_count": getattr(ctx, "turn_count", 0),
+                        "message_count": len(messages),
+                    }
+
+                cli_adapter.display_messages(
+                    messages, prefix=f"[prompt:{ctx.current_node_id}] ", debug_info=debug_info
+                )
 
         # Get user input
         user = input("> ").strip()
         if user == ":quit":
             break
 
-        if args.llm and responder:
-            # Use LLM responder
-            node = compiled.nodes.get(ctx.current_node_id) if ctx.current_node_id else None
-            allowed_values: list[str] | None = None
-            if node is not None:
-                # Get allowed values from QuestionNode
-                vals = getattr(node, "allowed_values", None)
-                if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
-                    allowed_values = vals
-                else:
-                    # Backward-compat: read from meta.allowed_values if present
-                    meta = getattr(node, "meta", None)
-                    if isinstance(meta, dict):
-                        mvals = meta.get("allowed_values")
-                        if isinstance(mvals, list) and all(isinstance(v, str) for v in mvals):
-                            allowed_values = mvals  # type: ignore[assignment]
+        # Process user response
+        result = runner.process_turn(ctx, user)
 
-            # Use LLMFlowResponder
-            r = responder.respond(
-                display_text,
-                ctx.pending_field,
-                ctx,
-                user,
-                allowed_values,
-            )
+        # Check for terminal/escalate after user response
+        if result.terminal:
+            print("[terminal] Flow complete")
+            break
 
-            # Debug logging
-            if dev_config.debug:
-                print(f"[DEBUG] Tool chosen: {r.tool_name}")
-                print(f"[DEBUG] Updates: {r.updates}")
-                print(f"[DEBUG] Metadata: {r.metadata}")
-                print(f"[DEBUG] Current answers: {ctx.answers}")
-                print(f"[DEBUG] Pending field: {ctx.pending_field}")
+        if result.escalate:
+            print("[escalate] Transferring to human")
+            break
 
-            # Apply updates to context
-            for k, v in r.updates.items():
-                ctx.answers[k] = v
-
-            # Show assistant message for all tools, including confirmations
-            if r.message:
-                print(f"[assistant] {r.message}")
-
-            # Forward responder outcome to engine; let engine handle all tools uniformly
-            engine_event: dict[str, object] = {"tool_name": r.tool_name or ""}
-            if ctx.pending_field and ctx.pending_field in r.updates:
-                engine_event["answer"] = r.updates[ctx.pending_field]
-            if r.message:
-                engine_event["ack_message"] = r.message
-            if r.metadata:
-                engine_event.update(r.metadata)
-            engine.process(ctx, user, engine_event)
-        # Manual mode - directly update context
-        elif ctx.pending_field and user:
-            ctx.answers[ctx.pending_field] = user
-            # Process the answer with engine
-            engine.process(ctx, user, {"answer": user})
+        # After processing user input, we need to get the next prompt
+        need_prompt = True
 
 
 if __name__ == "__main__":

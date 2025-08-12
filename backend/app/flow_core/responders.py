@@ -15,7 +15,6 @@ class Response:
     escalate: bool = False
     reason: str | None = None
     tool_name: str | None = None
-    assistant_message: str | None = None
 
 
 @dataclass(slots=True)
@@ -100,14 +99,14 @@ class LLMResponder(Responder):
             "Prefer UpdateAnswersFlow with a short value for the pending field if you can extract it.\n"
             "Use UnknownAnswer if the user doesn't know OR if the user asks a question about the prompt (clarification). "
             "Use RequestHumanHandoff only when necessary.\n\n"
-            "Also write the next assistant message to send to the user, acknowledging context when relevant, then restating or answering succinctly.\n\n"
+            "Do NOT produce any assistant-facing messages; only choose a tool and its arguments.\n\n"
             f"Latest user message: {user_message}\n"
             f"Conversation window (oldest to newest):\n{history_block}\n\n"
             f"Question: {prompt_text}\n"
             f"Pending field: {pending_field}\n"
             f"Known answers: {summary}\n"
             f"User message: {user_message}\n"
-            "Respond by calling exactly one tool and include an 'assistant_message' field in tool args with the text to send."
+            "Respond by calling exactly one tool and include ONLY the tool fields; do not include 'assistant_message'."
         )
         allowed_values = ctx.allowed_values if ctx else None
         if allowed_values and pending_field:
@@ -122,7 +121,7 @@ class LLMResponder(Responder):
         # Fallback: accept bare {updates: {...}} without explicit tool name
         if tool is None and isinstance(args, dict) and isinstance(args.get("updates"), dict):
             tool = "UpdateAnswersFlow"
-        assistant_message = args.get("assistant_message") if isinstance(args, dict) else None
+        # No assistant messages produced or consumed
         if tool == "UpdateAnswersFlow":
             updates = args.get("updates") if isinstance(args, dict) else None
             if (
@@ -139,13 +138,11 @@ class LLMResponder(Responder):
             return Response(
                 updates=updates if isinstance(updates, dict) else {},
                 tool_name=tool,
-                assistant_message=assistant_message if isinstance(assistant_message, str) else None,
             )
         if tool == "UnknownAnswer":
             return Response(
                 updates={},
                 tool_name=tool,
-                assistant_message=assistant_message if isinstance(assistant_message, str) else None,
             )
         if tool == "RequestHumanHandoff":
             return Response(
@@ -153,12 +150,10 @@ class LLMResponder(Responder):
                 escalate=True,
                 reason=str(args.get("reason", "")),
                 tool_name=tool,
-                assistant_message=assistant_message if isinstance(assistant_message, str) else None,
             )
         return Response(
             updates={},
             tool_name=None,
-            assistant_message=assistant_message if isinstance(assistant_message, str) else None,
         )
 
 

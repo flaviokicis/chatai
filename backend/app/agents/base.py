@@ -176,9 +176,8 @@ class FlowAgent(BaseAgent):
             from app.flow_core.llm_responder import LLMFlowResponder
 
             # Use LLM responder to extract answer
-            responder = LLMFlowResponder(self.deps.llm)
-            # Allow agents to specify toolsets: global + per-agent
             extra_tools = self.get_global_tools() + self.get_agent_tools()
+            responder = LLMFlowResponder(self.deps.llm)
             llm_response = responder.respond(
                 response.message or "",
                 ctx.pending_field,
@@ -189,28 +188,34 @@ class FlowAgent(BaseAgent):
                 agent_custom_instructions=self.get_agent_custom_instructions(),
             )
 
-            # If LLM extracted an answer, process it with the engine
-            if llm_response.updates and ctx.pending_field in llm_response.updates:
-                answer = llm_response.updates[ctx.pending_field]
-                old_node_id = ctx.current_node_id
-                response = engine.process(
-                    ctx,
-                    None,
-                    {
-                        "answer": answer,
-                        "tool_name": llm_response.tool_name,
-                        "ack_message": llm_response.message,
-                    },
-                )
+            # Handle escalation or completion
+            if llm_response.escalate:
+                return self._escalate("user_requested_handoff", {"answers": ctx.answers})
 
-                # Check if we need to switch flows after the answer update
+            # Apply updates to context
+            for k, v in llm_response.updates.items():
+                ctx.answers[k] = v
+
+            # Forward responder outcome to engine; let engine handle all tools uniformly
+            engine_event: dict[str, object] = {"tool_name": llm_response.tool_name or ""}
+            if ctx.pending_field and ctx.pending_field in llm_response.updates:
+                engine_event["answer"] = llm_response.updates[ctx.pending_field]
+            # Do not pass tool-crafted messages; we'll rewrite the final outbound later
+            if llm_response.metadata:
+                engine_event.update(llm_response.metadata)
+
+            # Process the tool event with engine (without tool ack messages)
+            old_node_id = ctx.current_node_id
+            response = engine.process(ctx, message.text, engine_event)
+
+            # Check if we need to switch flows after the answer update
+            if llm_response.updates:
                 updated_stored = {
                     "flow_context": ctx.to_dict(),
                     "answers": ctx.answers,
                 }
                 updated_stored = self.save_agent_state(updated_stored, agent_state)
                 new_flow = self.select_flow(updated_stored, message.text or "")
-                # Update agent_state with any changes from select_flow
                 agent_state = self.load_agent_state(updated_stored)
 
                 # If flow changed, switch to new flow and re-process
@@ -231,14 +236,7 @@ class FlowAgent(BaseAgent):
                 if response.kind == "terminal":
                     return self._escalate("checklist_complete", {"answers": ctx.answers})
 
-                # If we didn't advance to a new node (and didn't switch flows), use the LLM's message
-                if (
-                    not flow_switched
-                    and response.kind == "prompt"
-                    and ctx.current_node_id == old_node_id
-                    and llm_response.message
-                ):
-                    response.message = llm_response.message
+                # Let the engine handle message combination - it already includes ack_message
         # If this is the first interaction, add the assistant's response to history
         # so the next interaction knows it's not the first one
         elif response.kind == "prompt" and response.message:

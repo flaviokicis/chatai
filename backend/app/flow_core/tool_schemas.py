@@ -10,10 +10,6 @@ from pydantic import BaseModel, Field
 class FlowResponse(BaseModel):
     """Base class for all flow response tools."""
 
-    assistant_message: str = Field(
-        ...,
-        description="The message to send to the user acknowledging their input and providing next steps",
-    )
     confidence: float = Field(
         default=1.0,
         description="Confidence level in this response (0-1)",
@@ -67,6 +63,10 @@ class RevisitQuestion(FlowResponse):
     question_key: str = Field(
         ...,
         description="Key of the question to revisit",
+    )
+    revisit_value: str | None = Field(
+        default=None,
+        description="The new value for the question (extract from user's message if possible)",
     )
     reason: str | None = Field(
         default=None,

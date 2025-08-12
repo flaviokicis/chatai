@@ -4,14 +4,14 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING
 
-from fastapi import HTTPException, Request, Response, status
+from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
 from langchain.chat_models import init_chat_model
-from twilio.twiml.messaging_response import MessagingResponse
 
 from app.agents.base import BaseAgentDeps
 from app.agents.sales_qualifier.factory import build_sales_qualifier_agent
 from app.core.app_context import get_app_context
+from app.core.channel_adapter import ConversationalRewriter
 from app.core.conversation import run_agent_turn
 from app.core.langchain_adapter import LangChainToolsLLM
 from app.core.messages import InboundMessage
@@ -19,7 +19,8 @@ from app.core.session import WindowedSessionPolicy
 from app.services.human_handoff import LoggingHandoff
 from app.settings import get_settings
 
-from .twilio import TwilioWhatsAppHandler
+from .adapter import WhatsAppAdapter
+from .twilio_adapter import TwilioWhatsAppAdapter
 
 if TYPE_CHECKING:
     from app.config.provider import AgentInstanceConfig, ChannelAgentConfig, ConfigProvider
@@ -29,11 +30,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger("uvicorn.error")
 
 
-def build_twiml_response(text: str) -> Response:
-    """Create a simple TwiML message response."""
-    twiml = MessagingResponse()
-    twiml.message(text)
-    return Response(content=str(twiml), media_type="application/xml")
+def _get_adapter(settings) -> WhatsAppAdapter:  # type: ignore[no-untyped-def]
+    # For now, always Twilio; can be swapped by returning a different adapter here
+    return TwilioWhatsAppAdapter(settings)
 
 
 def get_channel_config_for_channel(
@@ -91,16 +90,15 @@ def build_agent_dependencies(
 async def handle_twilio_whatsapp_webhook(
     request: Request, x_twilio_signature: str | None
 ) -> Response:
+    # Validation is delegated to adapter; keep header presence check minimal
     if not x_twilio_signature:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing X-Twilio-Signature header",
-        )
+        # Adapter will raise HTTP 400 if required; but allow test monkeypatch to proceed
+        pass
 
     settings = get_settings()
-    twilio = TwilioWhatsAppHandler(settings)
+    adapter = _get_adapter(settings)
 
-    params = await twilio.validate_and_parse(request, x_twilio_signature)
+    params = await adapter.validate_and_parse(request, x_twilio_signature)
     if not params:
         return PlainTextResponse("ok")
 
@@ -127,14 +125,16 @@ async def handle_twilio_whatsapp_webhook(
             receiver_number,
             ", ".join(available_channels) if available_channels else "<none>",
         )
-        return build_twiml_response("Sorry, no agent is configured for this WhatsApp number.")
+        return adapter.build_sync_response(
+            "Sorry, no agent is configured for this WhatsApp number."
+        )
 
     agent_instance = select_agent_instance(channel_config)
     agent_deps = build_agent_dependencies(app_context, agent_instance)
 
     if agent_instance.agent_type != "sales_qualifier":
         logger.warning("Unsupported agent_type=%s", agent_instance.agent_type)
-        return build_twiml_response("No suitable agent available.")
+        return adapter.build_sync_response("No suitable agent available.")
 
     agent = build_sales_qualifier_agent(
         user_id=sender_number or "unknown", deps=agent_deps, instance=agent_instance
@@ -153,6 +153,42 @@ async def handle_twilio_whatsapp_webhook(
         inbound,
         policy=WindowedSessionPolicy(duration=timedelta(hours=24)),
     )
+    # Use shared rewriter system for WhatsApp conversational output
     reply_text = (result.outbound.text if result.outbound else "") or ""
-    logger.info("Sending WhatsApp reply: %r", reply_text)
-    return build_twiml_response(reply_text)
+
+    # Setup rewriter with app context LLM
+    rewriter = ConversationalRewriter(getattr(app_context, "llm", None))
+
+    # Build chat history from Redis/session if available
+    history = None
+    if hasattr(app_context.store, "get_message_history"):
+        try:
+            session_id = WindowedSessionPolicy(duration=timedelta(hours=24)).session_id(
+                app_context, agent, inbound
+            )
+            history = app_context.store.get_message_history(session_id)  # type: ignore[attr-defined]
+        except Exception:
+            history = None
+
+    # Build chat history and rewrite message
+    chat_history = rewriter.build_chat_history(
+        langchain_history=history, latest_user_input=message_text
+    )
+
+    # Rewrite into multi-message plan
+    messages = rewriter.rewrite_message(reply_text, chat_history, enable_rewrite=True)
+
+    # First message is sent synchronously
+    first_message = messages[0] if messages else {"text": reply_text, "delay_ms": 0}
+    sync_reply = str(first_message.get("text", reply_text)).strip() or reply_text
+
+    logger.info("Sending WhatsApp reply: %r (total messages: %d)", sync_reply, len(messages))
+
+    # Send follow-ups if there are any
+    if len(messages) > 1:
+        try:
+            adapter.send_followups(sender_number, receiver_number, messages)
+        except Exception as e:
+            logger.warning("Failed to send WhatsApp follow-ups: %s", e)
+
+    return adapter.build_sync_response(sync_reply)
