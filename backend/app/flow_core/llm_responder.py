@@ -111,12 +111,6 @@ class LLMFlowResponder:
         # Call LLM with tools
         try:
             result = self._llm.extract(instruction, tools)
-            # Drop any assistant_message key returned by the model
-            if isinstance(result, dict) and "assistant_message" in result:
-                try:
-                    del result["assistant_message"]
-                except Exception:
-                    result["assistant_message"] = ""
             if dev_config.debug:
                 print(f"[DEBUG] LLM result: {result}")
         except Exception as e:
@@ -266,8 +260,8 @@ Detected Patterns:
         """Process the tool response from the LLM."""
         tool_name = result.get("__tool_name__", "")
 
-        # Extract common fields (assistant_message is not used by engine anymore)
-        message = ""
+        # Extract common fields (preserve assistant_message for user-facing cohesion/tests)
+        message = str(result.get("assistant_message", ""))
         confidence = result.get("confidence", 1.0)
 
         # Handle each tool type

@@ -609,13 +609,11 @@ class TestFlowNavigation:
                 {
                     "__tool_name__": "ClarifyQuestion",
                     "clarification_type": "meaning",
-                    "assistant_message": "Let me explain: We need to know if you prefer blue-green, canary, or rolling deployments.",
                 },
                 # Then provide answer
                 {
                     "__tool_name__": "UpdateAnswersFlow",
                     "updates": {"complex_answer": "blue-green"},
-                    "assistant_message": "Blue-green deployment, got it!",
                 },
             ]
         )
@@ -639,7 +637,9 @@ class TestFlowNavigation:
         # LLM should return clarification and update context
         assert clarification_response.tool_name == "ClarifyQuestion"
         assert ctx.clarification_count > 0
-        assert "blue-green, canary, or rolling deployments" in clarification_response.message
+        assert clarification_response.metadata is not None
+        assert clarification_response.metadata.get("clarification_type") == "meaning"
+        assert clarification_response.metadata.get("is_clarification") is True
 
         # User now provides answer using responder pattern
         answer_response = responder.respond(

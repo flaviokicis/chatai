@@ -68,9 +68,6 @@ class LLMFlowEngine:
         # Set entry point
         ctx.current_node_id = self._flow.entry
 
-        # Identify available paths if any
-        ctx.available_paths = self._identify_paths()
-
         return ctx
 
     def process(
@@ -429,12 +426,6 @@ class LLMFlowEngine:
         if node_state.visits > 1:
             return self._generate_revisit_prompt(node, ctx)
 
-        # Check conversation style and adapt
-        if ctx.conversation_style == "casual":
-            return self._make_casual(base_prompt, ctx)
-        if ctx.conversation_style == "technical":
-            return self._make_technical(base_prompt, ctx)
-
         # Add context if relevant
         if ctx.turn_count > 0 and self._should_add_context(node, ctx):
             return self._add_conversational_context(base_prompt, ctx)
@@ -692,11 +683,6 @@ class LLMFlowEngine:
         # In flexible mode, try to recover
         return self._find_next_question(ctx)
 
-    def _identify_paths(self) -> list[str]:
-        """Identify available paths in the flow."""
-        # TODO: Implement path detection from flow structure
-        return []
-
     def _find_next_question_simple(self, ctx: FlowContext) -> EngineResponse:
         """Simple fallback for finding next question."""
         for node_id, node in self._flow.nodes.items():
@@ -722,28 +708,6 @@ class LLMFlowEngine:
         # Do not add extra framing here; return the base prompt so that
         # the rewrite layer controls all user-facing phrasing.
         return node.prompt
-
-    def _make_casual(self, prompt: str, ctx: FlowContext) -> str:
-        """Make prompt more casual."""
-        if not self._llm:
-            return prompt
-
-        try:
-            instruction = f"Make this question more casual and friendly: {prompt}"
-            return self._llm.rewrite(instruction, "")
-        except Exception:
-            return prompt
-
-    def _make_technical(self, prompt: str, ctx: FlowContext) -> str:
-        """Make prompt more technical."""
-        if not self._llm:
-            return prompt
-
-        try:
-            instruction = f"Make this question more technical and precise: {prompt}"
-            return self._llm.rewrite(instruction, "")
-        except Exception:
-            return prompt
 
     def _should_add_context(self, node: QuestionNode, ctx: FlowContext) -> bool:
         """Determine if context should be added to prompt."""

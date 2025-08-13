@@ -4,6 +4,7 @@ import logging
 import os
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from langchain.chat_models import init_chat_model
 
@@ -21,6 +22,18 @@ from app.services.rate_limiter import (
 from app.settings import get_settings
 
 app = FastAPI(title="Chatai Twilio Webhook", version="0.2.0")
+
+# Enable CORS for the Next.js frontend (localhost dev defaults)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 logger = logging.getLogger("uvicorn.error")
 set_app_context(
     app,

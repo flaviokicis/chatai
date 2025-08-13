@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class GuardRef(BaseModel):
     """Reference to a guard function with arguments."""
-    
+
     fn: str
     args: dict[str, object] = Field(default_factory=dict)
     # New: LLM hints for intelligent evaluation
@@ -17,7 +17,7 @@ class GuardRef(BaseModel):
 
 class Edge(BaseModel):
     """Edge connecting two nodes in the flow."""
-    
+
     source: str
     target: str
     guard: GuardRef | None = None
@@ -29,7 +29,7 @@ class Edge(BaseModel):
 
 class BaseNode(BaseModel):
     """Base class for all node types."""
-    
+
     id: str
     kind: Literal["Question", "Decision", "Terminal", "Action", "Subflow"]
     label: str | None = None
@@ -42,7 +42,7 @@ class BaseNode(BaseModel):
 
 class QuestionNode(BaseNode):
     """Node that asks a question and collects an answer."""
-    
+
     kind: Literal["Question"] = "Question"
     key: str
     prompt: str
@@ -52,14 +52,14 @@ class QuestionNode(BaseNode):
     examples: list[str] = Field(default_factory=list)
     allowed_values: list[str] | None = None
     data_type: Literal["text", "number", "boolean", "date", "email", "phone", "url"] = "text"
-    required: bool = True
+    required: bool = False
     dependencies: list[str] = Field(default_factory=list)  # Keys this depends on
     priority: int = 100
 
 
 class DecisionNode(BaseNode):
     """Node that makes routing decisions based on state."""
-    
+
     kind: Literal["Decision"] = "Decision"
     # New: Decision metadata
     decision_type: Literal["automatic", "llm_assisted", "user_choice"] = "automatic"
@@ -68,7 +68,7 @@ class DecisionNode(BaseNode):
 
 class TerminalNode(BaseNode):
     """Node that ends the flow."""
-    
+
     kind: Literal["Terminal"] = "Terminal"
     reason: str | None = None
     # New: Terminal behavior
@@ -79,7 +79,7 @@ class TerminalNode(BaseNode):
 
 class ActionNode(BaseNode):
     """Node that performs an action (API call, calculation, etc.)."""
-    
+
     kind: Literal["Action"] = "Action"
     action_type: str  # Type of action to perform
     action_config: dict[str, Any] = Field(default_factory=dict)
@@ -89,7 +89,7 @@ class ActionNode(BaseNode):
 
 class SubflowNode(BaseNode):
     """Node that invokes another flow as a subflow."""
-    
+
     kind: Literal["Subflow"] = "Subflow"
     flow_ref: str  # Reference to another flow
     # Parameter mapping from parent to child
@@ -106,7 +106,7 @@ Node = Annotated[
 
 class ValidationRule(BaseModel):
     """Validation rule for answers."""
-    
+
     type: Literal["regex", "range", "length", "custom"]
     pattern: str | None = None  # For regex
     min_value: float | None = None  # For range
@@ -119,7 +119,7 @@ class ValidationRule(BaseModel):
 
 class PolicyPathSelection(BaseModel):
     """Policy for path selection in multi-path flows."""
-    
+
     lock_threshold: int = 2
     allow_switch_before_lock: bool = True
     confidence_threshold: float = 0.7  # New: minimum confidence for path selection
@@ -128,7 +128,7 @@ class PolicyPathSelection(BaseModel):
 
 class PolicyConversation(BaseModel):
     """Policy for conversation behavior."""
-    
+
     allow_clarifications: bool = True
     max_clarifications: int = 3
     allow_skip: bool = False
@@ -140,7 +140,7 @@ class PolicyConversation(BaseModel):
 
 class PolicyValidation(BaseModel):
     """Policy for answer validation."""
-    
+
     strict_validation: bool = False
     max_validation_attempts: int = 3
     validation_strategy: Literal["immediate", "deferred", "batch"] = "immediate"
@@ -148,7 +148,7 @@ class PolicyValidation(BaseModel):
 
 class Policies(BaseModel):
     """Flow policies controlling behavior."""
-    
+
     path_selection: PolicyPathSelection | None = None
     conversation: PolicyConversation = Field(default_factory=PolicyConversation)
     validation: PolicyValidation = Field(default_factory=PolicyValidation)
@@ -156,7 +156,7 @@ class Policies(BaseModel):
 
 class FlowMetadata(BaseModel):
     """Metadata about the flow."""
-    
+
     name: str
     description: str | None = None
     version: str = "1.0.0"
@@ -168,7 +168,7 @@ class FlowMetadata(BaseModel):
 
 class Flow(BaseModel):
     """Complete flow definition."""
-    
+
     schema_version: Literal["v2"] = "v2"  # Updated version
     id: str
     metadata: FlowMetadata | None = None
@@ -189,12 +189,12 @@ class Flow(BaseModel):
             if n.id == node_id:
                 return n
         return None
-    
+
     def questions_by_priority(self) -> list[QuestionNode]:
         """Get question nodes sorted by priority."""
         questions = [n for n in self.nodes if isinstance(n, QuestionNode)]
         return sorted(questions, key=lambda q: q.priority)
-    
+
     def get_dependencies(self, node_id: str) -> list[str]:
         """Get dependencies for a node."""
         node = self.node_by_id(node_id)

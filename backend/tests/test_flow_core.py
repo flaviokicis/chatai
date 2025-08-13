@@ -444,7 +444,6 @@ class TestLLMFlowResponder:
                 {
                     "__tool_name__": "UpdateAnswersFlow",
                     "updates": {"name": "Alice"},
-                    "assistant_message": "Nice to meet you, Alice!",
                     "validated": True,
                 }
             ]
@@ -461,8 +460,9 @@ class TestLLMFlowResponder:
         )
 
         assert response.updates == {"name": "Alice"}
-        assert response.message == "Nice to meet you, Alice!"
         assert response.tool_name == "UpdateAnswersFlow"
+        assert response.metadata is not None
+        assert response.metadata.get("validated") is True
 
     def test_responder_clarification(self) -> None:
         """Test responder handling clarification."""
@@ -470,7 +470,6 @@ class TestLLMFlowResponder:
             [
                 {
                     "__tool_name__": "ClarifyQuestion",
-                    "assistant_message": "I need your full legal name for the form.",
                     "clarification_type": "format",
                 }
             ]
@@ -487,8 +486,11 @@ class TestLLMFlowResponder:
         )
 
         assert response.updates == {}
-        assert "legal name" in response.message
         assert response.tool_name == "ClarifyQuestion"
+        assert response.metadata is not None
+        assert response.metadata.get("clarification_type") == "format"
+        assert response.metadata.get("is_clarification") is True
+        assert ctx.clarification_count == 1
 
     def test_responder_escalation(self) -> None:
         """Test responder escalating to human."""
@@ -496,7 +498,6 @@ class TestLLMFlowResponder:
             [
                 {
                     "__tool_name__": "RequestHumanHandoff",
-                    "assistant_message": "Let me connect you with a specialist.",
                     "reason": "complex_request",
                     "context": {"issue": "technical"},
                     "urgency": "high",
@@ -516,7 +517,10 @@ class TestLLMFlowResponder:
 
         assert response.escalate
         assert response.escalate_reason == "complex_request"
-        assert "specialist" in response.message
+        assert response.tool_name == "RequestHumanHandoff"
+        assert response.metadata is not None
+        assert response.metadata.get("context") == {"issue": "technical"}
+        assert response.metadata.get("urgency") == "high"
 
     def test_responder_with_allowed_values(self) -> None:
         """Test responder with constrained values."""
@@ -641,18 +645,15 @@ class TestEndToEndFlows:
             [
                 {
                     "__tool_name__": "ClarifyQuestion",
-                    "assistant_message": "This question helps us understand your preferences.",
                     "clarification_type": "purpose",
                 },
                 {
                     "__tool_name__": "SkipQuestion",
-                    "assistant_message": "No problem, let's skip this one.",
                     "reason": "prefer_not_to_answer",
                 },
                 {
                     "__tool_name__": "UpdateAnswersFlow",
                     "updates": {"question2": "answer2"},
-                    "assistant_message": "Thanks for that answer!",
                 },
             ]
         )
@@ -676,7 +677,9 @@ class TestEndToEndFlows:
 
         # The LLM should return a clarification
         assert llm_response.tool_name == "ClarifyQuestion"
-        assert "understand your preferences" in llm_response.message
+        assert llm_response.metadata is not None
+        assert llm_response.metadata.get("clarification_type") == "purpose"
+        assert llm_response.metadata.get("is_clarification") is True
 
         # Skip the question using responder pattern
         skip_response = responder.respond(
@@ -685,7 +688,8 @@ class TestEndToEndFlows:
 
         # The LLM should return a skip
         assert skip_response.tool_name == "SkipQuestion"
-        assert "No problem" in skip_response.message
+        assert skip_response.metadata is not None
+        assert skip_response.metadata.get("skip_reason") == "prefer_not_to_answer"
 
         # Continue to next question using responder pattern
         final_response = responder.respond(
@@ -694,7 +698,7 @@ class TestEndToEndFlows:
 
         # The LLM should extract the answer
         assert final_response.tool_name == "UpdateAnswersFlow"
-        assert "Thanks for that answer!" in final_response.message
+        assert final_response.updates == {"question2": "answer2"}
 
         # Apply the updates to context (like the agent does)
         for k, v in final_response.updates.items():
@@ -705,6 +709,279 @@ class TestEndToEndFlows:
             engine.process(ctx, None, {"answer": final_response.updates[ctx.pending_field]})
 
         assert "question2" in ctx.answers or ctx.is_complete
+
+
+class TestFlowTurnRunnerEndToEnd:
+    """End-to-end tests using FlowTurnRunner like CLI and webhook do."""
+
+    def test_complete_conversation_flow(self, simple_flow: Flow) -> None:
+        """Test a complete conversation using FlowTurnRunner."""
+        from app.flow_core.compiler import FlowCompiler
+        from app.flow_core.runner import FlowTurnRunner
+
+        # Set up the runner like CLI does
+        compiler = FlowCompiler()
+        compiled = compiler.compile(simple_flow)
+
+        mock_llm = MockLLM(
+            [
+                # Name question
+                {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"name": "Alice"},
+                    "validated": True,
+                },
+                # Age question
+                {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"age": "30"},
+                    "validated": True,
+                },
+                # Email question
+                {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"email": "alice@example.com"},
+                    "validated": True,
+                },
+            ]
+        )
+
+        runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
+        ctx = runner.initialize_context()
+
+        # Simulate conversation turns like CLI
+        conversation = [
+            ("Alice", {"name": "Alice"}),
+            ("30", {"age": "30"}),
+            ("alice@example.com", {"email": "alice@example.com"}),
+        ]
+
+        for user_input, expected_update in conversation:
+            # Get prompt
+            result = runner.process_turn(ctx)
+            assert not result.terminal
+            assert result.assistant_message is not None
+
+            # Process user response
+            result = runner.process_turn(ctx, user_input)
+
+            # Check that answers were updated
+            for key, value in expected_update.items():
+                assert ctx.answers.get(key) == value
+
+        # Final turn should be terminal
+        result = runner.process_turn(ctx)
+        assert result.terminal
+        assert result.assistant_message is not None
+
+        # Verify all answers collected
+        assert ctx.answers == {"name": "Alice", "age": "30", "email": "alice@example.com"}
+
+    def test_conversation_with_clarification(self, simple_flow: Flow) -> None:
+        """Test conversation with clarification request."""
+        from app.flow_core.compiler import FlowCompiler
+        from app.flow_core.runner import FlowTurnRunner
+
+        compiler = FlowCompiler()
+        compiled = compiler.compile(simple_flow)
+
+        mock_llm = MockLLM(
+            [
+                # Clarification request
+                {
+                    "__tool_name__": "ClarifyQuestion",
+                    "clarification_type": "purpose",
+                },
+                # Then provide answer
+                {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"name": "Bob"},
+                    "validated": True,
+                },
+            ]
+        )
+
+        runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
+        ctx = runner.initialize_context()
+
+        # Get initial prompt
+        result = runner.process_turn(ctx)
+        assert "What is your name?" in result.assistant_message
+
+        # User asks for clarification
+        result = runner.process_turn(ctx, "Why do you need my name?")
+        assert result.tool_name == "ClarifyQuestion"
+        assert not result.terminal
+
+        # User provides answer after clarification
+        result = runner.process_turn(ctx, "Bob")
+        assert result.tool_name == "UpdateAnswersFlow"
+        assert ctx.answers.get("name") == "Bob"
+
+    def test_conversation_with_revisit(self, simple_flow: Flow) -> None:
+        """Test conversation with revisiting previous answer."""
+        from app.flow_core.compiler import FlowCompiler
+        from app.flow_core.runner import FlowTurnRunner
+
+        compiler = FlowCompiler()
+        compiled = compiler.compile(simple_flow)
+
+        mock_llm = MockLLM(
+            [
+                # First answer
+                {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"name": "John"},
+                    "validated": True,
+                },
+                # Second answer
+                {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"age": "25"},
+                    "validated": True,
+                },
+                # Revisit name
+                {
+                    "__tool_name__": "RevisitQuestion",
+                    "question_key": "name",
+                    "revisit_value": "Jonathan",
+                },
+            ]
+        )
+
+        runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
+        ctx = runner.initialize_context()
+
+        # Answer name question
+        result = runner.process_turn(ctx)  # Get prompt
+        result = runner.process_turn(ctx, "John")  # Answer
+        assert ctx.answers.get("name") == "John"
+
+        # Answer age question
+        result = runner.process_turn(ctx)  # Get prompt
+        result = runner.process_turn(ctx, "25")  # Answer
+        assert ctx.answers.get("age") == "25"
+
+        # User wants to change name
+        result = runner.process_turn(ctx, "Actually, my name is Jonathan")
+        assert result.tool_name == "RevisitQuestion"
+        assert ctx.answers.get("name") == "Jonathan"  # Should be updated
+
+    def test_conversation_with_unknown_answer(self, simple_flow: Flow) -> None:
+        """Test conversation when user doesn't know answer."""
+        from app.flow_core.compiler import FlowCompiler
+        from app.flow_core.runner import FlowTurnRunner
+
+        compiler = FlowCompiler()
+        compiled = compiler.compile(simple_flow)
+
+        mock_llm = MockLLM(
+            [
+                # Unknown answer
+                {
+                    "__tool_name__": "UnknownAnswer",
+                    "reason": "unknown",
+                    "field": "age",
+                },
+            ]
+        )
+
+        runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
+        ctx = runner.initialize_context()
+
+        # Get to age question (skip name for this test)
+        ctx.answers["name"] = "Test"
+        ctx.current_node_id = "q_age"
+
+        # Get age prompt
+        result = runner.process_turn(ctx)
+        assert "How old are you?" in result.assistant_message
+
+        # User doesn't know
+        result = runner.process_turn(ctx, "I don't know")
+        assert result.tool_name == "UnknownAnswer"
+
+        # Should continue to next question since age is not required
+        result = runner.process_turn(ctx)
+        assert not result.terminal
+
+    def test_conversation_with_escalation(self, simple_flow: Flow) -> None:
+        """Test conversation that escalates to human."""
+        from app.flow_core.compiler import FlowCompiler
+        from app.flow_core.runner import FlowTurnRunner
+
+        compiler = FlowCompiler()
+        compiled = compiler.compile(simple_flow)
+
+        mock_llm = MockLLM(
+            [
+                {
+                    "__tool_name__": "RequestHumanHandoff",
+                    "reason": "complex_request",
+                    "urgency": "high",
+                },
+            ]
+        )
+
+        runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
+        ctx = runner.initialize_context()
+
+        # Get initial prompt
+        result = runner.process_turn(ctx)
+        assert not result.escalate
+
+        # User makes complex request
+        result = runner.process_turn(ctx, "This is very complicated and I need special help")
+        assert result.escalate
+        assert result.tool_name == "RequestHumanHandoff"
+
+    def test_branching_flow_conversation(self, branching_flow: Flow) -> None:
+        """Test conversation through a branching flow."""
+        from app.flow_core.compiler import FlowCompiler
+        from app.flow_core.runner import FlowTurnRunner
+
+        compiler = FlowCompiler()
+        compiled = compiler.compile(branching_flow)
+
+        mock_llm = MockLLM(
+            [
+                # Choose "new" customer
+                {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"user_type": "new"},
+                    "validated": True,
+                },
+                # Answer signup question
+                {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"signup_reason": "exploring options"},
+                    "validated": True,
+                },
+            ]
+        )
+
+        runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
+        ctx = runner.initialize_context()
+
+        # Get customer type question
+        result = runner.process_turn(ctx)
+        assert "new or existing" in result.assistant_message
+
+        # Answer "new"
+        result = runner.process_turn(ctx, "new")
+        assert ctx.answers.get("user_type") == "new"
+
+        # Should route to signup question
+        result = runner.process_turn(ctx)
+        assert "brings you here" in result.assistant_message
+
+        # Answer signup question
+        result = runner.process_turn(ctx, "exploring options")
+        assert ctx.answers.get("signup_reason") == "exploring options"
+
+        # Should complete
+        result = runner.process_turn(ctx)
+        assert result.terminal
 
 
 if __name__ == "__main__":

@@ -1,10 +1,12 @@
 "use client";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/ui/page-header";
+import { cn } from "@/lib/utils";
+import Link from "next/link";
 import { 
   Bot, 
   Calendar, 
@@ -141,7 +143,7 @@ export default function AgentsPage() {
               <Card key={agent.id} className="relative">
                 <CardHeader className="pb-4">
                   <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
+                    <Link href={`/agents/${agent.id}`} className="flex items-center gap-3 group">
                       <div className={`h-10 w-10 rounded-lg grid place-items-center ${
                         agent.enabled 
                           ? "bg-primary/10 ring-1 ring-primary/20" 
@@ -152,12 +154,12 @@ export default function AgentsPage() {
                         }`} />
                       </div>
                       <div className="flex-1">
-                        <CardTitle className="text-base">{agent.name}</CardTitle>
+                        <CardTitle className="text-base group-hover:underline">{agent.name}</CardTitle>
                         <div className="mt-1">
                           {getStatusBadge(agent.status)}
                         </div>
                       </div>
-                    </div>
+                    </Link>
                     <Switch checked={agent.enabled} />
                   </div>
                 </CardHeader>
@@ -180,10 +182,16 @@ export default function AgentsPage() {
                   )}
 
                   <div className="flex gap-2 pt-2">
-                    <Button variant="outline" size="sm" className="flex-1">
+                    <Link
+                      href={`/agents/${agent.id}`}
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        "flex-1"
+                      )}
+                    >
                       <Settings className="h-3.5 w-3.5 mr-1.5" />
                       Configure
-                    </Button>
+                    </Link>
                     <Button variant="outline" size="sm" className="flex-1">
                       <Clock className="h-3.5 w-3.5 mr-1.5" />
                       History
