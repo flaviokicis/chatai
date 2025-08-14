@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Inboxed — AI Inbox Automation",
-  description: "AI agents to automate your WhatsApp inbox with seamless human handoff.",
+  title: "Inboxed — Automação de Inbox com IA",
+  description: "Agentes de IA para automatizar sua caixa de entrada no WhatsApp com handoff humano perfeito.",
 };
 
 export default function RootLayout({
@@ -24,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="pt-BR">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

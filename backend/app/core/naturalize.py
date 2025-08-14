@@ -11,9 +11,9 @@ MAX_FOLLOWUP_DELAY_MS = 4000
 MAX_MULTI_MESSAGES = 8
 
 DEFAULT_INSTRUCTION = (
-    "Rewrite the prompt into a single friendly question addressed to the user. "
-    "Requirements: one sentence; no bullet points or lists; no multiple alternatives; "
-    "no quotation marks; keep meaning; be concise."
+    "Reescreva o prompt em uma única pergunta amigável em português (Brasil), direcionada ao usuário. "
+    "Requisitos: uma frase; sem listas ou marcadores; sem múltiplas alternativas; "
+    "sem aspas; mantenha o significado; seja conciso."
 )
 
 
@@ -39,12 +39,12 @@ def clarify_and_reask(llm: LLMClient, question_text: str, user_message: str) -> 
     then restate the original question as a single sentence.
     """
     instr = (
-        "The user asked a clarification related to the question. "
-        "Write a brief acknowledgement that references their wording, then restate the question succinctly. "
-        "One sentence only; no lists; no quotes; keep meaning; be concise."
+        "O usuário pediu um esclarecimento sobre a pergunta. "
+        "Escreva um breve reconhecimento que faça referência às palavras do usuário e depois reformule a pergunta de forma sucinta. "
+        "Apenas uma frase; sem listas; sem aspas; mantenha o significado; seja conciso. Responda em português (Brasil)."
     )
     try:
-        text = f"Question: {question_text}\nUser asked: {user_message}"
+        text = f"Pergunta: {question_text}\nUsuário perguntou: {user_message}"
         rewritten = llm.rewrite(instr, text)
         if isinstance(rewritten, str) and rewritten.strip():
             first_line = next((ln.strip() for ln in rewritten.splitlines() if ln.strip()), "")
@@ -75,6 +75,9 @@ def rewrite_whatsapp_multi(
     if not original_text.strip():
         return [{"text": original_text, "delay_ms": 0}]
 
+    # Proceed to rewrite even for direct questions. Post-processing below preserves
+    # the exact question wording and ensures a single question bubble.
+
     history_lines: list[str] = []
     last_user_message: str = ""
     for turn in chat_window or []:
@@ -88,27 +91,32 @@ def rewrite_whatsapp_multi(
     history_block = "\n".join(history_lines[-200:])  # cap to keep prompt bounded
 
     instruction = (
-        "Role: You are a warm, friendly receptionist on WhatsApp.\n"
-        "Task: Rewrite the assistant's reply into short, human-like messages.\n"
-        "You decide how many messages to send (one is fine; often two is great).\n\n"
-        "CRITICAL CONSTRAINTS (must-follow):\n"
-        "- Preserve the original meaning EXACTLY. Do NOT change the topic or add new details.\n"
-        "- If the original includes choices/entities/units/numbers, reproduce them VERBATIM (same wording, same order).\n"
-        "- Do NOT turn the prompt into a different question. Only rephrase tone and split across bubbles.\n\n"
-        "- Do NOT introduce words like 'revisit' or 'Let's revisit' unless they already appear in the original text.\n\n"
-        "Style guidelines:\n"
-        "- If the user just answered or corrected something, begin with a brief acknowledgement that references it.\n"
-        "- Keep it friendly and succinct; plain text only.\n"
-        "- Use a tiny transition only when it truly helps the flow; avoid filler.\n"
-        "- Keep each message <= 120 characters.\n"
-        "- Timing: first message delay_ms = 0; subsequent messages 2200-4000 ms.\n"
-        "- Output STRICTLY a JSON array of {text: string, delay_ms: integer}.\n\n"
-        "If you cannot keep every original choice/entity exactly as written, return a SINGLE message with the original text and delay_ms = 0.\n\n"
-        "Examples (format only, content must remain unchanged):\n"
-        "Input: 'Could you tell me if it's more like a tennis court or a soccer field?'\n"
-        'Output: [\n  {"text": "Got it!", "delay_ms": 0},\n  {"text": "Is it more like a tennis court or a soccer field?", "delay_ms": 1600}\n]\n\n'
-        "Input: 'What can I help you with today?'\n"
-        'Output: [\n  {"text": "What can I help you with today?", "delay_ms": 0}\n]\n'
+        "Papel: você é uma recepcionista calorosa e amigável no WhatsApp.\n"
+        "Tarefa: reescreva a resposta do assistente em mensagens curtas e naturais.\n"
+        "Você decide quantas mensagens enviar (uma é ok; muitas vezes duas é ótimo).\n\n"
+        "RESTRIÇÕES CRÍTICAS (obrigatórias):\n"
+        "- Preserve o significado original EXATAMENTE. Não mude o tópico nem adicione detalhes.\n"
+        "- Se o original incluir opções/entidades/unidades/números, reproduza-os AO PÉ DA LETRA (mesmas palavras, mesma ordem).\n"
+        "- Não reescreva perguntas em outras palavras. Se o texto for uma pergunta, mantenha o texto EXATO da pergunta.\n"
+        "- Apenas ajuste o tom e, se fizer sentido, divida em bolhas (sem gerar perguntas adicionais).\n\n"
+        "- Não introduza palavras como 'revisitar' ou 'Vamos revisitar' a menos que já apareçam no texto original.\n\n"
+        "Diretrizes de estilo:\n"
+        "- Se o usuário acabou de responder ou corrigir algo, comece com um breve reconhecimento que faça referência a isso.\n"
+        "- Mantenha amigável e sucinto; apenas texto simples.\n"
+        "- Use transições mínimas apenas quando realmente ajudarem o fluxo; evite enfeites.\n"
+        "- Mantenha cada mensagem com <= 120 caracteres.\n"
+        "- Evite repetir saudações. Se a primeira mensagem for uma saudação (ex.: 'Oi!', 'Olá!'), a próxima NÃO deve começar com a mesma saudação.\n"
+        "- Tempo: primeira mensagem delay_ms = 0; seguintes entre 2200-4000 ms.\n"
+        "- Saída ESTRITAMENTE como um array JSON de {text: string, delay_ms: integer}.\n\n"
+        "Se você não conseguir manter cada opção/entidade exatamente como escrito, retorne UMA única mensagem com o texto original e delay_ms = 0.\n\n"
+        "Exemplos (apenas formato; o conteúdo deve manter o significado):\n"
+        "Entrada: 'Poderia me dizer se é mais parecido com uma quadra de tênis ou um campo de futebol?'\n"
+        '[\n  {"text": "Entendido!", "delay_ms": 0},\n  {"text": "É mais parecido com uma quadra de tênis ou um campo de futebol?", "delay_ms": 1600}\n]\n\n'
+        "Entrada: 'É em ambiente interno (indoor) ou externo (outdoor)?'\n"
+        '[\n  {"text": "É em ambiente interno (indoor) ou externo (outdoor)?", "delay_ms": 0}\n]\n\n'
+        "Entrada: 'Com o que posso te ajudar hoje?'\n"
+        '[\n  {"text": "Com o que posso te ajudar hoje?", "delay_ms": 0}\n]\n\n'
+        "Importante: escreva as mensagens em português (Brasil)."
     )
 
     payload = (

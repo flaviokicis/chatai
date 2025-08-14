@@ -29,7 +29,7 @@ class MessageRouter:
         agent_type = self._resolve_agent_type(message)
         ctor = self.registry.get(agent_type)
         if not ctor:
-            return OutboundMessage(text="Sorry, no agent available right now.")
+            return OutboundMessage(text="Desculpe, nenhum agente está disponível no momento.")
         agent = ctor(message.user_id)
         result = agent.handle(message)
         # Persisting of state is left to the agent for now.

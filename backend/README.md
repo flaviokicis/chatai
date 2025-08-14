@@ -150,6 +150,13 @@ You can quickly test by pointing `CONFIG` to a file containing one of these payl
 - Use Flow Core (`app.flow_core`) for all state machine logic. Agents should delegate progression to Engine and keep only domain glue logic.
 - Use shared tool schemas from `app/flow_core/tool_schemas.py`.
 
+### Principle: Prefer LLM reasoning over hardcoded keyword heuristics
+
+- Whenever choosing between hardcoding behavior with if/switch and string keyword lists versus asking the LLM, prefer the LLM.
+- Do not enumerate ad-hoc phrases (e.g., clarification or frustration keywords) to detect intent; ask the LLM with a targeted instruction instead.
+- Avoid post-processing user-visible strings with brittle replacements. If phrasing needs adjustment, guide the LLM via instructions and constraints.
+- Rationale: keeps behavior adaptable across languages and phrasing, reduces false positives/negatives, and centralizes behavior in model prompts.
+
 ## Test-driven development (TDD)
 
 This project is intentionally run with a pragmatic TDD mindset:

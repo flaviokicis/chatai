@@ -158,6 +158,19 @@ class NavigateFlow(FlowResponse):
     )
 
 
+class RestartConversation(FlowResponse):
+    """Hard reset of the conversation/flow context to the very beginning.
+
+    This tool MUST be used only when the user explicitly and unequivocally asks to
+    "restart from scratch" or to "start over" the conversation. It clears answers,
+    history, path selections and returns to the flow's entry node.
+    """
+
+    reason: Literal["explicit_user_request",] = Field(
+        default="explicit_user_request", description="Why the restart is being performed."
+    )
+
+
 # Tool registry for flow interactions
 FLOW_TOOLS = [
     UpdateAnswersFlow,
@@ -169,6 +182,7 @@ FLOW_TOOLS = [
     ProvideInformation,
     ConfirmCompletion,
     NavigateFlow,
+    RestartConversation,
 ]
 
 

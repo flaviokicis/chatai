@@ -124,16 +124,11 @@ export default function AgentsPage() {
       <div className="mx-auto max-w-6xl px-4 py-6 md:py-8">
         <div className="mb-6">
           <PageHeader
-            title="AI Agents"
-            description="Manage your automated conversation handlers"
+            title="Fluxos (migrar)"
+            description="Esta página foi substituída por Fluxos. Use a aba Fluxos no menu."
             icon={Bot}
           />
-          <div className="flex justify-end -mt-4">
-            <Button className="gap-2">
-              <Plus className="h-4 w-4" />
-              Create Agent
-            </Button>
-          </div>
+          <div className="flex justify-end -mt-4"></div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
@@ -172,11 +167,11 @@ export default function AgentsPage() {
                     <div className="grid grid-cols-2 gap-4 pt-2 border-t">
                       <div className="text-center">
                         <div className="text-lg font-semibold">{agent.conversations}</div>
-                        <div className="text-xs text-muted-foreground">Conversations</div>
+                         <div className="text-xs text-muted-foreground">Conversas</div>
                       </div>
                       <div className="text-center">
                         <div className="text-lg font-semibold text-primary">{agent.conversionRate}</div>
-                        <div className="text-xs text-muted-foreground">Success Rate</div>
+                         <div className="text-xs text-muted-foreground">Taxa de sucesso</div>
                       </div>
                     </div>
                   )}
@@ -190,11 +185,11 @@ export default function AgentsPage() {
                       )}
                     >
                       <Settings className="h-3.5 w-3.5 mr-1.5" />
-                      Configure
+                      Configurar
                     </Link>
                     <Button variant="outline" size="sm" className="flex-1">
                       <Clock className="h-3.5 w-3.5 mr-1.5" />
-                      History
+                      Histórico
                     </Button>
                   </div>
                 </CardContent>
@@ -205,25 +200,25 @@ export default function AgentsPage() {
 
         <Card className="mt-6">
           <CardHeader>
-            <CardTitle>Agent Performance Overview</CardTitle>
+            <CardTitle>Visão geral (agentes)</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="text-center p-4 rounded-lg bg-primary/5">
                 <div className="text-2xl font-bold text-primary">221</div>
-                <div className="text-sm text-muted-foreground">Total Conversations</div>
+                <div className="text-sm text-muted-foreground">Conversas totais</div>
               </div>
               <div className="text-center p-4 rounded-lg bg-emerald-50">
                 <div className="text-2xl font-bold text-emerald-600">67%</div>
-                <div className="text-sm text-muted-foreground">Avg Success Rate</div>
+                <div className="text-sm text-muted-foreground">Taxa média de sucesso</div>
               </div>
               <div className="text-center p-4 rounded-lg bg-blue-50">
                 <div className="text-2xl font-bold text-blue-600">4</div>
-                <div className="text-sm text-muted-foreground">Active Agents</div>
+                <div className="text-sm text-muted-foreground">Agentes ativos</div>
               </div>
               <div className="text-center p-4 rounded-lg bg-amber-50">
                 <div className="text-2xl font-bold text-amber-600">2.3s</div>
-                <div className="text-sm text-muted-foreground">Avg Response Time</div>
+                <div className="text-sm text-muted-foreground">Tempo médio de resposta</div>
               </div>
             </div>
           </CardContent>

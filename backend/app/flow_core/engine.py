@@ -104,7 +104,7 @@ class LLMFlowEngine:
         logger.warning(f"Unknown node type: {type(node).__name__}")
         return EngineResponse(
             kind="escalate",
-            message="I encountered an unexpected situation. Let me get someone to help.",
+            message="Encontrei uma situação inesperada. Vou chamar alguém para ajudar.",
             node_id=node.id if node else None,
         )
 
@@ -180,10 +180,20 @@ class LLMFlowEngine:
         - NavigateFlow: jump to target node
         """
         tool_name = str(event.get("tool_name") or "")
+        # The runner no longer forwards LLM-generated text; all user-facing phrasing is done by the rewrite model.
+        # Keep ack_text empty to avoid mixing tool LLM text with final outbound.
+        ack_text = ""
 
         # Tool-provided messages are ignored at this layer to avoid double messaging.
         # The final outbound will be rewritten later with full context.
         def _with_ack(res: EngineResponse) -> EngineResponse:
+            # Prefix a short acknowledgment to the outgoing prompt, if present
+            if ack_text and res.kind == "prompt":
+                ack_clean = ack_text.rstrip(".!?")
+                if res.message:
+                    res.message = f"{ack_clean}. {res.message}"
+                else:
+                    res.message = ack_clean
             return res
 
         if tool_name == "UnknownAnswer":
@@ -201,7 +211,7 @@ class LLMFlowEngine:
                 # Required question - escalate so user gets help
                 return EngineResponse(
                     kind="escalate",
-                    message="Let me connect you with someone who can help with this.",
+                    message="Vou te conectar com alguém que pode ajudar com isso.",
                     node_id=node.id,
                     metadata={"reason": (event or {}).get("reason", "unknown")},
                 )
@@ -264,17 +274,28 @@ class LLMFlowEngine:
         if tool_name == "RequestHumanHandoff":
             return EngineResponse(
                 kind="escalate",
-                message="Transferring you to a human for further assistance.",
+                message="Transferindo você para um atendente humano para mais assistência.",
                 node_id=node.id,
                 metadata={"reason": event.get("reason", "unspecified")},
             )
 
         if tool_name == "ProvideInformation":
-            # Stay on the same node; provide informational ack if any
+            # Stay on the same node; simply regenerate the contextual prompt.
+            # The rewriter will handle adding a brief empathetic acknowledgement.
             return EngineResponse(
                 kind="prompt",
                 message=self._generate_contextual_prompt(node, ctx),
                 node_id=node.id,
+            )
+
+        if tool_name == "ClarifyQuestion":
+            # Do not inject LLM-generated clarification text here. Return the base prompt,
+            # and let the rewriter produce a concise explanation followed by the question.
+            return EngineResponse(
+                kind="prompt",
+                message=self._generate_contextual_prompt(node, ctx),
+                node_id=node.id,
+                metadata={"is_clarification": True},
             )
 
         if tool_name == "ConfirmCompletion":
@@ -295,6 +316,29 @@ class LLMFlowEngine:
                 message=self._generate_contextual_prompt(node, ctx),
                 node_id=node.id,
             )
+
+        if tool_name == "RestartConversation":
+            # Perform an in-place hard reset of context to the flow's entry
+            # Keep flow_id and session_id; clear the rest
+            entry_node_id = self._flow.entry
+            ctx.current_node_id = entry_node_id
+            ctx.answers.clear()
+            ctx.node_states.clear()
+            ctx.pending_field = None
+            ctx.history.clear()
+            ctx.turn_count = 0
+            ctx.available_paths.clear()
+            ctx.active_path = None
+            ctx.path_confidence.clear()
+            ctx.path_locked = False
+            ctx.user_intent = None
+            ctx.conversation_style = None
+            ctx.clarification_count = 0
+            ctx.is_complete = False
+            ctx.escalation_reason = None
+
+            # After reset, process from the entry to generate the initial prompt
+            return _with_ack(self.process(ctx, None, None))
 
         # Unknown tool; let default prompt logic run
         return None
@@ -340,7 +384,7 @@ class LLMFlowEngine:
 
         return EngineResponse(
             kind="terminal",
-            message=node.reason or "Conversation complete",
+            message=node.reason or "Conversa concluída",
             node_id=node.id,
             metadata={"final_answers": ctx.answers},
         )
@@ -393,7 +437,7 @@ class LLMFlowEngine:
             ctx.is_complete = True
             return EngineResponse(
                 kind="terminal",
-                message="All questions have been answered. Thank you!",
+                message="Todas as perguntas foram respondidas. Obrigado!",
                 node_id=ctx.current_node_id,
             )
 
@@ -410,7 +454,7 @@ class LLMFlowEngine:
 
         return EngineResponse(
             kind="terminal",
-            message="I've collected all the information I need. Thank you!",
+            message="Reuni todas as informações necessárias. Obrigado!",
             node_id=ctx.current_node_id,
         )
 
@@ -433,7 +477,10 @@ class LLMFlowEngine:
         return base_prompt
 
     def _is_clarification_request(self, message: str, ctx: FlowContext) -> bool:
-        """Detect if user is asking for clarification."""
+        """Detect if user is asking for clarification.
+
+        Uses simple heuristics without an LLM; with an LLM, defers to a concise rewrite check.
+        """
         if not self._llm:
             # Simple heuristic
             clarification_keywords = [
@@ -443,12 +490,12 @@ class LLMFlowEngine:
                 "what does that mean",
                 "why do you need",
                 "what for",
-                "?",
             ]
-            message_lower = message.lower()
-            return any(keyword in message_lower for keyword in clarification_keywords)
+            text = message.lower().strip()
+            if any(k in text for k in clarification_keywords):
+                return True
+            return text.endswith("?")
 
-        # Use LLM for better detection
         try:
             instruction = (
                 "Is the user asking for clarification about the current question? "
@@ -465,7 +512,7 @@ class LLMFlowEngine:
         """Generate a clarification for the current question."""
         if not self._llm:
             # Simple template-based clarification
-            return f"Let me clarify: {node.prompt}\n\nThis helps us understand your needs better."
+            return f"Deixe-me esclarecer: {node.prompt}\n\nIsso nos ajuda a entender melhor suas necessidades."
 
         # Use LLM for contextual clarification
         try:
@@ -477,7 +524,7 @@ class LLMFlowEngine:
             context_info = f"We're discussing: {ctx.user_intent or 'your requirements'}"
             return self._llm.rewrite(instruction, context_info)
         except Exception:
-            return f"Let me clarify: {node.prompt}"
+            return f"Deixe-me esclarecer: {node.prompt}"
 
     def _validate_answer(self, node: QuestionNode, answer: Any, ctx: FlowContext) -> bool:
         """Validate an answer using the node's validator."""
@@ -491,7 +538,7 @@ class LLMFlowEngine:
     def _generate_validation_prompt(self, node: QuestionNode, answer: Any, ctx: FlowContext) -> str:
         """Generate a prompt for validation failure."""
         if not self._llm:
-            return f"I couldn't understand '{answer}'. {node.prompt}"
+            return f"Não consegui entender '{answer}'. {node.prompt}"
 
         try:
             instruction = (
@@ -501,7 +548,7 @@ class LLMFlowEngine:
             )
             return self._llm.rewrite(instruction, "")
         except Exception:
-            return f"I couldn't process '{answer}'. Could you please try again? {node.prompt}"
+            return f"Não consegui processar '{answer}'. Você pode tentar novamente? {node.prompt}"
 
     def _evaluate_guard(self, edge: Any, ctx: FlowContext, event: dict[str, Any] | None) -> bool:
         """Evaluate a guard function."""
@@ -656,7 +703,7 @@ class LLMFlowEngine:
         """Handle case when there's no current node."""
         return EngineResponse(
             kind="escalate",
-            message="I've lost track of where we are. Let me get someone to help.",
+            message="Perdi o contexto de onde estamos. Vou chamar alguém para ajudar.",
             node_id=None,
             metadata={"error": "no_current_node"},
         )
@@ -665,7 +712,7 @@ class LLMFlowEngine:
         """Handle dead end in the flow."""
         return EngineResponse(
             kind="escalate",
-            message="I've reached an unexpected point. Let me transfer you to someone who can help.",
+            message="Cheguei a um ponto inesperado. Vou transferir você para alguém que possa ajudar.",
             node_id=node.id,
             metadata={"error": "dead_end"},
         )
@@ -675,7 +722,7 @@ class LLMFlowEngine:
         if self._strict_mode:
             return EngineResponse(
                 kind="escalate",
-                message="I couldn't determine the next step. Transferring to a specialist.",
+                message="Não consegui determinar o próximo passo. Transferindo para um especialista.",
                 node_id=node.id,
                 metadata={"error": "no_valid_transition"},
             )
@@ -693,7 +740,7 @@ class LLMFlowEngine:
 
         return EngineResponse(
             kind="terminal",
-            message="All questions answered!",
+            message="Todas as perguntas foram respondidas!",
             node_id=ctx.current_node_id,
         )
 

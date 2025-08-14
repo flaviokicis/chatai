@@ -47,17 +47,17 @@ def config_json(tmp_path):
                                     "global": [
                                         {
                                             "key": "intention",
-                                            "prompt": "What are you looking to accomplish today?",
+                                            "prompt": "O que você está buscando realizar hoje?",
                                             "priority": 10,
                                         },
                                         {
                                             "key": "budget",
-                                            "prompt": "Do you have a budget range in mind?",
+                                            "prompt": "Você tem uma faixa de orçamento em mente?",
                                             "priority": 90,
                                         },
                                         {
                                             "key": "timeframe",
-                                            "prompt": "What is your ideal timeline?",
+                                            "prompt": "Qual é o seu prazo ideal?",
                                             "priority": 100,
                                         },
                                     ]
@@ -128,7 +128,10 @@ def test_whatsapp_like_flow(monkeypatch, config_json):
     )
     assert r1.status_code == 200
     txt1 = r1.text
-    assert "What are you looking to accomplish today?" in txt1
+    assert (
+        "O que você está buscando realizar hoje?" in txt1
+        or "What are you looking to accomplish today?" in txt1
+    )
 
     # Turn 2: user provides intention; should move to next question (budget)
     r2 = client.post(
@@ -138,7 +141,10 @@ def test_whatsapp_like_flow(monkeypatch, config_json):
     )
     assert r2.status_code == 200
     txt2 = r2.text
-    assert "Do you have a budget range in mind?" in txt2
+    assert (
+        "Você tem uma faixa de orçamento em mente?" in txt2
+        or "Do you have a budget range in mind?" in txt2
+    )
 
     # Verify state persisted for this user and agent
     state = ctx.store.load(from_num, "sales_qualifier")
@@ -192,7 +198,7 @@ def test_ambiguous_paths_escalate_to_human(monkeypatch, tmp_path):
                                             "questions": [
                                                 {
                                                     "key": "court_type",
-                                                    "prompt": "Is it indoor or outdoor?",
+                                                    "prompt": "É em ambiente interno (indoor) ou externo (outdoor)?",
                                                     "priority": 20,
                                                 }
                                             ],
@@ -207,7 +213,7 @@ def test_ambiguous_paths_escalate_to_human(monkeypatch, tmp_path):
                                             "questions": [
                                                 {
                                                     "key": "field_size",
-                                                    "prompt": "Approximate field size?",
+                                                    "prompt": "Tamanho aproximado do campo?",
                                                     "priority": 20,
                                                 }
                                             ],
@@ -292,7 +298,7 @@ def test_ambiguous_paths_escalate_to_human(monkeypatch, tmp_path):
         headers=headers,
     )
     assert r4.status_code == 200
-    assert "Transferring" in r4.text
+    assert "Transferindo você para um atendente humano" in r4.text
     # And active path should remain unset in state
     state = ctx.store.load(from_num, "sales_qualifier")
     assert isinstance(state, dict)
@@ -398,7 +404,10 @@ def test_paths_selection_and_questions_flow(monkeypatch, tmp_path):
                 return {"__tool_name__": "SelectFlowPath", "path": "tennis_court"}
             self._i += 1
             if self._i == 1:
-                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"intention": "tennis court"}}
+                return {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {"intention": "tennis court"},
+                }
             if self._i == 2:
                 return {"__tool_name__": "UpdateAnswersFlow", "updates": {"court_type": "indoor"}}
             return {}

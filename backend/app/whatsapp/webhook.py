@@ -126,7 +126,7 @@ async def handle_twilio_whatsapp_webhook(
             ", ".join(available_channels) if available_channels else "<none>",
         )
         return adapter.build_sync_response(
-            "Sorry, no agent is configured for this WhatsApp number."
+            "Desculpe, nenhum agente está configurado para este número do WhatsApp."
         )
 
     agent_instance = select_agent_instance(channel_config)
@@ -134,10 +134,14 @@ async def handle_twilio_whatsapp_webhook(
 
     if agent_instance.agent_type != "sales_qualifier":
         logger.warning("Unsupported agent_type=%s", agent_instance.agent_type)
-        return adapter.build_sync_response("No suitable agent available.")
+        return adapter.build_sync_response("Nenhum agente adequado disponível.")
 
+    # Build the agent in strict mode to mirror CLI default behavior
     agent = build_sales_qualifier_agent(
-        user_id=sender_number or "unknown", deps=agent_deps, instance=agent_instance
+        user_id=sender_number or "unknown",
+        deps=agent_deps,
+        instance=agent_instance,
+        strict_mode=True,
     )
 
     inbound = InboundMessage(
@@ -177,6 +181,15 @@ async def handle_twilio_whatsapp_webhook(
 
     # Rewrite into multi-message plan
     messages = rewriter.rewrite_message(reply_text, chat_history, enable_rewrite=True)
+    try:
+        plan_preview = [
+            f"{int(m.get('delay_ms', 0))}ms: {str(m.get('text', '')).strip()}"
+            for m in messages or []
+            if isinstance(m, dict)
+        ]
+        logger.info("WhatsApp message plan (%d): %s", len(messages or []), plan_preview)
+    except Exception:
+        pass
 
     # First message is sent synchronously
     first_message = messages[0] if messages else {"text": reply_text, "delay_ms": 0}

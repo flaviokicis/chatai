@@ -104,7 +104,7 @@ export function VerticalBranches({
       {preBranchNodes.length > 0 ? (
         <div className="mb-4">
           <div className="rounded-xl border bg-card p-3">
-            <div className="text-xs font-medium text-muted-foreground mb-2">Global questions</div>
+            <div className="text-xs font-medium text-muted-foreground mb-2">Perguntas globais</div>
             <div className="relative">
               <div className="absolute left-[18px] top-0 bottom-0 w-px bg-border" />
               <div className="space-y-3">

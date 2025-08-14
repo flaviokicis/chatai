@@ -15,8 +15,8 @@ export default function AccountPage() {
     <div className="min-h-screen w-full bg-background">
       <div className="mx-auto max-w-4xl px-4 py-6 md:py-8">
         <PageHeader
-          title="Account Settings"
-          description="Manage your account information"
+          title="Configurações da Conta"
+          description="Gerencie suas informações de conta"
           icon={User}
         />
 
@@ -24,49 +24,49 @@ export default function AccountPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <User className="h-5 w-5" />
-              Personal Information
+              Informações Pessoais
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-2">
               <Label htmlFor="username" className="text-sm font-medium">
-                Username
+                Nome de usuário
               </Label>
               <Input
                 id="username"
-                placeholder="Enter your username"
+                placeholder="Digite seu nome de usuário"
                 defaultValue="jessica_doe"
                 className="w-full"
               />
               <p className="text-xs text-muted-foreground">
-                This is your unique identifier across the platform
+                Este é seu identificador único na plataforma
               </p>
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="email" className="text-sm font-medium flex items-center gap-2">
                 <Mail className="h-4 w-4" />
-                Email Address
+                Endereço de e-mail
               </Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="Enter your email address"
+                placeholder="Digite seu e-mail"
                 defaultValue="jessica@company.com"
                 className="w-full"
               />
               <p className="text-xs text-muted-foreground">
-                We'll use this email for notifications and account recovery
+                Usaremos este e-mail para notificações e recuperação de conta
               </p>
             </div>
 
             <div className="flex gap-3 pt-4">
               <Button className="gap-2">
                 <Save className="h-4 w-4" />
-                Save Changes
+                Salvar alterações
               </Button>
               <Button variant="outline" onClick={() => router.push('/')}>
-                Cancel
+                Cancelar
               </Button>
             </div>
           </CardContent>

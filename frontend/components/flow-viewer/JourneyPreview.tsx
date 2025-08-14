@@ -17,7 +17,7 @@ export function JourneyPreview({ steps, title }: { steps: JourneyStep[]; title?:
       ) : null}
       <div className="rounded-3xl border bg-white shadow-sm p-3">
         <div className="rounded-2xl bg-slate-50 p-3 h-[520px] overflow-y-auto">
-          <div className="text-center text-[10px] text-muted-foreground mb-2">WhatsApp Journey Preview</div>
+          <div className="text-center text-[10px] text-muted-foreground mb-2">Como esta conversa deve ficar no WhatsApp</div>
           <div className="space-y-3">
             {steps.map((s) => (
               <div key={s.id} className="flex w-full">

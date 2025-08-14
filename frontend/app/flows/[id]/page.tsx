@@ -21,7 +21,7 @@ function GraphSkeleton() {
   );
 }
 
-export default async function AgentDetailPage({ params }: { params: Params }) {
+export default async function FlowDetailPage({ params }: { params: Params }) {
   const { id } = await params;
   const flow = await fetchCompiledFlow();
 
@@ -29,8 +29,8 @@ export default async function AgentDetailPage({ params }: { params: Params }) {
     <div className="min-h-screen w-full bg-background">
       <div className="mx-auto max-w-7xl px-4 py-6 md:py-8 space-y-6">
         <div className="flex items-baseline justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">Agente (migrar): {id}</h1>
-          <div className="text-xs text-muted-foreground">Use a página Fluxos para visualizar e editar</div>
+          <h1 className="text-2xl font-semibold tracking-tight">Fluxo: {id}</h1>
+          <div className="text-xs text-muted-foreground">Identificador do fluxo: {flow.id}</div>
         </div>
         <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
           <div className="2xl:col-span-3">

@@ -19,8 +19,16 @@ class SalesQualifierAgent(FlowAgent):
         deps: BaseAgentDeps,
         compiled_flow: object,
         path_compiled: dict[str, object] | None = None,
+        *,
+        strict_mode: bool = False,
     ) -> None:
-        super().__init__(user_id, deps, compiled_flow=compiled_flow, path_flows=path_compiled or {})
+        super().__init__(
+            user_id,
+            deps,
+            compiled_flow=compiled_flow,
+            path_flows=path_compiled or {},
+            strict_mode=strict_mode,
+        )
 
     def _get_path_selection_prompt(self, message_text: str, answers: dict, paths: list[str]) -> str:
         """Sales-specific path selection prompt."""

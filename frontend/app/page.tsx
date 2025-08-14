@@ -1,14 +1,14 @@
 "use client";
 
-import { Bot, Settings, User, FolderOpen } from "lucide-react";
+import { Bot, Settings, User, Globe } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import Link from "next/link";
 
 const shortcuts = [
-  { href: "/project", icon: FolderOpen, label: "Project", description: "Configure your AI training" },
-  { href: "/agents", icon: Bot, label: "Agents", description: "Manage conversation handlers" },
-  { href: "/settings", icon: Settings, label: "Settings", description: "App preferences & config" },
-  { href: "/account", icon: User, label: "Account", description: "Personal information" },
+  { href: "/project", icon: Globe, label: "Configurações Globais", description: "Definições padrão para todos os fluxos" },
+  { href: "/flows", icon: Bot, label: "Fluxos", description: "Gerenciar fluxos e agentes relacionados" },
+  { href: "/settings", icon: Settings, label: "Configurações", description: "Preferências e configuração do app" },
+  { href: "/account", icon: User, label: "Conta", description: "Informações pessoais" },
 ];
 
 export default function Home() {
@@ -22,7 +22,7 @@ export default function Home() {
             </div>
             <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">Inboxed</h1>
           </div>
-          <p className="text-muted-foreground">AI agents for WhatsApp inbox automation</p>
+          <p className="text-muted-foreground">Agentes de IA para automatizar sua caixa de entrada no WhatsApp</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

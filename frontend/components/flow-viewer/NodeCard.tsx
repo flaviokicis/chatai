@@ -1,6 +1,6 @@
 "use client";
 
-import type { PositionedNode } from "./types";
+import type { PositionedNode, QuestionNodeSummary } from "./types";
 import styles from "./styles.module.css";
 
 function KindBadge({ kind }: { kind: string }) {
@@ -11,29 +11,31 @@ function KindBadge({ kind }: { kind: string }) {
 
 export function NodeCard({ node, highlighted, variant = "default" }: { node: PositionedNode; highlighted?: boolean; variant?: "default" | "compact" }) {
   const showMeta = variant === "default";
+  const accent = node.kind === "Question" ? styles.qAccent : node.kind === "Decision" ? styles.dAccent : styles.tAccent;
+  const questionPrompt: string | undefined = node.kind === "Question" ? (node as unknown as QuestionNodeSummary).prompt : undefined;
   return (
-    <div className={`${styles.nodeCard} ${highlighted ? styles.nodeCardActive : ""} ${variant === "compact" ? styles.nodeCardCompact : ""}`}>
+    <div className={`${styles.nodeCard} ${accent} ${highlighted ? styles.nodeCardActive : ""} ${variant === "compact" ? styles.nodeCardCompact : ""}`}>
       <div className={styles.nodeHeader}>
         <div className={variant === "compact" ? styles.nodeTitle : "font-medium truncate"}>
-          {node.kind === "Question" && (node as any).prompt ? (node as any).prompt : node.label ?? node.id}
+          {node.kind === "Question" && questionPrompt ? questionPrompt : node.label ?? node.id}
         </div>
         <KindBadge kind={node.kind} />
       </div>
       {showMeta ? (
         <div className={styles.meta}>
-          <div>ID: {node.id}</div>
-          {node.isEntry ? <div>Entry</div> : null}
+          <div>Código: {node.id}</div>
+          {node.isEntry ? <div>Início</div> : null}
         </div>
       ) : null}
-      {variant === "default" && node.kind === "Question" && (node as any).prompt ? (
+      {variant === "default" && node.kind === "Question" && questionPrompt ? (
         <div className={styles.prompt}>
-          <div className={styles.promptTitle}>Prompt</div>
-          <div className={styles.promptBody}>{(node as any).prompt}</div>
+          <div className={styles.promptTitle}>Pergunta</div>
+          <div className={styles.promptBody}>{questionPrompt}</div>
         </div>
       ) : null}
       {variant === "default" ? (
       <div className={styles.outgoing}>
-        <div className={styles.outgoingTitle}>Outgoing</div>
+        <div className={styles.outgoingTitle}>Saídas</div>
         <ul className={styles.outgoingList}>
           {node.outgoing.map((e, i) => (
             <li key={`${e.source}->${e.target}#${e.priority ?? 0}#${i}`}>

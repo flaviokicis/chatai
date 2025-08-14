@@ -5,12 +5,16 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from app.core.agent_base import Agent
-from app.core.messages import AgentResult, OutboundMessage
+from app.core.messages import AgentResult, InboundMessage, OutboundMessage
+from app.flow_core.runner import FlowTurnRunner
+from app.flow_core.state import FlowContext
+from app.flow_core.tool_schemas import SelectFlowPath
 
 if TYPE_CHECKING:  # pragma: no cover - import-time only for typing
     from app.core.llm import LLMClient
     from app.core.state import ConversationStore
     from app.core.tools import HumanHandoffTool
+    from app.flow_core.compiler import CompiledFlow
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -32,7 +36,9 @@ class BaseAgent(Agent):
     def _escalate(self, reason: str, summary: dict[str, Any]) -> AgentResult:
         self.deps.handoff.escalate(self.user_id, reason, summary)
         return AgentResult(
-            outbound=OutboundMessage(text="Transferring you to a human for further assistance."),
+            outbound=OutboundMessage(
+                text="Transferindo você para um atendente humano para mais assistência."
+            ),
             handoff={"reason": reason, "summary": summary},
             state_diff={},
         )
@@ -52,14 +58,16 @@ class FlowAgent(BaseAgent):
         user_id: str,
         deps: BaseAgentDeps,
         *,
-        compiled_flow,
-        path_flows: dict[str, object] | None = None,
+        compiled_flow: CompiledFlow,
+        path_flows: dict[str, CompiledFlow] | None = None,
+        strict_mode: bool = False,
     ) -> None:  # type: ignore[no-untyped-def]
         super().__init__(user_id, deps)
         self._compiled = compiled_flow
         self._path_flows = path_flows or {}
+        self._strict_mode = bool(strict_mode)
 
-    def select_flow(self, stored_state: dict, message_text: str) -> object:
+    def select_flow(self, stored_state: dict, message_text: str) -> CompiledFlow:
         """Generic multi-path flow selection. Override to customize path selection logic."""
         # If no path flows available, use main flow
         if not self._path_flows:
@@ -85,8 +93,6 @@ class FlowAgent(BaseAgent):
 
         # Get path selection prompt (can be overridden by subclasses)
         prompt = self._get_path_selection_prompt(message_text, answers, paths)
-
-        from app.flow_core.tool_schemas import SelectFlowPath
 
         result = self.deps.llm.extract(prompt, [SelectFlowPath])
         chosen = result.get("path") if isinstance(result, dict) else None
@@ -131,127 +137,77 @@ class FlowAgent(BaseAgent):
         stored.update(agent_state)
         return stored
 
-    def handle(self, message):  # type: ignore[no-untyped-def]
-        from app.core.messages import AgentResult, OutboundMessage
-        from app.flow_core.engine import LLMFlowEngine
-        from app.flow_core.state import FlowContext
-
+    def handle(self, message: InboundMessage) -> AgentResult:  # type: ignore[no-untyped-def]
         # Load state
         stored = self.deps.store.load(self.user_id, self.agent_type) or {}
         agent_state = self.load_agent_state(stored)
 
-        # Let agent select which flow to use
+        # Select flow (may use existing answers/state)
         selected_flow = self.select_flow(stored, message.text or "")
 
-        # Create engine with selected flow
-        engine = LLMFlowEngine(selected_flow, self.deps.llm, strict_mode=False)
+        # Initialize unified runner (mirrors CLI behavior)
+        runner = FlowTurnRunner(selected_flow, self.deps.llm, strict_mode=self._strict_mode)
 
         # Load or initialize context
         if "flow_context" in stored:
             ctx = FlowContext.from_dict(stored["flow_context"])
         else:
-            ctx = engine.initialize_context()
+            ctx = runner.initialize_context()
             # Load legacy answers if they exist
             answers = dict(stored.get("answers", {}))
             ctx.answers.update(answers)
 
-        # Process with engine
-        response = engine.process(ctx, message.text or "")
+        # Process one turn
+        result = runner.process_turn(ctx, message.text or None)
 
-        if response.kind == "terminal":
-            return self._escalate("checklist_complete", {"answers": ctx.answers})
+        # Handle terminal
+        if result.terminal:
+            return self._escalate("checklist_complete", {"answers": result.ctx.answers})
 
-        # If we got a prompt and have a user message, and we're expecting an answer, use LLM to extract it
-        # Only extract if this isn't the first interaction (when we're just asking the initial question)
-        assistant_messages = [h for h in ctx.history if h.role == "assistant"]
-        is_first_interaction = len(assistant_messages) == 0
-        should_extract = (
-            response.kind == "prompt"
-            and message.text
-            and ctx.pending_field
-            and not is_first_interaction
-        )
+        # Handle escalation
+        if result.escalate:
+            return self._escalate("user_requested_handoff", {"answers": result.ctx.answers})
 
-        if should_extract:
-            from app.flow_core.llm_responder import LLMFlowResponder
+        # After applying updates, re-evaluate path selection if any answers changed
+        if result.answers_diff:
+            updated_stored = {
+                "flow_context": result.ctx.to_dict(),
+                "answers": result.ctx.answers,
+            }
+            updated_stored = self.save_agent_state(updated_stored, agent_state)
+            new_flow = self.select_flow(updated_stored, message.text or "")
+            agent_state = self.load_agent_state(updated_stored)
 
-            # Use LLM responder to extract answer
-            extra_tools = self.get_global_tools() + self.get_agent_tools()
-            responder = LLMFlowResponder(self.deps.llm)
-            llm_response = responder.respond(
-                response.message or "",
-                ctx.pending_field,
-                ctx,
-                message.text,
-                allowed_values=None,  # TODO: extract from node if needed
-                extra_tools=extra_tools or None,
-                agent_custom_instructions=self.get_agent_custom_instructions(),
-            )
+            if new_flow != selected_flow:
+                # Switch to new flow while preserving answers/history
+                new_runner = FlowTurnRunner(new_flow, self.deps.llm, strict_mode=self._strict_mode)
+                old_answers = result.ctx.answers.copy()
+                old_history = result.ctx.history.copy()
+                ctx2 = new_runner.initialize_context()
+                ctx2.answers.update(old_answers)
+                ctx2.history = old_history
+                # Produce next prompt in the new path (no new user input)
+                result = new_runner.process_turn(ctx2, None)
+                # Replace ctx for persistence below
+                ctx = ctx2
+            else:
+                ctx = result.ctx
+        else:
+            ctx = result.ctx
 
-            # Handle escalation or completion
-            if llm_response.escalate:
-                return self._escalate("user_requested_handoff", {"answers": ctx.answers})
-
-            # Apply updates to context
-            for k, v in llm_response.updates.items():
-                ctx.answers[k] = v
-
-            # Forward responder outcome to engine; let engine handle all tools uniformly
-            engine_event: dict[str, object] = {"tool_name": llm_response.tool_name or ""}
-            if ctx.pending_field and ctx.pending_field in llm_response.updates:
-                engine_event["answer"] = llm_response.updates[ctx.pending_field]
-            # Do not pass tool-crafted messages; we'll rewrite the final outbound later
-            if llm_response.metadata:
-                engine_event.update(llm_response.metadata)
-
-            # Process the tool event with engine (without tool ack messages)
-            old_node_id = ctx.current_node_id
-            response = engine.process(ctx, message.text, engine_event)
-
-            # Check if we need to switch flows after the answer update
-            if llm_response.updates:
-                updated_stored = {
-                    "flow_context": ctx.to_dict(),
-                    "answers": ctx.answers,
-                }
-                updated_stored = self.save_agent_state(updated_stored, agent_state)
-                new_flow = self.select_flow(updated_stored, message.text or "")
-                agent_state = self.load_agent_state(updated_stored)
-
-                # If flow changed, switch to new flow and re-process
-                flow_switched = False
-                if new_flow != selected_flow:
-                    flow_switched = True
-                    engine = LLMFlowEngine(new_flow, self.deps.llm, strict_mode=False)
-                    # Reset context for new flow but keep answers and history
-                    old_answers = ctx.answers.copy()
-                    old_history = ctx.history.copy()
-                    ctx = engine.initialize_context()
-                    ctx.answers.update(old_answers)
-                    ctx.history = old_history
-                    # Process from the beginning of the new flow
-                    response = engine.process(ctx, None)
-
-                # Check if the new flow resulted in terminal state
-                if response.kind == "terminal":
-                    return self._escalate("checklist_complete", {"answers": ctx.answers})
-
-                # Let the engine handle message combination - it already includes ack_message
-        # If this is the first interaction, add the assistant's response to history
-        # so the next interaction knows it's not the first one
-        elif response.kind == "prompt" and response.message:
-            ctx.add_turn("assistant", response.message, response.node_id)
-
-        # Save state
-        updated_stored = {
+        # Persist state
+        stored_out = {
             "flow_context": ctx.to_dict(),
-            "answers": ctx.answers,  # Keep for backward compatibility
+            "answers": ctx.answers,
         }
-        updated_stored = self.save_agent_state(updated_stored, agent_state)
-        self.deps.store.save(self.user_id, self.agent_type, updated_stored)
+        stored_out = self.save_agent_state(stored_out, agent_state)
+        self.deps.store.save(self.user_id, self.agent_type, stored_out)
 
+        # Return outbound message
         return AgentResult(
-            outbound=OutboundMessage(text=response.message or ""), handoff=None, state_diff={}
+            outbound=OutboundMessage(text=result.assistant_message or ""),
+            handoff=None,
+            state_diff={},
         )
 
     # ---- Tool configuration hooks ----

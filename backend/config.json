@@ -15,9 +15,9 @@
             "params": {
               "question_graph": {
                 "global": [
-                  { "key": "intention", "prompt": "What are you looking to accomplish today?", "priority": 10 },
-                  { "key": "budget", "prompt": "Do you have a budget range in mind?", "priority": 90 },
-                  { "key": "timeframe", "prompt": "What is your ideal timeline?", "priority": 100 }
+                  { "key": "intention", "prompt": "O que você está buscando realizar hoje?", "priority": 10 },
+                  { "key": "budget", "prompt": "Você tem uma faixa de orçamento em mente?", "priority": 90 },
+                  { "key": "timeframe", "prompt": "Qual é o seu prazo ideal?", "priority": 100 }
                 ],
                 "paths": {
                   "tennis_court": {
@@ -26,9 +26,9 @@
                       { "type": "regex", "pattern": "(tennis|court)\\b" }
                     ],
                     "questions": [
-                      { "key": "court_type", "prompt": "Is it indoor or outdoor?", "priority": 20 },
-                      { "key": "dimensions", "prompt": "Do you know the court dimensions?", "priority": 30 },
-                      { "key": "lighting_level", "prompt": "Target lighting level (lux)?", "priority": 40 }
+                      { "key": "court_type", "prompt": "É em ambiente interno (indoor) ou externo (outdoor)?", "priority": 20 },
+                      { "key": "dimensions", "prompt": "Você sabe as dimensões da quadra?", "priority": 30 },
+                      { "key": "lighting_level", "prompt": "Nível de iluminação desejado (lux)?", "priority": 40 }
                     ]
                   },
                   "soccer_court": {
@@ -36,9 +36,9 @@
                       { "type": "keyword", "any": ["soccer", "football", "pitch"] }
                     ],
                     "questions": [
-                      { "key": "field_size", "prompt": "Approximate field size?", "priority": 20 },
-                      { "key": "surface", "prompt": "Surface type (grass/turf)?", "priority": 30 },
-                      { "key": "lighting_level", "prompt": "Target lighting level (lux)?", "priority": 40 }
+                      { "key": "field_size", "prompt": "Tamanho aproximado do campo?", "priority": 20 },
+                      { "key": "surface", "prompt": "Tipo de superfície (grama/gramado sintético)?", "priority": 30 },
+                      { "key": "lighting_level", "prompt": "Nível de iluminação desejado (lux)?", "priority": 40 }
                     ]
                   }
                 },

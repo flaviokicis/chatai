@@ -89,69 +89,50 @@ def run_cli() -> None:
     # Initialize context
     ctx = runner.initialize_context()
 
-    # Flag to track if we need to get initial prompt
-    need_prompt = True
-
+    # Start like WhatsApp: wait for first user input; do not auto-prompt
     while True:
-        # Get prompt if needed (first iteration or after processing user input)
-        if need_prompt:
-            result = runner.process_turn(ctx)
-
-            if result.terminal:
-                print(f"[terminal] {result.assistant_message}")
-                break
-
-            if result.escalate:
-                print(f"[escalate] {result.assistant_message}")
-                break
-
-            # Show the prompt using shared rewriter system
-            display_text = result.assistant_message or ""
-            if display_text:
-                # Build chat history from flow context
-                chat_history = rewriter.build_chat_history(
-                    flow_context_history=getattr(ctx, "history", None)
-                )
-
-                # Rewrite into multi-message format
-                messages = rewriter.rewrite_message(
-                    display_text, chat_history, enable_rewrite=not args.no_rewrite
-                )
-
-                # Display with debug info
-                debug_info = None
-                if args.debug:
-                    debug_info = {
-                        "node_id": ctx.current_node_id,
-                        "pending_field": getattr(ctx, "pending_field", None),
-                        "answers_count": len(getattr(ctx, "answers", {})),
-                        "turn_count": getattr(ctx, "turn_count", 0),
-                        "message_count": len(messages),
-                    }
-
-                cli_adapter.display_messages(
-                    messages, prefix=f"[prompt:{ctx.current_node_id}] ", debug_info=debug_info
-                )
-
-        # Get user input
         user = input("> ").strip()
         if user == ":quit":
             break
-
-        # Process user response
         result = runner.process_turn(ctx, user)
 
-        # Check for terminal/escalate after user response
+        # Handle terminal/escalate
         if result.terminal:
-            print("[terminal] Flow complete")
+            print(f"[terminal] {result.assistant_message}")
             break
-
         if result.escalate:
-            print("[escalate] Transferring to human")
+            print(f"[escalate] {result.assistant_message}")
             break
 
-        # After processing user input, we need to get the next prompt
-        need_prompt = True
+        # Display assistant message via shared rewriter system
+        display_text = result.assistant_message or ""
+        if display_text:
+            # Build chat history from flow context
+            chat_history = rewriter.build_chat_history(
+                flow_context_history=getattr(ctx, "history", None)
+            )
+
+            # Rewrite into multi-message format
+            messages = rewriter.rewrite_message(
+                display_text, chat_history, enable_rewrite=not args.no_rewrite
+            )
+
+            # Display with debug info
+            debug_info = None
+            if args.debug:
+                debug_info = {
+                    "node_id": ctx.current_node_id,
+                    "pending_field": getattr(ctx, "pending_field", None),
+                    "answers_count": len(getattr(ctx, "answers", {})),
+                    "turn_count": getattr(ctx, "turn_count", 0),
+                    "message_count": len(messages),
+                }
+
+            cli_adapter.display_messages(
+                messages, prefix=f"[prompt:{ctx.current_node_id}] ", debug_info=debug_info
+            )
+
+        # Next loop waits for next user input (no auto-prompt)
 
 
 if __name__ == "__main__":

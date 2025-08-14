@@ -41,5 +41,11 @@ pnpm dev
 ### Product notes
 
 - We avoid hardcoding customer specifics; all agent behavior is fed by configurable graphs and prompts.
+- Whenever choosing between hardcoded string heuristics (ifs/switch on phrases) and an LLM instruction, prefer using the LLM to decide behavior.
 - WhatsApp is the initial channel. Additional channels (e.g., Instagram) fit the same configuration surface.
 - The demo home in the frontend shows how a logged-in operator would view inboxes, conversations, and agent status using our brand colors.
+
+### Language
+
+- User-facing content is Portuguese (Brazil). LLM prompts that produce messages visible to end users, plus UI labels, are in PT-BR. Internal/decision-making prompts can remain in English.
+- Example flows/configs updated with PT-BR prompts: `backend/config.json`, `backend/config.local.json`, and `backend/playground/flow_example.json`.

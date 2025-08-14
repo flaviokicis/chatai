@@ -1,0 +1,23 @@
+{
+  "schema_version": "v2",
+  "id": "flow.agendamento_consulta",
+  "entry": "q.first_visit",
+  "nodes": [
+    { "id": "q.first_visit", "kind": "Question", "key": "first_visit", "prompt": "Seria pra primeira consulta?", "priority": 10 },
+    { "id": "q.payer_type", "kind": "Question", "key": "payer_type", "prompt": "Seria particular ou por plano?", "priority": 20 },
+    { "id": "d.route_payer_type", "kind": "Decision", "label": "Roteamento por forma de pagamento", "decision_type": "automatic" },
+    { "id": "q.plan_name", "kind": "Question", "key": "plan_name", "prompt": "Qual seria o plano?", "priority": 30 },
+    { "id": "q.plan_info", "kind": "Question", "key": "plan_info", "prompt": "Quais as informacoes do plano?", "priority": 40 },
+    { "id": "t.done", "kind": "Terminal", "reason": "Coleta de dados concluída" }
+  ],
+  "edges": [
+    { "source": "q.first_visit", "target": "q.payer_type", "priority": 0 },
+    { "source": "q.payer_type", "target": "d.route_payer_type", "priority": 0 },
+    { "source": "d.route_payer_type", "target": "q.plan_name", "guard": { "fn": "answers_equals", "args": { "key": "payer_type", "value": "plano" } }, "priority": 1, "condition_description": "Caminho: atendimento por plano" },
+    { "source": "d.route_payer_type", "target": "t.done", "guard": { "fn": "answers_equals", "args": { "key": "payer_type", "value": "particular" } }, "priority": 2, "condition_description": "Caminho: atendimento particular" },
+    { "source": "q.plan_name", "target": "q.plan_info", "priority": 0 },
+    { "source": "q.plan_info", "target": "t.done", "priority": 0 }
+  ]
+}
+
+

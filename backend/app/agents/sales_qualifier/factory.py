@@ -40,9 +40,15 @@ def _build_paths_and_settings(params: dict[str, Any]) -> tuple[dict[str, object]
 
 
 def build_sales_qualifier_agent(
-    user_id: str, deps: BaseAgentDeps, instance: AgentInstanceConfig
+    user_id: str, deps: BaseAgentDeps, instance: AgentInstanceConfig, *, strict_mode: bool = False
 ) -> SalesQualifierAgent:
     params = instance.params or {}
     compiled = build_compiled_flow(params, flow_id=instance.instance_id or "sales")
     path_compiled, _unused = _build_paths_and_settings(params)
-    return SalesQualifierAgent(user_id, deps, compiled_flow=compiled, path_compiled=path_compiled)
+    return SalesQualifierAgent(
+        user_id,
+        deps,
+        compiled_flow=compiled,
+        path_compiled=path_compiled,
+        strict_mode=strict_mode,
+    )

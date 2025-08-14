@@ -5,7 +5,6 @@ import { FlowViewer } from "./FlowViewer";
 import type { CompiledFlow, EdgeKey, FlowEdgeSummary } from "./types";
 import { JourneyPreview, type JourneyStep } from "./JourneyPreview";
 import { NodeLegend } from "./NodeLegend";
-import { VerticalBranches } from "./VerticalBranches";
 
 type BranchOption = { targetId: string; label: string };
 
@@ -108,18 +107,32 @@ export function FlowExperience({ flow }: { flow: CompiledFlow }) {
   return (
     <div className="space-y-6">
       <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-4 md:p-6 space-y-4">
-        <NodeLegend />
-        <VerticalBranches
-          flow={flow}
-          selectedBranchId={selection[firstDecision ?? ""] ?? null}
-          onSelect={(id) => {
-            if (!firstDecision) return;
-            setSelection({ [firstDecision]: id });
-          }}
-        />
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <NodeLegend />
+          {branchOptions.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <div className="text-xs text-muted-foreground">Caminho destacado:</div>
+              <div className="flex gap-1">
+                {branchOptions.map((opt) => (
+                  <button
+                    key={opt.targetId}
+                    type="button"
+                    onClick={() => firstDecision && setSelection({ [firstDecision]: opt.targetId })}
+                    className={`px-2.5 py-1.5 rounded-md border text-xs ${selection[firstDecision ?? ""] === opt.targetId ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 hover:bg-muted border-border"}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="w-full overflow-x-auto">
+          <FlowViewer flow={flow} highlightedNodes={highlightedNodes} highlightedEdges={highlightedEdges} />
+        </div>
       </div>
       <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-4 md:p-6">
-        <JourneyPreview steps={steps} title="Journey preview" />
+        <JourneyPreview steps={steps} title="Visualização do fluxo no WhatsApp" />
       </div>
     </div>
   );

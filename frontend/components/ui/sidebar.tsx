@@ -1,16 +1,16 @@
 "use client";
 
-import { Bot, Home, User, FolderOpen, Settings } from "lucide-react";
+import { Bot, Home, User, Globe, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const sidebarItems = [
-  { href: "/", icon: Home, label: "Home" },
-  { href: "/account", icon: User, label: "Account" },
-  { href: "/project", icon: FolderOpen, label: "Project" },
-  { href: "/agents", icon: Bot, label: "Agents" },
-  { href: "/settings", icon: Settings, label: "Settings" },
+  { href: "/", icon: Home, label: "Início" },
+  { href: "/account", icon: User, label: "Conta" },
+  { href: "/project", icon: Globe, label: "Configurações Globais" },
+  { href: "/flows", icon: Bot, label: "Fluxos" },
+  { href: "/settings", icon: Settings, label: "Configurações" },
 ];
 
 export function Sidebar() {
