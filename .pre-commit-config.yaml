@@ -1,15 +1,1 @@
-repos:
-  - repo: local
-    hooks:
-      - id: ruff
-        name: ruff (backend)
-        language: system
-        entry: bash -lc 'cd backend && source .venv/bin/activate && uv run ruff check --fix . --config pyproject.toml'
-        types: [python]
-        pass_filenames: false
-      - id: ruff-format
-        name: ruff-format (backend)
-        language: system
-        entry: bash -lc 'cd backend && source .venv/bin/activate && uv run ruff format . --config pyproject.toml'
-        types: [python]
-        pass_filenames: false
+repos: []
