@@ -85,11 +85,6 @@ export interface FlowLayoutColumn {
   nodes: PositionedNode[];
 }
 
-export interface EdgeSegment {
-  from: { x: number; y: number };
-  to: { x: number; y: number };
-}
-
 export interface MeasuredNodeRect {
   id: string;
   x: number;
@@ -100,11 +95,6 @@ export interface MeasuredNodeRect {
 
 // Utility types for rendering/highlighting
 export type EdgeKey = `${string}->${string}`;
-export interface EdgeStyle {
-  color?: string;
-  width?: number;
-  opacity?: number;
-  dashed?: boolean;
-}
+// Reserved for future edge styling extensions
 
 

@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     redis_port: int | None = Field(default=None, alias="REDIS_PORT")
     redis_db: int | None = Field(default=None, alias="REDIS_DB")
     redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
+    # Database
+    database_url: str | None = Field(default=None, alias="DATABASE_URL")
     # Optional debug flag via environment (DEBUG=true) in addition to dev_config.py
     debug: bool = Field(default=False, alias="DEBUG")
 
@@ -49,6 +51,16 @@ class Settings(BaseSettings):
         password = (self.redis_password or "").strip()
         auth = f":{password}@" if password else ""
         return f"redis://{auth}{host}:{port}/{db}"
+
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        """Return SQLAlchemy-compatible database URL, with a sensible default for local dev.
+
+        Default: postgresql+psycopg://postgres:postgres@localhost:5432/chatai
+        """
+        if self.database_url and self.database_url.strip():
+            return self.database_url
+        return "postgresql+psycopg://postgres:postgres@localhost:5432/chatai"
 
 
 @lru_cache(maxsize=1)

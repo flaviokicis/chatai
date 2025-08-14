@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import logging
-import re
-import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -218,8 +216,25 @@ class LLMFlowEngine:
                     metadata={"reason": (event or {}).get("reason", "unknown")},
                 )
 
-            # Optional question - skip and continue the flow
-            ctx.get_node_state(node.id).status = NodeStatus.SKIPPED
+            # Optional question - defer this question and prefer advancing to a decision node if one is next
+            # Do NOT mark as skipped; mark as deferred so we can revisit later if needed
+            node_state = ctx.get_node_state(node.id)
+            node_state.metadata["deferred"] = True
+
+            # If there is a Decision node directly reachable from here, jump to it
+            try:
+                edges = self._flow.edges_from.get(node.id, [])
+                for e in edges:
+                    target = self._flow.nodes.get(getattr(e, "target", ""))
+                    # Defer type checks to name to avoid tight coupling
+                    if target and target.__class__.__name__ == "DecisionNode":
+                        ctx.current_node_id = getattr(target, "id", None) or e.target
+                        # Let the normal processing generate the decision prompt/options
+                        return self.process(ctx, None, None)
+            except Exception:
+                pass
+
+            # Otherwise, fall back to default advancement
             return self._advance_from_node(ctx, node, event)
 
         if tool_name == "SkipQuestion":
@@ -407,7 +422,8 @@ class LLMFlowEngine:
                 label = str(getattr(target_node, "id", "opção"))
             else:
                 label = "opção"
-            key = self._slugify_path(label)
+            # Prefer the concrete target node id as the canonical key
+            key = str(edge.target)
             options.append({"key": key, "label": label, "edge": edge})
 
         ctx.available_paths = [opt["key"] for opt in options]
@@ -425,6 +441,30 @@ class LLMFlowEngine:
 
         if selected_edge:
             ctx.current_node_id = selected_edge.target
+            # If we deferred a previous question that fed into this decision, backfill a plausible intent
+            try:
+                # Find last question node marked as deferred without answer
+                for state in ctx.node_states.values():
+                    if state.metadata.get("deferred") and state.status != NodeStatus.COMPLETED:
+                        qnode = self._flow.nodes.get(state.node_id)
+                        if qnode and getattr(qnode, "key", None) and qnode.key not in ctx.answers:
+                            # Use the selected path's label as a concise intent if it exists
+                            label = None
+                            try:
+                                # Resolve label from options list by matching edge
+                                for opt in options:
+                                    if opt.get("edge") is selected_edge:
+                                        label = str(opt.get("label") or "").strip()
+                                        break
+                            except Exception:
+                                label = None
+                            if isinstance(label, str) and label:
+                                ctx.answers[qnode.key] = label
+                                state.status = NodeStatus.COMPLETED
+                                state.metadata.pop("deferred", None)
+                        break
+            except Exception:
+                pass
             return self.process(ctx, None, None)
 
         if len(valid_edges) == 1:
@@ -687,25 +727,18 @@ class LLMFlowEngine:
         return None
 
     # ---- Helpers for decision routing ----
-    def _slugify_path(self, text: str) -> str:
-        # Normalize accents
-        norm = unicodedata.normalize("NFKD", text)
-        ascii_text = "".join(ch for ch in norm if not unicodedata.combining(ch))
-        t = ascii_text.lower()
-        t = re.sub(r"[^a-z0-9]+", "_", t)
-        t = re.sub(r"_+", "_", t).strip("_")
-        return t or "opcao"
-
     def _match_path_key(self, candidate: str, available: list[str]) -> str | None:
         """Match a free-text candidate to one of the available path keys."""
         if not isinstance(candidate, str) or not available:
             return None
-        c = self._slugify_path(candidate)
-        if c in available:
-            return c
-        # Try fuzzy contains
+        cand = candidate.strip().lower()
+        if cand in (a.lower() for a in available):
+            # Exact (case-insensitive) match
+            return next(a for a in available if a.lower() == cand)
+        # Try substring match case-insensitively
         for a in available:
-            if c in a or a in c:
+            al = a.lower()
+            if cand in al or al in cand:
                 return a
         return None
 
@@ -738,21 +771,20 @@ class LLMFlowEngine:
         cand = (candidate or "").strip()
         if not cand:
             return None
-        cand_slug = self._slugify_path(cand)
-
-        # 1) Match by key
+        # 1) Match by key (node id canonical)
         for opt in options:
-            if cand_slug == str(opt.get("key", "")):
+            if cand == str(opt.get("key", "")):
                 return opt.get("edge")
 
-        # 2) Match by label
+        # 2) Match by label (case-insensitive or contains)
+        cand_lower = cand.lower()
         for opt in options:
             label = str(opt.get("label", ""))
-            label_slug = self._slugify_path(label)
-            if cand_slug == label_slug or cand_slug in label_slug:
+            lab_lower = label.lower()
+            if cand_lower == lab_lower or cand_lower in lab_lower:
                 return opt.get("edge")
 
-        # 3) Match by target node id
+        # 3) Match by target node id (exact)
         for opt in options:
             edge = opt.get("edge")
             try:

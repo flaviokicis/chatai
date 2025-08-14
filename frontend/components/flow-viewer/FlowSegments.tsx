@@ -1,19 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import type { CompiledFlow, FlowEdgeSummary } from "./types";
+import type { CompiledFlow } from "./types";
 import { NodeCard } from "./NodeCard";
-
-function pickLabel(edge: FlowEdgeSummary, nodes: CompiledFlow["nodes"]): string {
-  if (edge.label) return edge.label;
-  if (edge.condition_description) return edge.condition_description;
-  const tgt = nodes[edge.target];
-  return tgt?.label ?? edge.target;
-}
-
-function sortedOutgoing(flow: CompiledFlow, id: string): FlowEdgeSummary[] {
-  return (flow.edges_from[id] ?? []).slice().sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
-}
+import { pickLabel, sortedOutgoing } from "./helpers";
 
 function collectLinearPath(flow: CompiledFlow, startId: string, max = 200): string[] {
   const result: string[] = [];
@@ -138,7 +128,16 @@ export function FlowSegments({
           );
         }
         // Branch segment
-        const gridCols = `grid-cols-${Math.max(1, seg.branches.length)}`;
+        const colCount = Math.max(1, seg.branches.length);
+        const gridCols = colCount === 1
+          ? "grid-cols-1"
+          : colCount === 2
+          ? "grid-cols-2"
+          : colCount === 3
+          ? "grid-cols-3"
+          : colCount === 4
+          ? "grid-cols-4"
+          : "grid-cols-5";
         return (
           <div key={`b-${seg.decisionId}-${idx}`} className={`grid ${gridCols} gap-4 min-w-[720px] xl:min-w-0`}>
             {seg.branches.map((b) => (

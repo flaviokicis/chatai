@@ -1,4 +1,3 @@
-import { Suspense } from "react";
 import { SubflowSection } from "@/components/flow-viewer/SubflowSection";
 import type { CompiledFlow } from "@/components/flow-viewer/types";
 import { FlowExperience } from "@/components/flow-viewer/FlowExperience";
@@ -15,12 +14,6 @@ async function fetchCompiledFlow(): Promise<CompiledFlow> {
   return (await res.json()) as CompiledFlow;
 }
 
-function GraphSkeleton() {
-  return (
-    <div className="animate-pulse text-sm text-muted-foreground">Carregando fluxo…</div>
-  );
-}
-
 export default async function FlowDetailPage({ params }: { params: Params }) {
   const { id } = await params;
   const flow = await fetchCompiledFlow();
@@ -34,9 +27,7 @@ export default async function FlowDetailPage({ params }: { params: Params }) {
         </div>
         <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
           <div className="2xl:col-span-3">
-            <Suspense fallback={<GraphSkeleton />}>
-              <FlowExperience flow={flow} />
-            </Suspense>
+            <FlowExperience flow={flow} />
           </div>
           <div>
             <FlowEditorChat />

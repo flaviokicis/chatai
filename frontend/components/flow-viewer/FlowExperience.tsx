@@ -1,21 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-// Graph viewer not used in segmented view
-import type { CompiledFlow, EdgeKey, FlowEdgeSummary } from "./types";
+import type { CompiledFlow, FlowEdgeSummary } from "./types";
 import { JourneyPreview, type JourneyStep } from "./JourneyPreview";
 import { NodeLegend } from "./NodeLegend";
-// import { VerticalBranches } from "./VerticalBranches";
 import { FlowSegments } from "./FlowSegments";
+import { pickLabel, sortedOutgoing } from "./helpers";
 
 type BranchOption = { targetId: string; label: string };
-
-function pickLabel(edge: FlowEdgeSummary, nodes: CompiledFlow["nodes"]): string {
-  if (edge.label) return edge.label;
-  if (edge.condition_description) return edge.condition_description;
-  const tgt = nodes[edge.target];
-  return tgt?.label ?? edge.target;
-}
 
 function findFirstBranchDecision(flow: CompiledFlow): string | null {
   const queue: string[] = [flow.entry];
@@ -33,20 +25,15 @@ function findFirstBranchDecision(flow: CompiledFlow): string | null {
   return null;
 }
 
-function computePath(
-  flow: CompiledFlow,
-  branchSelection: Record<string, string>,
-  maxSteps = 200
-): { nodes: string[]; edges: EdgeKey[] } {
-  const pathNodes: string[] = [];
-  const pathEdges: EdgeKey[] = [];
+function computePath(flow: CompiledFlow, branchSelection: Record<string, string>, maxSteps = 200): string[] {
+  const nodes: string[] = [];
   let current = flow.entry;
   let steps = 0;
   const visited = new Set<string>();
   while (current && steps < maxSteps) {
-    pathNodes.push(current);
+    nodes.push(current);
     visited.add(current);
-    const outs = (flow.edges_from[current] ?? []).slice().sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+    const outs = sortedOutgoing(flow, current);
     if (outs.length === 0) break;
     let chosen: FlowEdgeSummary | undefined;
     if (flow.nodes[current]?.kind === "Decision" && outs.length > 1) {
@@ -56,12 +43,11 @@ function computePath(
       chosen = outs[0];
     }
     if (!chosen) break;
-    pathEdges.push(`${chosen.source}->${chosen.target}` as EdgeKey);
     current = chosen.target;
     steps += 1;
     if (visited.has(current) && steps > 2) break; // guard against cycles in preview
   }
-  return { nodes: pathNodes, edges: pathEdges };
+  return nodes;
 }
 
 function stepsFromNodes(flow: CompiledFlow, nodeIds: string[]): JourneyStep[] {
@@ -82,7 +68,7 @@ export function FlowExperience({ flow }: { flow: CompiledFlow }) {
   const firstDecision = useMemo(() => findFirstBranchDecision(flow), [flow]);
   const branchOptions: BranchOption[] = useMemo(() => {
     if (!firstDecision) return [];
-    const outs = (flow.edges_from[firstDecision] ?? []).slice().sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+    const outs = sortedOutgoing(flow, firstDecision);
     return outs.map((e) => ({ targetId: e.target, label: pickLabel(e, flow.nodes) }));
   }, [firstDecision, flow]);
 
@@ -98,12 +84,9 @@ export function FlowExperience({ flow }: { flow: CompiledFlow }) {
     }
   }, [firstDecision, branchOptions, selection]);
 
-  const { nodes: pathNodes } = useMemo(
-    () => computePath(flow, selection),
-    [flow, selection]
-  );
+  const pathNodes = useMemo(() => computePath(flow, selection), [flow, selection]);
 
-  const steps = useMemo(() => stepsFromNodes(flow, pathNodes.filter((id) => flow.nodes[id]?.kind !== "Decision")), [flow, pathNodes]);
+  const steps = useMemo(() => stepsFromNodes(flow, pathNodes), [flow, pathNodes]);
 
   return (
     <div className="space-y-6">

@@ -92,31 +92,32 @@ def rewrite_whatsapp_multi(
     history_block = "\n".join(history_lines[-200:])  # cap to keep prompt bounded
 
     instruction = (
-        "Papel: você é uma recepcionista calorosa e amigável no WhatsApp.\n"
-        "Tarefa: reescreva a resposta do assistente em mensagens curtas e naturais.\n"
-        "Você decide quantas mensagens enviar (uma é ok; muitas vezes duas é ótimo).\n\n"
-        "RESTRIÇÕES CRÍTICAS (obrigatórias):\n"
-        "- Preserve o significado original EXATAMENTE. Não mude o tópico nem adicione detalhes.\n"
-        "- Se o original incluir opções/entidades/unidades/números, reproduza-os AO PÉ DA LETRA (mesmas palavras, mesma ordem).\n"
-        "- Não reescreva perguntas em outras palavras. Se o texto for uma pergunta, mantenha o texto EXATO da pergunta.\n"
-        "- Apenas ajuste o tom e, se fizer sentido, divida em bolhas (sem gerar perguntas adicionais).\n\n"
-        "- Não introduza palavras como 'revisitar' ou 'Vamos revisitar' a menos que já apareçam no texto original.\n\n"
+        "Papel: você é uma assistente virtual de IA brasileira, calorosa e amigável no WhatsApp.\n"
+        "Tarefa: reescreva a resposta do assistente em mensagens curtas e naturais, soando como uma pessoa de verdade.\n"
+        "Você decide quantas mensagens enviar (uma é ok; duas às vezes funcionam melhor).\n\n"
+        "REGRAS DE SIGNIFICADO (obrigatórias):\n"
+        "- Preserve o significado original. Não mude o tópico nem invente detalhes.\n"
+        "- Quando houver opções, mantenha os substantivos essenciais (ex.: 'quadra/tênis', 'campo/futebol', 'galpão').\n"
+        "- Evite tom de menu. NÃO use 'escolha uma opção', 'selecione', nem enumeração com números.\n"
+        "- Você pode reformular levemente a pergunta para ficar natural, desde que as opções apareçam como exemplos em uma única frase.\n"
+        "- Não adicione novas opções; não remova opções importantes.\n\n"
         "Diretrizes de estilo:\n"
-        "- Se o usuário acabou de responder ou corrigir algo, comece com um breve reconhecimento que faça referência a isso.\n"
-        "- Mantenha amigável e sucinto; apenas texto simples.\n"
-        "- Use transições mínimas apenas quando realmente ajudarem o fluxo; evite enfeites.\n"
+        "- Se o usuário acabou de dizer algo, comece com um reconhecimento breve que faça referência a isso.\n"
+        "- Faça a pergunta de forma simples e livre, por exemplo: 'é mais para X, Y, Z ou algo diferente?'.\n"
+        "- Sem listas ou bullets. Uma pergunta direta em tom de conversa.\n"
         "- Mantenha cada mensagem com <= 120 caracteres.\n"
-        "- Evite repetir saudações. Se a primeira mensagem for uma saudação (ex.: 'Oi!', 'Olá!'), a próxima NÃO deve começar com a mesma saudação.\n"
-        "- Tempo: primeira mensagem delay_ms = 0; seguintes entre 2200-4000 ms.\n"
-        "- Saída ESTRITAMENTE como um array JSON de {text: string, delay_ms: integer}.\n\n"
-        "Se você não conseguir manter cada opção/entidade exatamente como escrito, retorne UMA única mensagem com o texto original e delay_ms = 0.\n\n"
-        "Exemplos (apenas formato; o conteúdo deve manter o significado):\n"
-        "Entrada: 'Poderia me dizer se é mais parecido com uma quadra de tênis ou um campo de futebol?'\n"
-        '[\n  {"text": "Entendido!", "delay_ms": 0},\n  {"text": "É mais parecido com uma quadra de tênis ou um campo de futebol?", "delay_ms": 1600}\n]\n\n'
+        "- Evite repetir saudações.\n"
+        "- Tempo: primeira mensagem delay_ms = 0; seguintes entre 2200-4000 ms.\n\n"
+        "Quando o usuário perguntar 'você é IA?', 'quem é você?' ou semelhante, insira antes uma bolha curta: \n"
+        "'Sou uma assistente virtual de IA e estou aqui para te ajudar.' e em seguida faça a pergunta normalmente.\n\n"
+        "Saída ESTRITAMENTE como um array JSON de {text: string, delay_ms: integer}.\n\n"
+        "Exemplos de reescrita natural (apenas formato):\n"
+        "Entrada: 'Com base na descrição do usuário, escolha o melhor caminho: quadra/tênis, campo/futebol, galpão ou outros.'\n"
+        '[\n  {"text": "Certo! Só pra entender melhor:", "delay_ms": 0},\n  {"text": "é mais pra quadra/tênis, campo/futebol, galpão ou algo diferente?", "delay_ms": 2400}\n]\n\n'
         "Entrada: 'É em ambiente interno (indoor) ou externo (outdoor)?'\n"
         '[\n  {"text": "É em ambiente interno (indoor) ou externo (outdoor)?", "delay_ms": 0}\n]\n\n'
         "Entrada: 'Com o que posso te ajudar hoje?'\n"
-        '[\n  {"text": "Com o que posso te ajudar hoje?", "delay_ms": 0}\n]\n\n'
+        '[\n  {"text": "Como posso te ajudar hoje?", "delay_ms": 0}\n]\n\n'
         "Importante: escreva as mensagens em português (Brasil)."
     )
 
@@ -164,12 +165,46 @@ def rewrite_whatsapp_multi(
                 out[idx]["delay_ms"] = d
             return out
     except Exception:
-        # Fall back to simple single-message naturalization
+        # Fall through to deterministic fallback below
         pass
 
-    # Fallback: single naturalized message
-    try:
-        first = naturalize_prompt(llm, original_text)
-    except Exception:
-        first = original_text
-    return [{"text": first, "delay_ms": 0}]
+    # Deterministic fallback: if the text looks like a menu/decision, rephrase into natural question
+    def _deterministic_menu_fallback(
+        text: str, last_user: str | None
+    ) -> list[dict[str, int | str]] | None:
+        lower = text.lower()
+        has_menu_signal = (
+            "caminho" in lower or "escolha" in lower or "qual caminho" in lower
+        ) and ("quadra" in lower or "futebol" in lower or "galp" in lower)
+        if not has_menu_signal:
+            return None
+        # Try to extract options after a colon
+        options_part = None
+        if ":" in text:
+            try:
+                options_part = text.split(":", 1)[1].strip()
+            except Exception:
+                options_part = None
+        # Clean punctuation
+        if options_part:
+            if options_part.endswith("."):
+                options_part = options_part[:-1].strip()
+        # Build messages
+        out: list[dict[str, int | str]] = []
+        if last_user and last_user.strip():
+            out.append({"text": "Certo!", "delay_ms": 0})
+            second_delay = MIN_FOLLOWUP_DELAY_MS
+        else:
+            second_delay = 0
+        question_body = (
+            f"é mais pra {options_part}?" if options_part else "por qual tipo a gente segue?"
+        )
+        out.append({"text": question_body, "delay_ms": second_delay})
+        return out
+
+    det = _deterministic_menu_fallback(original_text, last_user_message or None)
+    if det:
+        return det
+
+    # Final fallback: return the original text verbatim
+    return [{"text": original_text, "delay_ms": 0}]
