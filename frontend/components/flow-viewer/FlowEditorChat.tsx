@@ -5,6 +5,7 @@ import { useState } from "react";
 export function FlowEditorChat() {
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([
     { role: "assistant", text: "Oi! Me diga como você quer ajustar este fluxo e eu preparo as mudanças." },
+    { role: "assistant", text: "Cole uma conversa de WhatsApp inteira para criar ou modificar o fluxo de conversa." },
   ]);
   const [input, setInput] = useState("");
 

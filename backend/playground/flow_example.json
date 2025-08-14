@@ -4,31 +4,39 @@
   "entry": "q.intention",
   "policies": { "path_selection": { "lock_threshold": 2, "allow_switch_before_lock": true } },
   "nodes": [
-    { "id": "q.intention", "kind": "Question", "key": "intention", "prompt": "Oi! O que você está buscando realizar hoje?" },
-    { "id": "q.use_case", "kind": "Question", "key": "use_case", "prompt": "Obrigado! O que melhor descreve seu projeto: uma quadra de tênis ou um campo de futebol?" },
+    { "id": "q.intention", "kind": "Question", "key": "intention", "prompt": "Como posso te ajudar hoje?" },
 
-    { "id": "d.route_use_case", "kind": "Decision", "label": "Roteamento por caso de uso", "decision_type": "llm_assisted", "decision_prompt": "Com base no projeto descrito pelo usuário, escolha o melhor caminho a seguir." },
+    { "id": "d.route_use_case", "kind": "Decision", "label": "Roteamento por caso de uso", "decision_type": "llm_assisted", "decision_prompt": "Com base na descrição do usuário, escolha o melhor caminho: quadra/tênis, campo/futebol, galpão ou outros." },
 
     { "id": "q.court_type", "kind": "Question", "key": "court_type", "prompt": "Você pode me dizer se é em ambiente interno (indoor) ou externo (outdoor)?" },
     { "id": "q.dimensions", "kind": "Question", "key": "dimensions", "prompt": "Você sabe as dimensões da quadra?" },
     { "id": "q.field_size", "kind": "Question", "key": "field_size", "prompt": "Qual é o tamanho aproximado do campo?" },
     { "id": "q.surface", "kind": "Question", "key": "surface", "prompt": "Qual é o tipo de superfície (grama/gramado sintético)?" },
+    { "id": "q.warehouse_use", "kind": "Question", "key": "warehouse_use", "prompt": "Qual será o uso principal do galpão (armazenagem, logística, produção, etc.)?" },
+    { "id": "q.warehouse_dimensions", "kind": "Question", "key": "warehouse_dimensions", "prompt": "Quais são as dimensões aproximadas do galpão?" },
+    { "id": "q.ceiling_height", "kind": "Question", "key": "ceiling_height", "prompt": "Qual é a altura do pé-direito?" },
+    { "id": "q.other_details", "kind": "Question", "key": "other_details", "prompt": "Pode me contar mais detalhes sobre o seu projeto para eu entender melhor?" },
     { "id": "q.lighting_level", "kind": "Question", "key": "lighting_level", "prompt": "Qual é o nível de iluminação desejado (lux), se houver?" },
     { "id": "q.budget", "kind": "Question", "key": "budget", "prompt": "Você tem uma faixa de orçamento em mente?" },
     { "id": "q.timeframe", "kind": "Question", "key": "timeframe", "prompt": "E qual é o seu prazo ideal?" },
     { "id": "t.done", "kind": "Terminal", "reason": "Conversa concluída" }
   ],
   "edges": [
-    { "source": "q.intention", "target": "q.use_case", "guard": { "fn": "answers_has", "args": { "key": "intention" } }, "priority": 0 },
-    { "source": "q.use_case", "target": "d.route_use_case", "priority": 0 },
+    { "source": "q.intention", "target": "d.route_use_case", "guard": { "fn": "answers_has", "args": { "key": "intention" } }, "priority": 0 },
 
     { "source": "d.route_use_case", "target": "q.court_type", "guard": { "fn": "always", "args": { "if": "projeto indica quadra/tênis" } }, "priority": 0, "condition_description": "Caminho: quadra/tênis" },
     { "source": "d.route_use_case", "target": "q.field_size", "guard": { "fn": "always", "args": { "if": "projeto indica campo/futebol" } }, "priority": 1, "condition_description": "Caminho: campo/futebol" },
+    { "source": "d.route_use_case", "target": "q.warehouse_use", "guard": { "fn": "always", "args": { "if": "projeto indica galpão" } }, "priority": 2, "condition_description": "Caminho: galpão" },
+    { "source": "d.route_use_case", "target": "q.other_details", "guard": { "fn": "always", "args": { "if": "projeto não é quadra/tênis, campo/futebol ou galpão" } }, "priority": 3, "condition_description": "Caminho: outros" },
 
     { "source": "q.court_type", "target": "q.dimensions", "priority": 0 },
     { "source": "q.dimensions", "target": "q.lighting_level", "priority": 0 },
     { "source": "q.field_size", "target": "q.surface", "priority": 0 },
     { "source": "q.surface", "target": "q.lighting_level", "priority": 0 },
+    { "source": "q.warehouse_use", "target": "q.warehouse_dimensions", "priority": 0 },
+    { "source": "q.warehouse_dimensions", "target": "q.ceiling_height", "priority": 0 },
+    { "source": "q.ceiling_height", "target": "q.lighting_level", "priority": 0 },
+    { "source": "q.other_details", "target": "q.lighting_level", "priority": 0 },
     { "source": "q.lighting_level", "target": "q.budget", "priority": 0 },
     { "source": "q.budget", "target": "q.timeframe", "priority": 0 },
     { "source": "q.timeframe", "target": "t.done", "priority": 0 }

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -289,11 +291,15 @@ class LLMFlowEngine:
             )
 
         if tool_name == "ClarifyQuestion":
-            # Do not inject LLM-generated clarification text here. Return the base prompt,
-            # and let the rewriter produce a concise explanation followed by the question.
+            # Generate a concise clarification using the last user message for context
+            last_user_msg = ""
+            for turn in reversed(ctx.history):
+                if getattr(turn, "role", "") == "user":
+                    last_user_msg = getattr(turn, "content", "")
+                    break
             return EngineResponse(
                 kind="prompt",
-                message=self._generate_contextual_prompt(node, ctx),
+                message=self._generate_clarification(node, last_user_msg, ctx),
                 node_id=node.id,
                 metadata={"is_clarification": True},
             )
@@ -351,27 +357,99 @@ class LLMFlowEngine:
     ) -> EngineResponse:
         """Process a decision node with LLM-aware edge selection."""
         ctx.mark_node_visited(node.id)
+        # Ensure no question field is pending while choosing a path
+        ctx.pending_field = None
 
         # Get edges from this node
         edges = self._flow.edges_from.get(node.id, [])
         if not edges:
             return self._handle_dead_end(ctx, node)
 
-        # In strict mode, use traditional guard evaluation
-        if self._strict_mode:
+        # Branch behavior by decision type
+        decision_type = getattr(node, "decision_type", "automatic")
+
+        if decision_type == "automatic":
+            # Preserve legacy/automatic behavior
+            if self._strict_mode:
+                for edge in edges:
+                    if self._evaluate_guard(edge, ctx, event):
+                        ctx.current_node_id = edge.target
+                        return self.process(ctx, None, None)
+                return self._handle_no_valid_transition(ctx, node)
+
+            selected_edge = self._select_edge_intelligently(edges, ctx, event)
+            if selected_edge:
+                ctx.current_node_id = selected_edge.target
+                return self.process(ctx, None, None)
+
+            # Fallback to guard evaluation (non-strict automatic mode)
             for edge in edges:
                 if self._evaluate_guard(edge, ctx, event):
                     ctx.current_node_id = edge.target
                     return self.process(ctx, None, None)
             return self._handle_no_valid_transition(ctx, node)
 
-        # In LLM mode, use intelligent edge selection
+        # decision_type is llm_assisted or user_choice -> interactive path selection
+        options: list[dict[str, Any]] = []
+        valid_edges: list[Any] = []
+        for edge in edges:
+            if self._evaluate_guard(edge, ctx, event):
+                valid_edges.append(edge)
+            target_node = self._flow.nodes.get(edge.target)
+            label = None
+            if getattr(edge, "condition_description", None):
+                label = str(edge.condition_description)
+            elif getattr(edge, "label", None):
+                label = str(edge.label)
+            elif target_node and getattr(target_node, "label", None):
+                label = str(target_node.label)
+            elif target_node:
+                label = str(getattr(target_node, "id", "opção"))
+            else:
+                label = "opção"
+            key = self._slugify_path(label)
+            options.append({"key": key, "label": label, "edge": edge})
+
+        ctx.available_paths = [opt["key"] for opt in options]
+
+        # First, try to resolve an explicit candidate (can be node id, label, or key)
+        selected_edge = None
+        if isinstance(event, dict):
+            path_meta = event.get("path") or event.get("selected_path")
+            if isinstance(path_meta, str) and path_meta.strip():
+                selected_edge = self._select_edge_by_candidate(path_meta, options)
+        if not selected_edge:
+            ans_val = ctx.answers.get("selected_path")
+            if isinstance(ans_val, str) and ans_val.strip():
+                selected_edge = self._select_edge_by_candidate(ans_val, options)
+
+        if selected_edge:
+            ctx.current_node_id = selected_edge.target
+            return self.process(ctx, None, None)
+
+        if len(valid_edges) == 1:
+            ctx.current_node_id = valid_edges[0].target
+            return self.process(ctx, None, None)
+
+        if self._strict_mode or decision_type == "user_choice":
+            return EngineResponse(
+                kind="prompt",
+                message=self._generate_decision_prompt(node, options, ctx),
+                node_id=node.id,
+                metadata={"needs_path_selection": True},
+            )
+
         selected_edge = self._select_edge_intelligently(edges, ctx, event)
         if selected_edge:
             ctx.current_node_id = selected_edge.target
             return self.process(ctx, None, None)
 
-        return self._handle_no_valid_transition(ctx, node)
+        return EngineResponse(
+            kind="prompt",
+            message=self._generate_decision_prompt(node, options, ctx),
+            node_id=node.id,
+            metadata={"needs_path_selection": True},
+        )
 
     def _process_terminal_node(
         self,
@@ -575,10 +653,7 @@ class LLMFlowEngine:
     ) -> Any:
         """Use LLM to select the best edge based on context."""
         if not self._llm:
-            # Fallback to first valid edge
-            for edge in edges:
-                if self._evaluate_guard(edge, ctx, event):
-                    return edge
+            # No LLM available → do not auto-select
             return None
 
         # Build context for LLM
@@ -608,10 +683,84 @@ class LLMFlowEngine:
         except Exception:
             pass
 
-        # Fallback to guard evaluation
-        for edge in edges:
-            if self._evaluate_guard(edge, ctx, event):
-                return edge
+        # No confident selection
+        return None
+
+    # ---- Helpers for decision routing ----
+    def _slugify_path(self, text: str) -> str:
+        # Normalize accents
+        norm = unicodedata.normalize("NFKD", text)
+        ascii_text = "".join(ch for ch in norm if not unicodedata.combining(ch))
+        t = ascii_text.lower()
+        t = re.sub(r"[^a-z0-9]+", "_", t)
+        t = re.sub(r"_+", "_", t).strip("_")
+        return t or "opcao"
+
+    def _match_path_key(self, candidate: str, available: list[str]) -> str | None:
+        """Match a free-text candidate to one of the available path keys."""
+        if not isinstance(candidate, str) or not available:
+            return None
+        c = self._slugify_path(candidate)
+        if c in available:
+            return c
+        # Try fuzzy contains
+        for a in available:
+            if c in a or a in c:
+                return a
+        return None
+
+    def _generate_decision_prompt(
+        self, node: DecisionNode, options: list[dict[str, Any]], ctx: FlowContext
+    ) -> str:
+        # If a custom decision_prompt is provided in the flow, use it verbatim
+        if getattr(node, "decision_prompt", None):
+            return str(node.decision_prompt)
+
+        # Default fallback: concise neutral question listing options
+        labels = [str(o["label"]) for o in options]
+        base = "Qual caminho faz mais sentido para a gente seguir?"
+        if not labels:
+            return base
+        if len(labels) == 1:
+            opt_text = labels[0]
+        else:
+            opt_text = ", ".join(labels[:-1]) + f" ou {labels[-1]}"
+        return f"{base} {opt_text}."
+
+    def _select_edge_by_candidate(self, candidate: str, options: list[dict[str, Any]]):
+        """Resolve an edge by matching the candidate against option key, label, or target node id.
+
+        Supports selecting by:
+        - key (slug of label)
+        - label (slug equality/contains)
+        - target node id (exact)
+        """
+        cand = (candidate or "").strip()
+        if not cand:
+            return None
+        cand_slug = self._slugify_path(cand)
+
+        # 1) Match by key
+        for opt in options:
+            if cand_slug == str(opt.get("key", "")):
+                return opt.get("edge")
+
+        # 2) Match by label
+        for opt in options:
+            label = str(opt.get("label", ""))
+            label_slug = self._slugify_path(label)
+            if cand_slug == label_slug or cand_slug in label_slug:
+                return opt.get("edge")
+
+        # 3) Match by target node id
+        for opt in options:
+            edge = opt.get("edge")
+            try:
+                if edge and getattr(edge, "target", None) == cand:
+                    return edge
+            except Exception:
+                continue
+
         return None
 
     def _get_unanswered_questions(self, ctx: FlowContext) -> list[dict[str, Any]]:

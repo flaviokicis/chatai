@@ -20,7 +20,7 @@ export function FlowViewer({
   const containerRef = useRef<HTMLDivElement>(null!);
   return (
     <div className="relative">
-      <div ref={containerRef} className={styles.flowGrid}>
+      <div ref={containerRef} className={`${styles.flowGrid} relative z-10`}>
         {columns.map((col) => (
           <div key={col.columnIndex} className={styles.column}>
             {col.nodes.map((n) => (

@@ -98,6 +98,40 @@ export function VerticalBranches({
 
   const gridCols = `grid-cols-${Math.max(1, branches.length)}`;
 
+  // Remove terminal nodes (e.g., t.done) from branch columns and compute common suffix
+  const filteredBranches: BranchColumn[] = useMemo(() => {
+    return branches.map((b) => ({
+      ...b,
+      nodes: b.nodes.filter((nid) => flow.nodes[nid]?.kind !== "Terminal"),
+    }));
+  }, [branches, flow.nodes]);
+
+  const commonTail: string[] = useMemo(() => {
+    if (filteredBranches.length === 0) return [];
+    const lists = filteredBranches.map((b) => b.nodes);
+    if (lists.some((l) => l.length === 0)) return [];
+    const minLen = Math.min(...lists.map((l) => l.length));
+    const tail: string[] = [];
+    for (let i = 1; i <= minLen; i++) {
+      const candidate = lists[0][lists[0].length - i];
+      if (lists.every((l) => l[l.length - i] === candidate)) {
+        tail.push(candidate);
+      } else {
+        break;
+      }
+    }
+    return tail.reverse();
+  }, [filteredBranches]);
+
+  const branchesWithoutTail: BranchColumn[] = useMemo(() => {
+    if (commonTail.length === 0) return filteredBranches;
+    const tailLen = commonTail.length;
+    return filteredBranches.map((b) => ({
+      ...b,
+      nodes: b.nodes.slice(0, Math.max(0, b.nodes.length - tailLen)),
+    }));
+  }, [filteredBranches, commonTail]);
+
   return (
     <div className="w-full overflow-x-auto">
       {/* Global pre-branch sequence */}
@@ -122,12 +156,12 @@ export function VerticalBranches({
 
       {/* Branch columns */}
       <div className={`grid ${gridCols} gap-4 min-w-[720px] xl:min-w-0`}> 
-        {branches.map((b) => (
+        {branchesWithoutTail.map((b) => (
           <div key={b.id} className="rounded-xl border bg-card p-3">
-            <button
+             <button
               type="button"
               onClick={() => onSelect?.(b.id)}
-              className={`mb-3 w-full text-left text-sm font-medium px-3 py-2 rounded-lg border ${
+               className={`mb-3 w-full text-left text-sm font-medium px-3 py-2 rounded-lg border cursor-pointer ${
                 selectedBranchId === b.id
                   ? "bg-primary text-primary-foreground border-primary"
                   : "bg-muted/40 hover:bg-muted border-border"
@@ -135,20 +169,38 @@ export function VerticalBranches({
             >
               {b.label}
             </button>
-            <div className="relative">
-              <div className="absolute left-[18px] top-0 bottom-0 w-px bg-border" />
-              <div className="space-y-3">
+              <div className="relative">
+                <div className="absolute left-[18px] top-0 bottom-0 w-px bg-border" />
+                <div className="space-y-2.5">
                 {b.nodes.map((nodeId) => (
-                  <div key={nodeId} className="relative pl-6 group">
-                    <div className={`absolute left-[14px] top-5 h-2 w-2 rounded-full ${selectedBranchId === b.id ? "bg-primary" : "bg-border"}`} />
-                    <NodeCard node={{ ...flow.nodes[nodeId], isEntry: flow.entry === nodeId, outgoing: flow.edges_from[nodeId] ?? [] }} highlighted={selectedBranchId === b.id} variant="compact" />
-                  </div>
-                ))}
+                    <div key={nodeId} className="relative pl-6 group">
+                      <div className={`absolute left-[14px] top-5 h-2 w-2 rounded-full ${selectedBranchId === b.id ? "bg-primary" : "bg-border"}`} />
+                    <NodeCard node={{ ...flow.nodes[nodeId], isEntry: flow.entry === nodeId, outgoing: flow.edges_from[nodeId] ?? [] }} highlighted={selectedBranchId === b.id} variant="compact" flat={selectedBranchId !== b.id} />
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
           </div>
         ))}
       </div>
+
+      {/* Global tail (shown once after branches) */}
+      {commonTail.length > 0 ? (
+        <div className="mt-4 rounded-xl border bg-card p-3">
+          <div className="text-xs font-medium text-muted-foreground mb-2">Perguntas globais (finais)</div>
+          <div className="relative">
+            <div className="absolute left-[18px] top-0 bottom-0 w-px bg-border" />
+            <div className="space-y-2.5">
+              {commonTail.map((nodeId) => (
+                <div key={nodeId} className="relative pl-6 group">
+                  <div className="absolute left-[14px] top-5 h-2 w-2 rounded-full bg-border" />
+                  <NodeCard node={{ ...flow.nodes[nodeId], isEntry: flow.entry === nodeId, outgoing: flow.edges_from[nodeId] ?? [] }} variant="compact" flat />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

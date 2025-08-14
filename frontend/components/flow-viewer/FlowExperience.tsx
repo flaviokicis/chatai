@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FlowViewer } from "./FlowViewer";
+// Graph viewer not used in segmented view
 import type { CompiledFlow, EdgeKey, FlowEdgeSummary } from "./types";
 import { JourneyPreview, type JourneyStep } from "./JourneyPreview";
 import { NodeLegend } from "./NodeLegend";
+// import { VerticalBranches } from "./VerticalBranches";
+import { FlowSegments } from "./FlowSegments";
 
 type BranchOption = { targetId: string; label: string };
 
@@ -66,6 +68,7 @@ function stepsFromNodes(flow: CompiledFlow, nodeIds: string[]): JourneyStep[] {
   return nodeIds
     .map((id) => flow.nodes[id])
     .filter(Boolean)
+    .filter((n) => n!.kind !== "Decision" && n!.kind !== "Terminal")
     .map((n) => ({
       id: n!.id,
       kind: n!.kind,
@@ -95,41 +98,25 @@ export function FlowExperience({ flow }: { flow: CompiledFlow }) {
     }
   }, [firstDecision, branchOptions, selection]);
 
-  const { nodes: pathNodes, edges: pathEdges } = useMemo(
+  const { nodes: pathNodes } = useMemo(
     () => computePath(flow, selection),
     [flow, selection]
   );
 
-  const highlightedNodes = useMemo(() => new Set(pathNodes), [pathNodes]);
-  const highlightedEdges = useMemo(() => new Set<EdgeKey>(pathEdges), [pathEdges]);
   const steps = useMemo(() => stepsFromNodes(flow, pathNodes.filter((id) => flow.nodes[id]?.kind !== "Decision")), [flow, pathNodes]);
 
   return (
     <div className="space-y-6">
       <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-4 md:p-6 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center flex-wrap gap-3">
           <NodeLegend />
-          {branchOptions.length > 0 ? (
-            <div className="flex items-center gap-2">
-              <div className="text-xs text-muted-foreground">Caminho destacado:</div>
-              <div className="flex gap-1">
-                {branchOptions.map((opt) => (
-                  <button
-                    key={opt.targetId}
-                    type="button"
-                    onClick={() => firstDecision && setSelection({ [firstDecision]: opt.targetId })}
-                    className={`px-2.5 py-1.5 rounded-md border text-xs ${selection[firstDecision ?? ""] === opt.targetId ? "bg-primary text-primary-foreground border-primary" : "bg-muted/40 hover:bg-muted border-border"}`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </div>
-        <div className="w-full overflow-x-auto">
-          <FlowViewer flow={flow} highlightedNodes={highlightedNodes} highlightedEdges={highlightedEdges} />
-        </div>
+        {/* Flexible segmented renderer: globals, branch groups, more globals, etc. */}
+        <FlowSegments
+          flow={flow}
+          selection={selection}
+          onSelect={(decisionId, targetId) => setSelection({ [decisionId]: targetId })}
+        />
       </div>
       <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-4 md:p-6">
         <JourneyPreview steps={steps} title="Visualização do fluxo no WhatsApp" />

@@ -65,10 +65,14 @@ export function EdgeLayer({
   useEffect(() => {
     function doMeasure() {
       if (!containerRef.current) return;
-      setRects(measureNodes(containerRef.current));
+      // Defer measurement to next frame to ensure DOM has painted
+      requestAnimationFrame(() => {
+        if (!containerRef.current) return;
+        setRects(measureNodes(containerRef.current));
+      });
     }
     doMeasure();
-    const ro = new ResizeObserver(doMeasure);
+    const ro = new ResizeObserver(() => doMeasure());
     if (containerRef.current) ro.observe(containerRef.current);
     window.addEventListener("resize", doMeasure);
     return () => {
@@ -104,7 +108,7 @@ export function EdgeLayer({
   }, [anchors, flow.edges_from, highlightedEdges]);
 
   return (
-    <svg width={bounds.width} height={bounds.height} className="pointer-events-none absolute inset-0">
+    <svg width={bounds.width} height={bounds.height} className="pointer-events-none absolute inset-0 z-0">
       <defs>
         <linearGradient id="edgeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
           <stop offset="0%" stopColor="hsl(var(--muted-foreground))" stopOpacity="0.4" />

@@ -42,6 +42,7 @@ dev-dependencies = [
   "httpx",
   "mypy",
   "ruff",
+  "pre-commit>=4.3.0",
 ]
 
 [tool.mypy]

@@ -11,9 +11,9 @@ MAX_FOLLOWUP_DELAY_MS = 4000
 MAX_MULTI_MESSAGES = 8
 
 DEFAULT_INSTRUCTION = (
-    "Reescreva o prompt em uma única pergunta amigável em português (Brasil), direcionada ao usuário. "
-    "Requisitos: uma frase; sem listas ou marcadores; sem múltiplas alternativas; "
-    "sem aspas; mantenha o significado; seja conciso."
+    "Você é uma atendente brasileira no WhatsApp. Reescreva o prompt em uma frase única, natural e casual em português (Brasil),"
+    " com tom caloroso e do dia a dia. Regras: uma frase; sem listas; sem aspas; mantenha o significado; conciso;"
+    " reconheça sutilmente a última fala do usuário quando fizer sentido (ex.: 'entendi', 'claro')."
 )
 
 
@@ -35,13 +35,14 @@ def naturalize_prompt(llm: LLMClient, text: str, instruction: str | None = None)
 
 
 def clarify_and_reask(llm: LLMClient, question_text: str, user_message: str) -> str:  # type: ignore[name-defined]
-    """Produce a brief acknowledgement that references the user's clarification,
-    then restate the original question as a single sentence.
+    """Produce a brief, casual PT-BR acknowledgement referencing the user's words,
+    then restate the original question succinctly in one sentence.
     """
     instr = (
-        "O usuário pediu um esclarecimento sobre a pergunta. "
-        "Escreva um breve reconhecimento que faça referência às palavras do usuário e depois reformule a pergunta de forma sucinta. "
-        "Apenas uma frase; sem listas; sem aspas; mantenha o significado; seja conciso. Responda em português (Brasil)."
+        "Papel: atendente brasileira no WhatsApp. O usuário pediu esclarecimento. "
+        "Faça um breve reconhecimento citando de leve a fala do usuário (ex.: 'ah, entendi', 'claro'), "
+        "e emende a pergunta original de forma natural e curta. "
+        "Uma única frase; sem listas; sem aspas; muito natural e do dia a dia; tom leve."
     )
     try:
         text = f"Pergunta: {question_text}\nUsuário perguntou: {user_message}"

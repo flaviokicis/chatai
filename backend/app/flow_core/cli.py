@@ -16,9 +16,22 @@ from .ir import Flow
 from .runner import FlowTurnRunner
 
 
+def _playground_flow_path() -> Path:
+    """Return backend/playground/flow_example.json resolved from this file."""
+    # __file__ = backend/app/flow_core/cli.py -> parents[2] = backend
+    backend_dir = Path(__file__).resolve().parents[2]
+    return backend_dir / "playground" / "flow_example.json"
+
+
 def run_cli() -> None:
     parser = argparse.ArgumentParser(description="Run a Flow IR JSON interactively")
-    parser.add_argument("json_path", type=Path, help="Path to flow JSON file")
+    parser.add_argument(
+        "json_path",
+        nargs="?",
+        type=Path,
+        default=_playground_flow_path(),
+        help="Path to flow JSON file (default: backend/playground/flow_example.json)",
+    )
     parser.add_argument("--llm", action="store_true", help="Use LLM to fill answers")
     parser.add_argument(
         "--model",
