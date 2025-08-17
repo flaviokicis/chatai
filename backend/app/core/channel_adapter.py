@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
+    from app.services.tenant_config_service import ProjectContext
 
 from app.core.naturalize import rewrite_whatsapp_multi
 
@@ -51,6 +52,7 @@ class ConversationalRewriter:
         *,
         max_followups: int = 2,
         enable_rewrite: bool = True,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> list[dict[str, Any]]:
         """Rewrite a message into conversational multi-message format.
 
@@ -68,7 +70,11 @@ class ConversationalRewriter:
 
         try:
             return rewrite_whatsapp_multi(
-                self._llm, text, chat_history, max_followups=max_followups
+                self._llm,
+                text,
+                chat_history,
+                max_followups=max_followups,
+                project_context=project_context,
             )
         except Exception:
             # Fallback to single message

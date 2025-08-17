@@ -157,8 +157,11 @@ class FlowAgent(BaseAgent):
             answers = dict(stored.get("answers", {}))
             ctx.answers.update(answers)
 
+        # Extract project context from message metadata if available
+        project_context = message.metadata.get("project_context") if message.metadata else None
+
         # Process one turn
-        result = runner.process_turn(ctx, message.text or None)
+        result = runner.process_turn(ctx, message.text or None, project_context=project_context)
 
         # Handle terminal
         if result.terminal:

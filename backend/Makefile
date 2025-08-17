@@ -33,6 +33,20 @@ typecheck:
 
 ci: lint fmt typecheck test
 
+# Danger: Drop and recreate all tables (useful after UUID migration)
+.PHONY: reset-db
+reset-db:
+	. .venv/bin/activate && uv run python -c "from app.db.base import Base; from app.db.session import get_engine; eng=get_engine(); Base.metadata.drop_all(bind=eng); Base.metadata.create_all(bind=eng); print('✅ Dropped and recreated all tables')"
+
+# Seed the database with example tenant, channel, and flow
+.PHONY: seed-db
+seed-db:
+	. .venv/bin/activate && uv run python seed_database.py
+
+# Complete database setup: reset tables + seed data (useful for development)
+.PHONY: setup-db
+setup-db: reset-db seed-db
+
 # Run the Flow Core CLI (manual mode by default)
 .PHONY: flow
 flow:

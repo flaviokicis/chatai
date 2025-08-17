@@ -28,6 +28,8 @@ dependencies = [
   "langchain-community>=0.3.0",
   "SQLAlchemy>=2.0.29",
   "psycopg[binary]>=3.1.18",
+  "cryptography>=42.0.0",
+  "uuid-v7>=1.0.0",
 ]
 
 [tool.hatch.build.targets.wheel]

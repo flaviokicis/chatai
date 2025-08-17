@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
+    from app.services.tenant_config_service import ProjectContext
 
 from app import dev_config
 
@@ -58,7 +59,12 @@ class FlowTurnRunner:
         """Initialize or restore flow context."""
         return self._engine.initialize_context(existing_context)
 
-    def process_turn(self, ctx: FlowContext, user_message: str | None = None) -> TurnResult:
+    def process_turn(
+        self,
+        ctx: FlowContext,
+        user_message: str | None = None,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+    ) -> TurnResult:
         """Process a single conversation turn.
 
         Args:
@@ -72,7 +78,7 @@ class FlowTurnRunner:
         initial_answers = dict(ctx.answers)
 
         # Get engine response (prompt or terminal)
-        engine_response = self._engine.process(ctx, user_message)
+        engine_response = self._engine.process(ctx, user_message, project_context=project_context)
 
         if engine_response.kind == "terminal":
             return TurnResult(
@@ -142,6 +148,18 @@ class FlowTurnRunner:
             print(f"[DEBUG] Tool chosen: {responder_result.tool_name}")
             print(f"[DEBUG] Updates: {responder_result.updates}")
             print(f"[DEBUG] Metadata: {responder_result.metadata}")
+            # Include reasoning if provided by tool LLM
+            reasoning = None
+            if isinstance(responder_result.metadata, dict):
+                reasoning = responder_result.metadata.get("reasoning")
+            if not reasoning:
+                # Some tools put reasoning at top level (e.g., SelectFlowPath)
+                reasoning = (
+                    responder_result.metadata.get("reason")
+                    if isinstance(responder_result.metadata, dict)
+                    else None
+                )
+            print(f"[DEBUG] Reasoning: {reasoning}")
             print(f"[DEBUG] Current answers: {ctx.answers}")
             print(f"[DEBUG] Pending field: {ctx.pending_field}")
 
@@ -173,6 +191,12 @@ class FlowTurnRunner:
         engine_event: dict[str, object] = {"tool_name": responder_result.tool_name or ""}
         if ctx.pending_field and ctx.pending_field in responder_result.updates:
             engine_event["answer"] = responder_result.updates[ctx.pending_field]
+        # Attach reasoning to engine event for downstream visibility
+        if responder_result.metadata and isinstance(responder_result.metadata, dict):
+            if responder_result.metadata.get("reasoning"):
+                engine_event["reasoning"] = responder_result.metadata.get("reasoning")
+            elif responder_result.metadata.get("reason"):
+                engine_event["reasoning"] = responder_result.metadata.get("reason")
         # Do not pass any text from tool LLM; the rewrite layer will craft the user-facing message.
         # We only pass structured metadata to drive engine behavior.
         # Pass structured metadata

@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # avoid hard import at runtime
+    from app.services.tenant_config_service import ProjectContext
+
     from .llm import LLMClient
 
 # Human pacing defaults for multi-message outputs
@@ -17,8 +19,28 @@ DEFAULT_INSTRUCTION = (
 )
 
 
-def naturalize_prompt(llm: LLMClient, text: str, instruction: str | None = None) -> str:  # type: ignore[name-defined]
+def naturalize_prompt(
+    llm: LLMClient,  # type: ignore[name-defined]
+    text: str,
+    instruction: str | None = None,
+    project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+) -> str:
+    """
+    Naturalize a prompt for WhatsApp with optional project context.
+
+    Args:
+        llm: LLM client for rewriting
+        text: Original text to rewrite
+        instruction: Custom instruction (overrides default)
+        project_context: Business context for better communication style
+    """
     instr = instruction or DEFAULT_INSTRUCTION
+
+    # Add project context to instruction if available
+    if project_context and project_context.has_rewriter_context():
+        context_prompt = project_context.get_rewriter_context_prompt()
+        instr = f"{instr}\n{context_prompt}"
+
     try:
         rewritten = llm.rewrite(instr, text)
         if isinstance(rewritten, str) and rewritten.strip():
@@ -34,9 +56,21 @@ def naturalize_prompt(llm: LLMClient, text: str, instruction: str | None = None)
         return text
 
 
-def clarify_and_reask(llm: LLMClient, question_text: str, user_message: str) -> str:  # type: ignore[name-defined]
-    """Produce a brief, casual PT-BR acknowledgement referencing the user's words,
+def clarify_and_reask(
+    llm: LLMClient,  # type: ignore[name-defined]
+    question_text: str,
+    user_message: str,
+    project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+) -> str:
+    """
+    Produce a brief, casual PT-BR acknowledgement referencing the user's words,
     then restate the original question succinctly in one sentence.
+
+    Args:
+        llm: LLM client for rewriting
+        question_text: The original question to clarify
+        user_message: The user's clarification request
+        project_context: Business context for appropriate communication style
     """
     instr = (
         "Papel: atendente brasileira no WhatsApp. O usuário pediu esclarecimento. "
@@ -44,6 +78,12 @@ def clarify_and_reask(llm: LLMClient, question_text: str, user_message: str) -> 
         "e emende a pergunta original de forma natural e curta. "
         "Uma única frase; sem listas; sem aspas; muito natural e do dia a dia; tom leve."
     )
+
+    # Add project context to instruction if available
+    if project_context and project_context.has_rewriter_context():
+        context_prompt = project_context.get_rewriter_context_prompt()
+        instr = f"{instr}\n{context_prompt}"
+
     try:
         text = f"Pergunta: {question_text}\nUsuário perguntou: {user_message}"
         rewritten = llm.rewrite(instr, text)
@@ -65,6 +105,7 @@ def rewrite_whatsapp_multi(
     chat_window: list[dict[str, str]] | None = None,
     *,
     max_followups: int = 2,
+    project_context: ProjectContext | None = None,  # type: ignore[name-defined]
 ) -> list[dict[str, int | str]]:
     """Rewrite an assistant reply into human-like WhatsApp-style messages.
 
@@ -101,25 +142,36 @@ def rewrite_whatsapp_multi(
         "- Evite tom de menu. NÃO use 'escolha uma opção', 'selecione', nem enumeração com números.\n"
         "- Você pode reformular levemente a pergunta para ficar natural, desde que as opções apareçam como exemplos em uma única frase.\n"
         "- Não adicione novas opções; não remova opções importantes.\n\n"
+        "ENERGIA E TOM (espelhar o usuário):\n"
+        "- Observe a última fala do usuário e espelhe a ENERGIA.\n"
+        "  * Se for animada (ex.: muitas exclamações, 'olaaaa', emojis), use um reconhecimento curto e animado (ex.: 'Opa!' ou 'Claro!') e 0-1 exclamações.\n"
+        "  * Se for neutra/formal, mantenha direto e simples (sem exclamações).\n"
+        "  * Pode usar emoji; mas sem exagerar 🙂.\n"
+        "- Não force empolgação se o usuário estiver formal.\n\n"
         "Diretrizes de estilo:\n"
-        "- Se o usuário acabou de dizer algo, comece com um reconhecimento breve que faça referência a isso.\n"
-        "- Faça a pergunta de forma simples e livre, por exemplo: 'é mais para X, Y, Z ou algo diferente?'.\n"
+        "- Comece com um reconhecimento breve que faça referência à fala do usuário quando fizer sentido.\n"
+        "- Faça a pergunta de forma simples e livre (ex.: 'é mais pra X, Y, Z ou algo diferente?').\n"
         "- Sem listas ou bullets. Uma pergunta direta em tom de conversa.\n"
         "- Mantenha cada mensagem com <= 120 caracteres.\n"
         "- Evite repetir saudações.\n"
         "- Tempo: primeira mensagem delay_ms = 0; seguintes entre 2200-4000 ms.\n\n"
-        "Quando o usuário perguntar 'você é IA?', 'quem é você?' ou semelhante, insira antes uma bolha curta: \n"
-        "'Sou uma assistente virtual de IA e estou aqui para te ajudar.' e em seguida faça a pergunta normalmente.\n\n"
+        "Identidade (quando perguntarem 'você é IA?'):\n"
+        "- Responda antes com: 'Sou uma assistente virtual de IA e estou aqui para te ajudar.' e depois continue normalmente.\n\n"
         "Saída ESTRITAMENTE como um array JSON de {text: string, delay_ms: integer}.\n\n"
-        "Exemplos de reescrita natural (apenas formato):\n"
+        "Exemplos (apenas formato; adapte o tom):\n"
         "Entrada: 'Com base na descrição do usuário, escolha o melhor caminho: quadra/tênis, campo/futebol, galpão ou outros.'\n"
-        '[\n  {"text": "Certo! Só pra entender melhor:", "delay_ms": 0},\n  {"text": "é mais pra quadra/tênis, campo/futebol, galpão ou algo diferente?", "delay_ms": 2400}\n]\n\n'
+        '[\n  {"text": "Opa!", "delay_ms": 0},\n  {"text": "é mais pra quadra/tênis, campo/futebol, galpão ou algo diferente?", "delay_ms": 2400}\n]\n\n'
         "Entrada: 'É em ambiente interno (indoor) ou externo (outdoor)?'\n"
         '[\n  {"text": "É em ambiente interno (indoor) ou externo (outdoor)?", "delay_ms": 0}\n]\n\n'
-        "Entrada: 'Com o que posso te ajudar hoje?'\n"
+        "Entrada (formal): 'Com o que posso te ajudar hoje?'\n"
         '[\n  {"text": "Como posso te ajudar hoje?", "delay_ms": 0}\n]\n\n'
         "Importante: escreva as mensagens em português (Brasil)."
     )
+
+    # Add project context to instruction if available
+    if project_context and project_context.has_rewriter_context():
+        context_prompt = project_context.get_rewriter_context_prompt()
+        instruction = f"{instruction}\n{context_prompt}"
 
     payload = (
         f"Original assistant reply:\n{original_text}\n\n"
@@ -207,4 +259,15 @@ def rewrite_whatsapp_multi(
         return det
 
     # Final fallback: return the original text verbatim
+    # Lightly mirror user energy in a tiny acknowledgment if very enthusiastic
+    try:
+        last = (last_user_message or "").strip()
+        high_energy = (
+            last.count("!") >= 2 or "olaaa" in last.lower() or ":)" in last or "😀" in last
+        )
+        if high_energy and original_text:
+            # Prepend a short upbeat cue only if it won't change meaning
+            return [{"text": f"Opa! {original_text}", "delay_ms": 0}]
+    except Exception:
+        pass
     return [{"text": original_text, "delay_ms": 0}]

@@ -13,12 +13,16 @@ from app.core.app_context import AppContext, get_app_context, set_app_context
 from app.core.langchain_adapter import LangChainToolsLLM
 from app.core.session import StableSessionPolicy
 from app.core.state import InMemoryStore, RedisStore
+from app.db.base import Base
+from app.db.models import Tenant
+from app.db.session import create_session, get_engine
 from app.router import api_router
 from app.services.rate_limiter import (
     InMemoryRateLimiterBackend,
     RateLimiter,
     RedisRateLimiterBackend,
 )
+from app.services.tenant_service import TenantService
 from app.settings import get_settings
 
 app = FastAPI(title="Chatai Twilio Webhook", version="0.2.0")
@@ -94,6 +98,31 @@ def _init_llm() -> None:
     except Exception as exc:  # pragma: no cover - startup log only
         logger.warning("Rate limiter initialization failed (%s); disabling rate limiting", exc)
         ctx.rate_limiter = None
+
+    # Ensure database tables exist in local/dev environments.
+    try:
+        engine = get_engine()
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables ensured (create_all)")
+        # Seed a default tenant in empty dev DBs to improve DX
+        try:
+            session = create_session()
+            try:
+                exists = session.query(Tenant).first() is not None
+                if not exists:
+                    TenantService(session).create_tenant(
+                        first_name="Demo",
+                        last_name="Tenant",
+                        email="demo@example.com",
+                    )
+                    logger.info("Seeded default demo tenant (UUIDv7)")
+            finally:
+                session.close()
+        except Exception:
+            # Non-fatal in production/CI
+            pass
+    except Exception as exc:  # pragma: no cover - startup log only
+        logger.warning("Failed to create DB tables on startup: %s", exc)
 
 
 @app.get("/health", response_class=PlainTextResponse)

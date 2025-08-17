@@ -27,3 +27,16 @@ def get_db_session() -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
+
+
+def create_session() -> Session:
+    """Create a SQLAlchemy session outside FastAPI dependency injection.
+
+    Useful for background tasks and framework code paths where DI is not available.
+    """
+    return _session_factory()()
+
+
+def get_engine():
+    """Expose the shared engine for metadata operations (e.g., create_all)."""
+    return _engine()

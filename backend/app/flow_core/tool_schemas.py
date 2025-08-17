@@ -14,6 +14,14 @@ class FlowResponse(BaseModel):
         default=1.0,
         description="Confidence level in this response (0-1)",
     )
+    reasoning: str | None = Field(
+        default=None,
+        description=(
+            "Brief explanation (one sentence) of why this tool was chosen and how the user's"
+            " message and context support the decision. Used for debugging/telemetry only;"
+            " never shown directly to the user."
+        ),
+    )
 
 
 class UpdateAnswersFlow(FlowResponse):

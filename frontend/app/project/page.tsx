@@ -5,11 +5,89 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/ui/page-header";
-import { Globe, Users, MessageCircle, Save, FileText } from "lucide-react";
+import { Globe, Users, MessageCircle, Save, FileText, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useTenant, useUpdateTenantConfig } from "@/lib/hooks/use-api";
+import { useState, useEffect } from "react";
 
 export default function ProjectPage() {
   const router = useRouter();
+  const { data: tenant, isLoading, isError } = useTenant();
+  const updateTenantConfig = useUpdateTenantConfig();
+  
+  const [formData, setFormData] = useState({
+    project_description: "",
+    target_audience: "",
+    communication_style: "",
+  });
+
+  const [hasChanges, setHasChanges] = useState(false);
+
+  useEffect(() => {
+    if (tenant) {
+      const newData = {
+        project_description: tenant.project_description || "",
+        target_audience: tenant.target_audience || "",
+        communication_style: tenant.communication_style || "",
+      };
+      setFormData(newData);
+      setHasChanges(false);
+    }
+  }, [tenant]);
+
+  const handleInputChange = (field: keyof typeof formData, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    setHasChanges(true);
+  };
+
+  const handleSave = () => {
+    updateTenantConfig.mutate(formData, {
+      onSuccess: () => {
+        setHasChanges(false);
+        alert("Configurações salvas com sucesso!");
+      },
+      onError: (error) => {
+        console.error("Erro ao salvar:", error);
+        alert("Erro ao salvar configurações. Tente novamente.");
+      },
+    });
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen w-full bg-background">
+        <div className="mx-auto max-w-4xl px-4 py-6 md:py-8">
+          <PageHeader
+            title="Configurações Globais"
+            description="Estas são as configurações padrão para todos os fluxos. Quando você personalizar um fluxo, as configurações dele terão prioridade sobre as globais."
+            icon={Globe}
+          />
+          <div className="flex justify-center items-center min-h-48">
+            <Loader2 className="h-8 w-8 animate-spin" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="min-h-screen w-full bg-background">
+        <div className="mx-auto max-w-4xl px-4 py-6 md:py-8">
+          <PageHeader
+            title="Configurações Globais"
+            description="Estas são as configurações padrão para todos os fluxos. Quando você personalizar um fluxo, as configurações dele terão prioridade sobre as globais."
+            icon={Globe}
+          />
+          <Card>
+            <CardContent className="p-6">
+              <p className="text-red-600">Erro ao carregar configurações. Tente novamente.</p>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen w-full bg-background">
@@ -42,7 +120,8 @@ export default function ProjectPage() {
 
 Exemplo: Somos um estúdio boutique de fitness oferecendo treinos personalizados, aulas em grupo e consultoria de nutrição. Nossos pacotes variam de R$ 250-1.000/sessão, com planos mensais disponíveis. Somos especializados em força e mobilidade para profissionais com pouco tempo."
                   className="min-h-[120px] resize-none"
-                  defaultValue=""
+                  value={formData.project_description}
+                  onChange={(e) => handleInputChange('project_description', e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
                   Seja específico sobre suas ofertas, preços e diferenciais
@@ -72,7 +151,8 @@ Exemplo: Somos um estúdio boutique de fitness oferecendo treinos personalizados
 
 Exemplo: Profissionais ocupados de 25 a 45 anos que valorizam eficiência e resultados. Geralmente perguntam sobre flexibilidade de horários, pacotes e prazos de resultados. Preferem comunicação direta e respostas rápidas. Preocupações comuns incluem falta de tempo e se nossa abordagem se adequa ao nível de condicionamento."
                   className="min-h-[120px] resize-none"
-                  defaultValue=""
+                  value={formData.target_audience}
+                  onChange={(e) => handleInputChange('target_audience', e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
                   Ajude nossa IA a entender com quem está falando e o que importa para essas pessoas
@@ -107,7 +187,8 @@ Exemplos de mensagens:
 
 Quanto mais exemplos você fornecer, melhor a IA pode soar como você!"
                   className="min-h-[160px] resize-none"
-                  defaultValue=""
+                  value={formData.communication_style}
+                  onChange={(e) => handleInputChange('communication_style', e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
                   Inclua vários cenários: cumprimentos, explicações, resolução de problemas e encerramentos
@@ -117,9 +198,18 @@ Quanto mais exemplos você fornecer, melhor a IA pode soar como você!"
           </Card>
 
           <div className="flex gap-3">
-            <Button size="lg" className="gap-2">
-              <Save className="h-4 w-4" />
-              Salvar configurações globais
+            <Button 
+              size="lg" 
+              className="gap-2"
+              onClick={handleSave}
+              disabled={!hasChanges || updateTenantConfig.isPending}
+            >
+              {updateTenantConfig.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              {updateTenantConfig.isPending ? "Salvando..." : "Salvar configurações globais"}
             </Button>
             <Button variant="outline" size="lg" onClick={() => router.push('/')}>
               Cancelar

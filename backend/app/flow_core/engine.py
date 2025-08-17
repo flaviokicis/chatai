@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
+    from app.services.tenant_config_service import ProjectContext
 
     from .compiler import CompiledFlow
 
@@ -75,6 +76,7 @@ class LLMFlowEngine:
         ctx: FlowContext,
         user_message: str | None = None,
         event: dict[str, Any] | None = None,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> EngineResponse:
         """
         Process a turn in the conversation.
@@ -96,9 +98,9 @@ class LLMFlowEngine:
 
         # Process based on node type
         if isinstance(node, QuestionNode):
-            return self._process_question_node(ctx, node, user_message, event)
+            return self._process_question_node(ctx, node, user_message, event, project_context)
         if isinstance(node, DecisionNode):
-            return self._process_decision_node(ctx, node, event)
+            return self._process_decision_node(ctx, node, event, project_context)
         if isinstance(node, TerminalNode):
             return self._process_terminal_node(ctx, node)
         logger.warning(f"Unknown node type: {type(node).__name__}")
@@ -114,6 +116,7 @@ class LLMFlowEngine:
         node: QuestionNode,
         user_message: str | None,
         event: dict[str, Any] | None,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> EngineResponse:
         """Process a question node with LLM awareness."""
         ctx.mark_node_visited(node.id)
@@ -137,11 +140,11 @@ class LLMFlowEngine:
             ctx.get_node_state(node.id).status = NodeStatus.COMPLETED
 
             # Advance to next node
-            return self._advance_from_node(ctx, node, event)
+            return self._advance_from_node(ctx, node, event, project_context)
 
         # If we have a tool-driven event (without an explicit answer), handle accordingly
         if event and isinstance(event, dict) and event.get("tool_name"):
-            handled = self._handle_tool_event(ctx, node, event)
+            handled = self._handle_tool_event(ctx, node, event, project_context)
             if handled:
                 return handled
 
@@ -166,7 +169,11 @@ class LLMFlowEngine:
         )
 
     def _handle_tool_event(
-        self, ctx: FlowContext, node: QuestionNode, event: dict[str, Any]
+        self,
+        ctx: FlowContext,
+        node: QuestionNode,
+        event: dict[str, Any],
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> EngineResponse | None:  # type: ignore[name-defined]
         """Handle non-answer tool events during a question node.
 
@@ -230,20 +237,20 @@ class LLMFlowEngine:
                     if target and target.__class__.__name__ == "DecisionNode":
                         ctx.current_node_id = getattr(target, "id", None) or e.target
                         # Let the normal processing generate the decision prompt/options
-                        return self.process(ctx, None, None)
+                        return self.process(ctx, None, None, project_context)
             except Exception:
                 pass
 
             # Otherwise, fall back to default advancement
-            return self._advance_from_node(ctx, node, event)
+            return self._advance_from_node(ctx, node, event, project_context)
 
         if tool_name == "SkipQuestion":
             ctx.get_node_state(node.id).status = NodeStatus.SKIPPED
             target = event.get("skip_to") or event.get("navigation")
             if isinstance(target, str) and target:
                 ctx.current_node_id = target
-                return _with_ack(self.process(ctx, None, None))
-            return self._advance_from_node(ctx, node, event)
+                return _with_ack(self.process(ctx, None, None, project_context))
+            return self._advance_from_node(ctx, node, event, project_context)
 
         if tool_name == "RevisitQuestion":
             # Get the revisit details
@@ -279,7 +286,7 @@ class LLMFlowEngine:
 
             if isinstance(target, str) and target:
                 ctx.current_node_id = target
-                return _with_ack(self.process(ctx, None, None))
+                return _with_ack(self.process(ctx, None, None, project_context))
 
             # If no target could be determined, remain on current node
             return EngineResponse(
@@ -331,7 +338,7 @@ class LLMFlowEngine:
             target = event.get("target_node") or event.get("navigation")
             if isinstance(target, str) and target:
                 ctx.current_node_id = target
-                return _with_ack(self.process(ctx, None, None))
+                return _with_ack(self.process(ctx, None, None, project_context))
             return EngineResponse(
                 kind="prompt",
                 message=self._generate_contextual_prompt(node, ctx),
@@ -359,7 +366,7 @@ class LLMFlowEngine:
             ctx.escalation_reason = None
 
             # After reset, process from the entry to generate the initial prompt
-            return _with_ack(self.process(ctx, None, None))
+            return _with_ack(self.process(ctx, None, None, project_context))
 
         # Unknown tool; let default prompt logic run
         return None
@@ -369,6 +376,7 @@ class LLMFlowEngine:
         ctx: FlowContext,
         node: DecisionNode,
         event: dict[str, Any] | None,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> EngineResponse:
         """Process a decision node with LLM-aware edge selection."""
         ctx.mark_node_visited(node.id)
@@ -389,20 +397,20 @@ class LLMFlowEngine:
                 for edge in edges:
                     if self._evaluate_guard(edge, ctx, event):
                         ctx.current_node_id = edge.target
-                        return self.process(ctx, None, None)
-                return self._handle_no_valid_transition(ctx, node)
+                        return self.process(ctx, None, None, project_context)
+                return self._handle_no_valid_transition(ctx, node, project_context)
 
-            selected_edge = self._select_edge_intelligently(edges, ctx, event)
+            selected_edge = self._select_edge_intelligently(edges, ctx, event, project_context)
             if selected_edge:
                 ctx.current_node_id = selected_edge.target
-                return self.process(ctx, None, None)
+                return self.process(ctx, None, None, project_context)
 
             # Fallback to guard evaluation (non-strict automatic mode)
             for edge in edges:
                 if self._evaluate_guard(edge, ctx, event):
                     ctx.current_node_id = edge.target
-                    return self.process(ctx, None, None)
-            return self._handle_no_valid_transition(ctx, node)
+                    return self.process(ctx, None, None, project_context)
+            return self._handle_no_valid_transition(ctx, node, project_context)
 
         # decision_type is llm_assisted or user_choice -> interactive path selection
         options: list[dict[str, Any]] = []
@@ -465,11 +473,11 @@ class LLMFlowEngine:
                         break
             except Exception:
                 pass
-            return self.process(ctx, None, None)
+            return self.process(ctx, None, None, project_context)
 
         if len(valid_edges) == 1:
             ctx.current_node_id = valid_edges[0].target
-            return self.process(ctx, None, None)
+            return self.process(ctx, None, None, project_context)
 
         if self._strict_mode or decision_type == "user_choice":
             return EngineResponse(
@@ -482,7 +490,7 @@ class LLMFlowEngine:
         selected_edge = self._select_edge_intelligently(edges, ctx, event)
         if selected_edge:
             ctx.current_node_id = selected_edge.target
-            return self.process(ctx, None, None)
+            return self.process(ctx, None, None, project_context)
 
         return EngineResponse(
             kind="prompt",
@@ -512,6 +520,7 @@ class LLMFlowEngine:
         ctx: FlowContext,
         node: Any,
         event: dict[str, Any] | None,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> EngineResponse:
         """Advance from current node to next."""
         edges = self._flow.edges_from.get(node.id, [])
@@ -532,22 +541,26 @@ class LLMFlowEngine:
 
         if not edges:
             # No outgoing edges, find next question or complete
-            return _with_ack(self._find_next_question(ctx))
+            return _with_ack(self._find_next_question(ctx, project_context))
 
         # Evaluate edges
         for edge in edges:
             if self._evaluate_guard(edge, ctx, event):
                 ctx.current_node_id = edge.target
-                return _with_ack(self.process(ctx, None, None))
+                return _with_ack(self.process(ctx, None, None, project_context))
 
         # No valid edge, stay on current node
-        return _with_ack(self.process(ctx, None, None))
+        return _with_ack(self.process(ctx, None, None, project_context))
 
-    def _find_next_question(self, ctx: FlowContext) -> EngineResponse:
+    def _find_next_question(
+        self,
+        ctx: FlowContext,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+    ) -> EngineResponse:
         """Find the next unanswered question intelligently."""
         if not self._llm and not self._strict_mode:
             # Fallback to simple priority-based selection
-            return self._find_next_question_simple(ctx)
+            return self._find_next_question_simple(ctx, project_context)
 
         # Use LLM to determine best next question based on context
         unanswered = self._get_unanswered_questions(ctx)
@@ -568,7 +581,7 @@ class LLMFlowEngine:
 
         if next_q:
             ctx.current_node_id = next_q["id"]
-            return self.process(ctx, None, None)
+            return self.process(ctx, None, None, project_context)
 
         return EngineResponse(
             kind="terminal",
@@ -634,15 +647,30 @@ class LLMFlowEngine:
 
         # Use LLM for contextual clarification
         try:
+            # Build conversation context
+            recent_history = ctx.get_recent_history(3)
+            history_text = "\n".join(f"{h['role']}: {h['content']}" for h in recent_history)
+
+            # Get what we know so far
+            current_answers = ", ".join(f"{k}={v}" for k, v in ctx.answers.items()) or "nothing yet"
+
             instruction = (
-                f"The user asked: '{user_message}' about the question: '{node.prompt}'. "
-                f"Provide a helpful clarification that explains why we need this information. "
-                f"Keep it concise and friendly."
+                "O usuário está pedindo um esclarecimento sobre uma pergunta. Sua tarefa é explicar:\n"
+                "1. Qual informação específica você precisa\n"
+                "2. Por que essa informação é necessária (o que ela ajuda a decidir)\n"
+                "3. Dê 2–3 exemplos concretos para ficar muito claro\n"
+                "4. Use uma linguagem simples e amigável, como se estivesse ajudando um amigo\n\n"
+                f"Pergunta do usuário: '{user_message}'\n"
+                f"O que você perguntou: '{node.prompt}'\n"
+                f"Contexto: Estamos ajudando com {ctx.user_intent or 'a solicitação da pessoa'}\n"
+                f"O que já sabemos: {current_answers}\n"
+                f"Conversa recente:\n{history_text}\n\n"
+                "Gere uma explicação útil em português do Brasil que deixe claro o que você precisa e por quê. "
+                "Seja acolhedor, paciente e ofereça exemplos específicos com os quais a pessoa possa se identificar."
             )
-            context_info = f"We're discussing: {ctx.user_intent or 'your requirements'}"
-            return self._llm.rewrite(instruction, context_info)
+            return self._llm.rewrite(instruction, "")
         except Exception:
-            return f"Deixe-me esclarecer: {node.prompt}"
+            return f"Deixe-me esclarecer melhor: {node.prompt}\n\nPreciso dessa informação para te ajudar da melhor forma possível."
 
     def _validate_answer(self, node: QuestionNode, answer: Any, ctx: FlowContext) -> bool:
         """Validate an answer using the node's validator."""
@@ -689,7 +717,11 @@ class LLMFlowEngine:
             return False
 
     def _select_edge_intelligently(
-        self, edges: list, ctx: FlowContext, event: dict[str, Any] | None
+        self,
+        edges: list,
+        ctx: FlowContext,
+        event: dict[str, Any] | None,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> Any:
         """Use LLM to select the best edge based on context."""
         if not self._llm:
@@ -714,6 +746,12 @@ class LLMFlowEngine:
                 f"Options:\n" + "\n".join(edge_descriptions) + "\n"
                 "Reply with just the number of the best option."
             )
+
+            # Add project context if available to help with decision-making
+            if project_context and project_context.has_decision_context():
+                context_prompt = project_context.get_decision_context_prompt()
+                instruction = f"{instruction}\n{context_prompt}"
+
             response = self._llm.rewrite(instruction, "")
 
             # Parse response
@@ -743,7 +781,11 @@ class LLMFlowEngine:
         return None
 
     def _generate_decision_prompt(
-        self, node: DecisionNode, options: list[dict[str, Any]], ctx: FlowContext
+        self,
+        node: DecisionNode,
+        options: list[dict[str, Any]],
+        ctx: FlowContext,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> str:
         # If a custom decision_prompt is provided in the flow, use it verbatim
         if getattr(node, "decision_prompt", None):
@@ -898,7 +940,12 @@ class LLMFlowEngine:
             metadata={"error": "dead_end"},
         )
 
-    def _handle_no_valid_transition(self, ctx: FlowContext, node: Any) -> EngineResponse:
+    def _handle_no_valid_transition(
+        self,
+        ctx: FlowContext,
+        node: Any,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+    ) -> EngineResponse:
         """Handle case when no valid transition is found."""
         if self._strict_mode:
             return EngineResponse(
@@ -909,15 +956,19 @@ class LLMFlowEngine:
             )
 
         # In flexible mode, try to recover
-        return self._find_next_question(ctx)
+        return self._find_next_question(ctx, project_context)
 
-    def _find_next_question_simple(self, ctx: FlowContext) -> EngineResponse:
+    def _find_next_question_simple(
+        self,
+        ctx: FlowContext,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+    ) -> EngineResponse:
         """Simple fallback for finding next question."""
         for node_id, node in self._flow.nodes.items():
             if isinstance(node, QuestionNode):
                 if node.key not in ctx.answers:
                     ctx.current_node_id = node.id
-                    return self.process(ctx, None, None)
+                    return self.process(ctx, None, None, project_context)
 
         return EngineResponse(
             kind="terminal",

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
@@ -16,7 +17,16 @@ from app.core.conversation import run_agent_turn
 from app.core.langchain_adapter import LangChainToolsLLM
 from app.core.messages import InboundMessage
 from app.core.session import WindowedSessionPolicy
+from app.db.models import MessageDirection, MessageStatus
+from app.db.repository import (
+    find_channel_instance_by_identifier,
+    get_or_create_contact,
+    get_or_create_thread,
+)
+from app.db.session import create_session
 from app.services.human_handoff import LoggingHandoff
+from app.services.message_logging_service import message_logging_service
+from app.services.tenant_config_service import TenantConfigService
 from app.settings import get_settings
 
 from .adapter import WhatsAppAdapter
@@ -113,28 +123,71 @@ async def handle_twilio_whatsapp_webhook(
     )
 
     app_context = get_app_context(request.app)  # type: ignore[arg-type]
-    # Per-tenant discovery: for now the WhatsApp number belongs to a single tenant
-    # If multi-tenant routing is added, replace this with real lookup.
-    tenant_id = "default"
-    channel_config, available_channels = get_channel_config_for_channel(
-        app_context, receiver_number
-    )
-    if not channel_config or not channel_config.agent_instances:
-        logger.warning(
-            "No channel config/agent instances found for %s (available=%s)",
-            receiver_number,
-            ", ".join(available_channels) if available_channels else "<none>",
-        )
-        return adapter.build_sync_response(
-            "Desculpe, nenhum agente está configurado para este número do WhatsApp."
-        )
 
-    agent_instance = select_agent_instance(channel_config)
-    agent_deps = build_agent_dependencies(app_context, agent_instance)
+    # Get tenant configuration from database using channel identifier
+    project_context = None
+    tenant_id: UUID | None = None
 
-    if agent_instance.agent_type != "sales_qualifier":
-        logger.warning("Unsupported agent_type=%s", agent_instance.agent_type)
-        return adapter.build_sync_response("Nenhum agente adequado disponível.")
+    session = create_session()
+    try:
+        tenant_service = TenantConfigService(session)
+        project_context = tenant_service.get_project_context_by_channel_identifier(receiver_number)
+
+        if not project_context:
+            logger.warning("No tenant configuration found for WhatsApp number: %s", receiver_number)
+            return adapter.build_sync_response(
+                "Desculpe, este número do WhatsApp não está configurado."
+            )
+
+        tenant_id = project_context.tenant_id
+        logger.info("Found tenant %s for channel %s", tenant_id, receiver_number)
+
+    except Exception as e:
+        logger.error("Failed to get tenant configuration: %s", e)
+        return adapter.build_sync_response("Desculpe, ocorreu um erro interno. Tente novamente.")
+    finally:
+        session.close()
+
+    # Use mock config fallback for now until full migration
+    # TODO: Remove this fallback once all channels are in database
+    try:
+        channel_config, available_channels = get_channel_config_for_channel(
+            app_context, receiver_number
+        )
+        if channel_config and channel_config.agent_instances:
+            agent_instance = select_agent_instance(channel_config)
+            agent_deps = build_agent_dependencies(app_context, agent_instance)
+        else:
+            # Create default agent configuration for database-managed channels
+            agent_deps = BaseAgentDeps(
+                store=app_context.store,
+                llm=LangChainToolsLLM(
+                    init_chat_model("gemini-2.5-flash", model_provider="google_genai")
+                ),
+                handoff=LoggingHandoff(),
+            )
+            # Create a basic agent instance config
+            from app.config.provider import AgentInstanceConfig
+
+            agent_instance = AgentInstanceConfig(
+                instance_id="default_sales_qualifier", agent_type="sales_qualifier"
+            )
+    except Exception as e:
+        logger.warning("Mock config fallback failed, using database-only mode: %s", e)
+        # Create default agent configuration for database-managed channels
+        agent_deps = BaseAgentDeps(
+            store=app_context.store,
+            llm=LangChainToolsLLM(
+                init_chat_model("gemini-2.5-flash", model_provider="google_genai")
+            ),
+            handoff=LoggingHandoff(),
+        )
+        # Create a basic agent instance config
+        from app.config.provider import AgentInstanceConfig
+
+        agent_instance = AgentInstanceConfig(
+            instance_id="default_sales_qualifier", agent_type="sales_qualifier"
+        )
 
     # Build the agent in strict mode to mirror CLI default behavior
     agent = build_sales_qualifier_agent(
@@ -148,8 +201,10 @@ async def handle_twilio_whatsapp_webhook(
         user_id=sender_number or "unknown", text=message_text, channel="whatsapp", metadata={}
     )
 
-    # Pass tenant_id via metadata for centralized rate limiting in run_agent_turn
-    inbound.metadata["tenant_id"] = tenant_id
+    # Pass tenant_id and project_context via metadata for centralized access
+    inbound.metadata["tenant_id"] = str(tenant_id) if tenant_id else "unknown"
+    if project_context:
+        inbound.metadata["project_context"] = project_context
     # Apply WhatsApp-specific 24h windowed session policy only here
     result = run_agent_turn(
         app_context,
@@ -179,8 +234,10 @@ async def handle_twilio_whatsapp_webhook(
         langchain_history=history, latest_user_input=message_text
     )
 
-    # Rewrite into multi-message plan
-    messages = rewriter.rewrite_message(reply_text, chat_history, enable_rewrite=True)
+    # Rewrite into multi-message plan with project context for better communication style
+    messages = rewriter.rewrite_message(
+        reply_text, chat_history, enable_rewrite=True, project_context=project_context
+    )
     try:
         plan_preview = [
             f"{int(m.get('delay_ms', 0))}ms: {str(m.get('text', '')).strip()}"
@@ -196,6 +253,61 @@ async def handle_twilio_whatsapp_webhook(
     sync_reply = str(first_message.get("text", reply_text)).strip() or reply_text
 
     logger.info("Sending WhatsApp reply: %r (total messages: %d)", sync_reply, len(messages))
+
+    # Persist chat to SQL using async message logging service for non-blocking operation
+    if tenant_id:  # We already have tenant_id from earlier database lookup
+        try:
+            session = create_session()
+            try:
+                channel_instance = find_channel_instance_by_identifier(session, receiver_number)
+                if channel_instance is not None:
+                    # Contact external_id is the full provider id (e.g., whatsapp:+55119...)
+                    contact = get_or_create_contact(
+                        session,
+                        tenant_id,
+                        external_id=sender_number,
+                        phone_number=sender_number.replace("whatsapp:", ""),
+                        display_name=None,
+                    )
+                    thread = get_or_create_thread(
+                        session,
+                        tenant_id=tenant_id,
+                        channel_instance_id=channel_instance.id,
+                        contact_id=contact.id,
+                        flow_id=None,
+                    )
+                    session.commit()  # Commit contact and thread creation synchronously
+
+                    # Log inbound message asynchronously (non-blocking)
+                    await message_logging_service.save_message_async(
+                        tenant_id=tenant_id,
+                        channel_instance_id=channel_instance.id,
+                        thread_id=thread.id,
+                        contact_id=contact.id,
+                        text=message_text,
+                        direction=MessageDirection.inbound,
+                        provider_message_id=params.get("SmsMessageSid") or params.get("MessageSid"),
+                        status=MessageStatus.delivered,
+                        delivered_at=datetime.now(UTC),
+                    )
+
+                    # Log outbound sync reply asynchronously (non-blocking)
+                    if sync_reply:
+                        await message_logging_service.save_message_async(
+                            tenant_id=tenant_id,
+                            channel_instance_id=channel_instance.id,
+                            thread_id=thread.id,
+                            contact_id=contact.id,
+                            text=sync_reply,
+                            direction=MessageDirection.outbound,
+                            status=MessageStatus.sent,
+                            sent_at=datetime.now(UTC),
+                        )
+
+            finally:
+                session.close()
+        except Exception as exc:  # pragma: no cover - best effort persistence
+            logger.warning("Failed to persist WhatsApp chat metadata: %s", exc)
 
     # Send follow-ups if there are any
     if len(messages) > 1:
