@@ -979,7 +979,8 @@ class TestErrorHandlingAndRecovery:
         # Should detect dead end
         assert compiled.validation_warnings  # Should have warnings about missing terminal
 
-        engine = LLMFlowEngine(compiled, strict_mode=False)
+        mock_llm = MockLLM([])
+        engine = LLMFlowEngine(compiled, mock_llm, strict_mode=False)
         ctx = engine.initialize_context()
 
         # Process until dead end

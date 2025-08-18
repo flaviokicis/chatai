@@ -350,8 +350,9 @@ class TestLLMFlowEngine:
         """Test engine initialization."""
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
+        mock_llm = MockLLM([])
 
-        engine = LLMFlowEngine(compiled, strict_mode=True)
+        engine = LLMFlowEngine(compiled, mock_llm, strict_mode=True)
         ctx = engine.initialize_context()
 
         assert ctx.flow_id == "test_flow"
@@ -361,8 +362,9 @@ class TestLLMFlowEngine:
         """Test engine in strict mode (traditional state machine)."""
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
+        mock_llm = MockLLM([])
 
-        engine = LLMFlowEngine(compiled, strict_mode=True)
+        engine = LLMFlowEngine(compiled, mock_llm, strict_mode=True)
         ctx = engine.initialize_context()
 
         # Process first step
@@ -399,7 +401,8 @@ class TestLLMFlowEngine:
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
 
-        engine = LLMFlowEngine(compiled, strict_mode=False)
+        mock_llm = MockLLM([])
+        engine = LLMFlowEngine(compiled, mock_llm, strict_mode=False)
         ctx = engine.initialize_context()
 
         # Move to name question
@@ -415,7 +418,8 @@ class TestLLMFlowEngine:
         compiler = FlowCompiler()
         compiled = compiler.compile(branching_flow)
 
-        engine = LLMFlowEngine(compiled, strict_mode=True)
+        mock_llm = MockLLM([])
+        engine = LLMFlowEngine(compiled, mock_llm, strict_mode=True)
         ctx = engine.initialize_context()
 
         # Get to user type question

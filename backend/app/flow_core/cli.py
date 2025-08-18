@@ -71,29 +71,27 @@ def run_cli() -> None:
 
     print(f"Flow: {flow.id}")
 
-    # Setup LLM and runner
-    llm_client = None
-    if args.llm:
-        # Ensure .env is loaded so GOOGLE_API_KEY is available for Gemini
-        load_dotenv()
-        if not os.environ.get("GOOGLE_API_KEY"):
-            print("[warn] GOOGLE_API_KEY not set; falling back to manual responder.")
-            args.llm = False
+    # Setup LLM and runner - LLM is always required
+    if not args.llm:
+        print("[error] LLM mode is required. Use --llm flag.")
+        return
 
-    if args.llm:
-        # Initialize Gemini via LangChain init_chat_model to reuse existing adapter
-        chat = init_chat_model(args.model, model_provider="google_genai")
-        llm_client = LangChainToolsLLM(chat)
-        runner = FlowTurnRunner(compiled, llm_client, strict_mode=False)
-        rewrite_status = "on" if (not args.no_rewrite) else "off"
-        delay_status = "off" if args.no_delays else "on"
-        debug_status = "on" if args.debug else "off"
-        print(
-            f"[mode] LLM mode: model={args.model}, rewrite={rewrite_status}, delays={delay_status}, debug={debug_status}"
-        )
-    else:
-        runner = FlowTurnRunner(compiled, None, strict_mode=True)
-        print("[mode] Manual mode (no LLM)")
+    # Ensure .env is loaded so GOOGLE_API_KEY is available for Gemini
+    load_dotenv()
+    if not os.environ.get("GOOGLE_API_KEY"):
+        print("[error] GOOGLE_API_KEY not set. LLM is required for operation.")
+        return
+
+    # Initialize Gemini via LangChain init_chat_model to reuse existing adapter
+    chat = init_chat_model(args.model, model_provider="google_genai")
+    llm_client = LangChainToolsLLM(chat)
+    runner = FlowTurnRunner(compiled, llm_client, strict_mode=False)
+    rewrite_status = "on" if (not args.no_rewrite) else "off"
+    delay_status = "off" if args.no_delays else "on"
+    debug_status = "on" if args.debug else "off"
+    print(
+        f"[mode] LLM mode: model={args.model}, rewrite={rewrite_status}, delays={delay_status}, debug={debug_status}"
+    )
 
     # Setup channel adapter and rewriter
     cli_adapter = CLIAdapter(enable_delays=not args.no_delays, debug_mode=args.debug)

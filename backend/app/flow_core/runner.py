@@ -34,7 +34,7 @@ class FlowTurnRunner:
     def __init__(
         self,
         compiled_flow,  # type: ignore[no-untyped-def]
-        llm: LLMClient | None = None,
+        llm: LLMClient,  # type: ignore[name-defined]
         *,
         extra_tools: list[type] | None = None,
         instruction_prefix: str | None = None,
@@ -44,13 +44,13 @@ class FlowTurnRunner:
 
         Args:
             compiled_flow: The compiled flow to execute
-            llm: Optional LLM client for intelligent responses
+            llm: LLM client for intelligent responses
             extra_tools: Additional tools to make available
             instruction_prefix: Custom instruction text to prepend
             strict_mode: If True, enforce traditional state machine behavior
         """
         self._engine = LLMFlowEngine(compiled_flow, llm, strict_mode=strict_mode)
-        self._responder = LLMFlowResponder(llm) if llm else None
+        self._responder = LLMFlowResponder(llm)
         self._compiled = compiled_flow
         self._extra_tools = extra_tools or []
         self._instruction_prefix = instruction_prefix
@@ -191,6 +191,12 @@ class FlowTurnRunner:
         engine_event: dict[str, object] = {"tool_name": responder_result.tool_name or ""}
         if ctx.pending_field and ctx.pending_field in responder_result.updates:
             engine_event["answer"] = responder_result.updates[ctx.pending_field]
+        
+        # Pass all updates to engine event so decision nodes can access path selections
+        # and other non-pending-field updates
+        for key, value in responder_result.updates.items():
+            if key != ctx.pending_field:  # Avoid duplicating the answer field
+                engine_event[key] = value
         # Attach reasoning to engine event for downstream visibility
         if responder_result.metadata and isinstance(responder_result.metadata, dict):
             if responder_result.metadata.get("reasoning"):

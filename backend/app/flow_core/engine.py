@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 from .ir import DecisionNode, QuestionNode, TerminalNode
 from .state import FlowContext, NodeStatus
+from .tool_schemas import DetectClarificationRequest, SelectFlowEdge, SelectNextQuestion
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ class LLMFlowEngine:
     def __init__(
         self,
         compiled: CompiledFlow,  # type: ignore[name-defined]
-        llm: LLMClient | None = None,
+        llm: LLMClient,  # type: ignore[name-defined]
         *,
         strict_mode: bool = False,
     ) -> None:
@@ -52,7 +53,7 @@ class LLMFlowEngine:
 
         Args:
             compiled: The compiled flow to execute
-            llm: Optional LLM client for intelligent decisions
+            llm: LLM client for intelligent decisions
             strict_mode: If True, enforce traditional state machine behavior
         """
         self._flow = compiled
@@ -558,8 +559,8 @@ class LLMFlowEngine:
         project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> EngineResponse:
         """Find the next unanswered question intelligently."""
-        if not self._llm and not self._strict_mode:
-            # Fallback to simple priority-based selection
+        if self._strict_mode:
+            # Fallback to simple priority-based selection in strict mode
             return self._find_next_question_simple(ctx, project_context)
 
         # Use LLM to determine best next question based on context
@@ -593,7 +594,7 @@ class LLMFlowEngine:
         """Generate a context-aware prompt."""
         base_prompt = node.prompt
 
-        if not self._llm or self._strict_mode:
+        if self._strict_mode:
             return base_prompt
 
         # Check if this is a revisit
@@ -608,32 +609,22 @@ class LLMFlowEngine:
         return base_prompt
 
     def _is_clarification_request(self, message: str, ctx: FlowContext) -> bool:
-        """Detect if user is asking for clarification.
-
-        Uses simple heuristics without an LLM; with an LLM, defers to a concise rewrite check.
-        """
-        if not self._llm:
-            # Simple heuristic
-            clarification_keywords = [
-                "what do you mean",
-                "can you explain",
-                "i don't understand",
-                "what does that mean",
-                "why do you need",
-                "what for",
-            ]
-            text = message.lower().strip()
-            if any(k in text for k in clarification_keywords):
-                return True
-            return text.endswith("?")
-
+        """Detect if user is asking for clarification using proper decision-making tools."""
         try:
-            instruction = (
-                "Is the user asking for clarification about the current question? "
-                "Answer with just 'yes' or 'no'."
+            current_node = self._get_current_node(ctx)
+            current_prompt = current_node.prompt if current_node else "the current question"
+            
+            prompt = (
+                f"Current question: {current_prompt}\n"
+                f"User message: {message}\n\n"
+                f"Determine if the user is asking for clarification about the current question. "
+                f"Consider phrases like 'what do you mean', 'can you explain', 'I don't understand', etc."
             )
-            response = self._llm.rewrite(instruction, message)
-            return response.lower().strip().startswith("y")
+            
+            result = self._llm.extract(prompt, [DetectClarificationRequest])
+            if result.get("__tool_name__") == "DetectClarificationRequest":
+                return result.get("is_clarification", False)
+            return False
         except Exception:
             return False
 
@@ -641,9 +632,7 @@ class LLMFlowEngine:
         self, node: QuestionNode, user_message: str, ctx: FlowContext
     ) -> str:
         """Generate a clarification for the current question."""
-        if not self._llm:
-            # Simple template-based clarification
-            return f"Deixe-me esclarecer: {node.prompt}\n\nIsso nos ajuda a entender melhor suas necessidades."
+
 
         # Use LLM for contextual clarification
         try:
@@ -683,8 +672,7 @@ class LLMFlowEngine:
 
     def _generate_validation_prompt(self, node: QuestionNode, answer: Any, ctx: FlowContext) -> str:
         """Generate a prompt for validation failure."""
-        if not self._llm:
-            return f"Não consegui entender '{answer}'. {node.prompt}"
+
 
         try:
             instruction = (
@@ -724,9 +712,7 @@ class LLMFlowEngine:
         project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> Any:
         """Use LLM to select the best edge based on context."""
-        if not self._llm:
-            # No LLM available → do not auto-select
-            return None
+
 
         # Build context for LLM
         edge_descriptions = []
@@ -752,12 +738,11 @@ class LLMFlowEngine:
                 context_prompt = project_context.get_decision_context_prompt()
                 instruction = f"{instruction}\n{context_prompt}"
 
-            response = self._llm.rewrite(instruction, "")
-
-            # Parse response
-            for i, edge in enumerate(edges):
-                if str(i) in response:
-                    return edge
+            result = self._llm.extract(instruction, [SelectFlowEdge])
+            if result.get("__tool_name__") == "SelectFlowEdge":
+                selected_index = result.get("selected_edge_index")
+                if selected_index is not None and 0 <= selected_index < len(edges):
+                    return edges[selected_index]
         except Exception:
             pass
 
@@ -879,9 +864,7 @@ class LLMFlowEngine:
         if not questions:
             return None
 
-        if not self._llm:
-            # Fallback to priority
-            return min(questions, key=lambda q: q["priority"])
+
 
         try:
             question_list = "\n".join(
@@ -896,12 +879,11 @@ class LLMFlowEngine:
                 f"Reply with just the number of the best question to ask next."
             )
 
-            response = self._llm.rewrite(instruction, "")
-
-            # Parse response
-            for i, q in enumerate(questions):
-                if str(i) in response:
-                    return q
+            result = self._llm.extract(instruction, [SelectNextQuestion])
+            if result.get("__tool_name__") == "SelectNextQuestion":
+                selected_index = result.get("selected_question_index")
+                if selected_index is not None and 0 <= selected_index < len(questions):
+                    return questions[selected_index]
         except Exception:
             pass
 
@@ -996,8 +978,7 @@ class LLMFlowEngine:
 
     def _add_conversational_context(self, prompt: str, ctx: FlowContext) -> str:
         """Add conversational context to prompt."""
-        if not self._llm:
-            return prompt
+
 
         try:
             recent_context = ctx.get_recent_history(3)
