@@ -98,7 +98,13 @@ class LLMResponder(Responder):
 
         instruction = (
             "Given the user's latest message and the current question, choose the best tool.\n"
-            "Prefer UpdateAnswersFlow with a short value for the pending field if you can extract it.\n"
+            "Prefer UpdateAnswersFlow when you can extract an answer for the pending field.\n"
+            "IMPORTANT: Preserve qualifiers, comparators, ranges and units from the user's wording.\n"
+            "- Do NOT remove words like 'up to'/'até', 'at most'/'no máximo', 'at least'/'pelo menos',\n"
+            "  'more than'/'mais de', 'less than'/'menos de', 'about'/'cerca de', 'approximately'/'aprox.',\n"
+            "  ranges like 'between X and Y'/'entre X e Y', tildes '~', and currency/measurement units (e.g., 'reais', 'R$', 'm', 'lux').\n"
+            "- Prefer capturing the exact phrase span (e.g., 'até 1000 reais') over a shortened value ('1000 reais').\n"
+            "- When uncertain, include more of the original phrase to avoid losing meaning.\n\n"
             "Use UnknownAnswer if the user doesn't know OR if the user asks a question about the prompt (clarification). "
             "Use RequestHumanHandoff only when necessary.\n\n"
             "Do NOT produce any assistant-facing messages; only choose a tool and its arguments.\n\n"

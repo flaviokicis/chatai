@@ -16,6 +16,21 @@ dev:
 test:
 	. .venv/bin/activate && uv run pytest -q
 
+# Run basic LLM integration tests (requires GOOGLE_API_KEY)
+.PHONY: test-integration
+test-integration:
+	. .venv/bin/activate && source .env && PYTHONPATH=. uv run pytest tests/test_integration_llm_flow.py::TestLLMFlowIntegration::test_basic_llm_integration_core_tools -v
+
+# Run comprehensive LLM integration tests (many API calls, ~3-5 minutes)
+.PHONY: test-integration-full
+test-integration-full:
+	. .venv/bin/activate && source .env && PYTHONPATH=. GOOGLE_API_KEY="$$GOOGLE_API_KEY" uv run pytest tests/test_comprehensive_dentist_flow.py tests/test_integration_specific_tools.py -m "integration and llm" -v -s
+
+# Run all integration tests with proper setup
+.PHONY: test-integration-all
+test-integration-all:
+	./scripts/test_llm_integration.sh --full
+
 lint:
 	. .venv/bin/activate && uv run ruff check .
 

@@ -1,0 +1,147 @@
+{
+  "schema_version": "v1",
+  "id": "flow.consultorio_dentista",
+  "entry": "q.motivo_consulta",
+  "policies": { 
+    "path_selection": { 
+      "lock_threshold": 3, 
+      "allow_switch_before_lock": true 
+    },
+    "conversation": {
+      "allow_clarifications": true,
+      "max_clarifications": 3,
+      "allow_revisit": true
+    }
+  },
+  "nodes": [
+    { "id": "q.motivo_consulta", "kind": "Question", "key": "motivo_consulta", "prompt": "Olá! Bem-vindo ao nosso consultório. Como posso te ajudar hoje?" },
+
+    { "id": "d.triagem_inicial", "kind": "Decision", "label": "Triagem por tipo de necessidade", "decision_type": "llm_assisted", "decision_prompt": "Com base no que o paciente descreveu, qual o melhor caminho: limpeza/rotina, emergência/dor, ortodontia, ou outros procedimentos?" },
+
+    { "id": "q.ultima_limpeza", "kind": "Question", "key": "ultima_limpeza", "prompt": "Quando foi sua última limpeza dental?", "allowed_values": ["menos de 6 meses", "6 meses a 1 ano", "mais de 1 ano", "nunca fiz"] },
+    { "id": "d.situacao_higiene", "kind": "Decision", "label": "Avaliação da situação de higiene", "decision_type": "llm_assisted", "decision_prompt": "Com base na última limpeza, determinar se é caso de limpeza simples, tratamento de gengiva, ou prevenção intensiva" },
+    
+    { "id": "q.limpeza_simples_motivo", "kind": "Question", "key": "limpeza_simples_motivo", "prompt": "Além da limpeza, há algo específico que te incomoda nos dentes?" },
+    
+    { "id": "q.problemas_gengiva", "kind": "Question", "key": "problemas_gengiva", "prompt": "Você tem notado sangramento ou sensibilidade na gengiva?" },
+    { "id": "q.frequencia_escovacao", "kind": "Question", "key": "frequencia_escovacao", "prompt": "Quantas vezes por dia você escova os dentes?" },
+    { "id": "q.uso_fio_dental", "kind": "Question", "key": "uso_fio_dental", "prompt": "Você usa fio dental regularmente?" },
+    
+    { "id": "q.habitos_higiene", "kind": "Question", "key": "habitos_higiene", "prompt": "Você tem interesse em aprender técnicas de escovação adequada?" },
+    { "id": "q.produtos_recomendados", "kind": "Question", "key": "produtos_recomendados", "prompt": "Gostaria de recomendações de produtos específicos para sua situação?" },
+    
+    { "id": "q.intensidade_dor", "kind": "Question", "key": "intensidade_dor", "prompt": "Em uma escala de 1 a 10, qual a intensidade da sua dor?", "allowed_values": ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"] },
+    { "id": "d.nivel_emergencia", "kind": "Decision", "label": "Classificação do nível de emergência", "decision_type": "llm_assisted", "decision_prompt": "Com base na intensidade da dor, determinar se é emergência imediata (dor 8-10), urgente (dor 5-7), ou pode aguardar agendamento (dor 1-4)" },
+    
+    { "id": "q.disponibilidade_hoje", "kind": "Question", "key": "disponibilidade_hoje", "prompt": "Você pode vir ao consultório agora? Temos um encaixe disponível." },
+    { "id": "q.acompanhante_emergencia", "kind": "Question", "key": "acompanhante_emergencia", "prompt": "Você tem alguém que possa te acompanhar ao consultório?" },
+    
+    { "id": "q.localizacao_dor", "kind": "Question", "key": "localizacao_dor", "prompt": "Você consegue indicar onde exatamente está doendo?" },
+    { "id": "q.inicio_sintomas", "kind": "Question", "key": "inicio_sintomas", "prompt": "Há quanto tempo você está sentindo essa dor?" },
+    { "id": "q.medicacao_dor", "kind": "Question", "key": "medicacao_dor", "prompt": "Você está tomando algum medicamento para dor?" },
+    
+    { "id": "q.agendamento_breve", "kind": "Question", "key": "agendamento_breve", "prompt": "Que tal agendarmos para ainda esta semana? Você prefere que dia?" },
+    
+    { "id": "q.interesse_ortodontia", "kind": "Question", "key": "interesse_ortodontia", "prompt": "Que tipo de tratamento ortodôntico te interessa? (aparelho tradicional, invisível, ou apenas avaliação)", "allowed_values": ["aparelho tradicional", "aparelho invisível", "apenas avaliação"] },
+    { "id": "d.tipo_ortodontia", "kind": "Decision", "label": "Direcionamento por tipo de ortodontia", "decision_type": "llm_assisted", "decision_prompt": "Com base no interesse do paciente, direcionar para: avaliação inicial, tratamento estético, ou correção funcional" },
+    
+    { "id": "q.avaliacao_inicial_interesse", "kind": "Question", "key": "avaliacao_inicial_interesse", "prompt": "Você gostaria de agendar apenas uma consulta para avaliação ou já tem interesse em iniciar o tratamento?" },
+    { "id": "q.tempo_disponivel_tratamento", "kind": "Question", "key": "tempo_disponivel_tratamento", "prompt": "Você tem disponibilidade para consultas mensais durante 1-2 anos?" },
+    
+    { "id": "q.estetica_prioridade", "kind": "Question", "key": "estetica_prioridade", "prompt": "A questão estética é sua principal preocupação?" },
+    { "id": "q.discrição_aparelho", "kind": "Question", "key": "discrição_aparelho", "prompt": "É importante que o aparelho seja discreto/invisível?" },
+    
+    { "id": "q.problemas_mordida", "kind": "Question", "key": "problemas_mordida", "prompt": "Você tem dificuldades para mastigar ou sente desconforto na mordida?" },
+    { "id": "q.experiencia_anterior_orto", "kind": "Question", "key": "experiencia_anterior_orto", "prompt": "Você já usou aparelho ortodôntico antes?" },
+    
+    { "id": "q.procedimento_especifico", "kind": "Question", "key": "procedimento_especifico", "prompt": "Qual procedimento específico você gostaria de realizar? (extração, canal, restauração, implante, etc.)" },
+    { "id": "d.complexidade_procedimento", "kind": "Decision", "label": "Avaliação da complexidade do procedimento", "decision_type": "llm_assisted", "decision_prompt": "Com base no procedimento solicitado, determinar se é: procedimento simples, procedimento complexo, ou necessita avaliação prévia" },
+    
+    { "id": "q.procedimento_simples_quando", "kind": "Question", "key": "procedimento_simples_quando", "prompt": "Podemos agendar esse procedimento para esta semana mesmo. Qual dia prefere?" },
+    
+    { "id": "q.procedimento_complexo_preparo", "kind": "Question", "key": "procedimento_complexo_preparo", "prompt": "Esse procedimento pode requerer mais sessões. Você tem disponibilidade para múltiplas consultas?" },
+    { "id": "q.exames_complementares", "kind": "Question", "key": "exames_complementares", "prompt": "Você tem algum exame recente (raio-x, tomografia) relacionado a essa região?" },
+    
+    { "id": "q.indicacao_medica", "kind": "Question", "key": "indicacao_medica", "prompt": "Esse procedimento foi indicado por algum dentista?" },
+    { "id": "q.segunda_opinião", "kind": "Question", "key": "segunda_opinião", "prompt": "Gostaria de uma avaliação completa antes de decidirmos o melhor tratamento?" },
+    
+    { "id": "q.plano_saude", "kind": "Question", "key": "plano_saude", "prompt": "Você tem plano odontológico ou pagará particular?", "allowed_values": ["plano odontológico", "particular"] },
+    { "id": "q.urgencia_atendimento", "kind": "Question", "key": "urgencia_atendimento", "prompt": "Qual a urgência do atendimento? (hoje mesmo, esta semana, este mês, sem pressa)", "allowed_values": ["hoje mesmo", "esta semana", "este mês", "sem pressa"] },
+    { "id": "q.horario_preferencia", "kind": "Question", "key": "horario_preferencia", "prompt": "Qual seu horário de preferência para consultas? (manhã, tarde, noite)", "allowed_values": ["manhã", "tarde", "noite"] },
+    { "id": "q.contato_paciente", "kind": "Question", "key": "contato_paciente", "prompt": "Qual o melhor telefone para entrarmos em contato?" },
+    
+    { "id": "t.agendamento_rotina", "kind": "Terminal", "reason": "Consulta de rotina agendada com sucesso" },
+    { "id": "t.emergencia_encaminhada", "kind": "Terminal", "reason": "Emergência direcionada para atendimento imediato" },
+    { "id": "t.ortodontia_avaliacao", "kind": "Terminal", "reason": "Avaliação ortodôntica agendada" },
+    { "id": "t.procedimento_agendado", "kind": "Terminal", "reason": "Procedimento específico agendado" }
+  ],
+  "edges": [
+    { "source": "q.motivo_consulta", "target": "d.triagem_inicial", "guard": { "fn": "answers_has", "args": { "key": "motivo_consulta" } }, "priority": 0 },
+
+    { "source": "d.triagem_inicial", "target": "q.ultima_limpeza", "guard": { "fn": "always", "args": { "if": "paciente quer limpeza ou consulta de rotina" } }, "priority": 0, "condition_description": "Caminho: limpeza/rotina" },
+    { "source": "d.triagem_inicial", "target": "q.intensidade_dor", "guard": { "fn": "always", "args": { "if": "paciente tem dor ou emergência dental" } }, "priority": 1, "condition_description": "Caminho: emergência/dor" },
+    { "source": "d.triagem_inicial", "target": "q.interesse_ortodontia", "guard": { "fn": "always", "args": { "if": "paciente interessado em ortodontia ou aparelho" } }, "priority": 2, "condition_description": "Caminho: ortodontia" },
+    { "source": "d.triagem_inicial", "target": "q.procedimento_especifico", "guard": { "fn": "always", "args": { "if": "paciente quer procedimento específico" } }, "priority": 3, "condition_description": "Caminho: outros procedimentos" },
+
+    { "source": "q.ultima_limpeza", "target": "d.situacao_higiene", "priority": 0 },
+    { "source": "d.situacao_higiene", "target": "q.limpeza_simples_motivo", "guard": { "fn": "always", "args": { "if": "limpeza recente, caso simples" } }, "priority": 0, "condition_description": "Subcaminho: limpeza simples" },
+    { "source": "d.situacao_higiene", "target": "q.problemas_gengiva", "guard": { "fn": "always", "args": { "if": "limpeza atrasada, possíveis problemas gengivais" } }, "priority": 1, "condition_description": "Subcaminho: tratamento gengiva" },
+    { "source": "d.situacao_higiene", "target": "q.habitos_higiene", "guard": { "fn": "always", "args": { "if": "nunca fez limpeza, precisa prevenção intensiva" } }, "priority": 2, "condition_description": "Subcaminho: prevenção intensiva" },
+    
+    { "source": "q.limpeza_simples_motivo", "target": "q.plano_saude", "priority": 0 },
+    { "source": "q.problemas_gengiva", "target": "q.frequencia_escovacao", "priority": 0 },
+    { "source": "q.frequencia_escovacao", "target": "q.uso_fio_dental", "priority": 0 },
+    { "source": "q.uso_fio_dental", "target": "q.plano_saude", "priority": 0 },
+    { "source": "q.habitos_higiene", "target": "q.produtos_recomendados", "priority": 0 },
+    { "source": "q.produtos_recomendados", "target": "q.plano_saude", "priority": 0 },
+
+
+    { "source": "q.intensidade_dor", "target": "d.nivel_emergencia", "priority": 0 },
+    { "source": "d.nivel_emergencia", "target": "q.disponibilidade_hoje", "guard": { "fn": "always", "args": { "if": "dor alta 8-10, emergência imediata" } }, "priority": 0, "condition_description": "Subcaminho: emergência imediata" },
+    { "source": "d.nivel_emergencia", "target": "q.localizacao_dor", "guard": { "fn": "always", "args": { "if": "dor média 5-7, urgente" } }, "priority": 1, "condition_description": "Subcaminho: urgente" },
+    { "source": "d.nivel_emergencia", "target": "q.agendamento_breve", "guard": { "fn": "always", "args": { "if": "dor baixa 1-4, pode aguardar" } }, "priority": 2, "condition_description": "Subcaminho: agendamento normal" },
+    
+    { "source": "q.disponibilidade_hoje", "target": "q.acompanhante_emergencia", "priority": 0 },
+    { "source": "q.acompanhante_emergencia", "target": "q.plano_saude", "priority": 0 },
+    { "source": "q.localizacao_dor", "target": "q.inicio_sintomas", "priority": 0 },
+    { "source": "q.inicio_sintomas", "target": "q.medicacao_dor", "priority": 0 },
+    { "source": "q.medicacao_dor", "target": "q.plano_saude", "priority": 0 },
+    { "source": "q.agendamento_breve", "target": "q.plano_saude", "priority": 0 },
+
+    
+    { "source": "q.interesse_ortodontia", "target": "d.tipo_ortodontia", "priority": 0 },
+    { "source": "d.tipo_ortodontia", "target": "q.avaliacao_inicial_interesse", "guard": { "fn": "always", "args": { "if": "apenas avaliação inicial" } }, "priority": 0, "condition_description": "Subcaminho: avaliação inicial" },
+    { "source": "d.tipo_ortodontia", "target": "q.estetica_prioridade", "guard": { "fn": "always", "args": { "if": "interesse em aparelho invisível, foco estético" } }, "priority": 1, "condition_description": "Subcaminho: tratamento estético" },
+    { "source": "d.tipo_ortodontia", "target": "q.problemas_mordida", "guard": { "fn": "always", "args": { "if": "aparelho tradicional, correção funcional" } }, "priority": 2, "condition_description": "Subcaminho: correção funcional" },
+    
+    { "source": "q.avaliacao_inicial_interesse", "target": "q.tempo_disponivel_tratamento", "priority": 0 },
+    { "source": "q.tempo_disponivel_tratamento", "target": "q.plano_saude", "priority": 0 },
+    { "source": "q.estetica_prioridade", "target": "q.discrição_aparelho", "priority": 0 },
+    { "source": "q.discrição_aparelho", "target": "q.plano_saude", "priority": 0 },
+    { "source": "q.problemas_mordida", "target": "q.experiencia_anterior_orto", "priority": 0 },
+    { "source": "q.experiencia_anterior_orto", "target": "q.plano_saude", "priority": 0 },
+
+
+    { "source": "q.procedimento_especifico", "target": "d.complexidade_procedimento", "priority": 0 },
+    { "source": "d.complexidade_procedimento", "target": "q.procedimento_simples_quando", "guard": { "fn": "always", "args": { "if": "procedimento simples como limpeza, restauração pequena" } }, "priority": 0, "condition_description": "Subcaminho: procedimento simples" },
+    { "source": "d.complexidade_procedimento", "target": "q.procedimento_complexo_preparo", "guard": { "fn": "always", "args": { "if": "procedimento complexo como canal, implante" } }, "priority": 1, "condition_description": "Subcaminho: procedimento complexo" },
+    { "source": "d.complexidade_procedimento", "target": "q.indicacao_medica", "guard": { "fn": "always", "args": { "if": "procedimento que precisa avaliação prévia" } }, "priority": 2, "condition_description": "Subcaminho: avaliação necessária" },
+    
+    { "source": "q.procedimento_simples_quando", "target": "q.plano_saude", "priority": 0 },
+    { "source": "q.procedimento_complexo_preparo", "target": "q.exames_complementares", "priority": 0 },
+    { "source": "q.exames_complementares", "target": "q.plano_saude", "priority": 0 },
+    { "source": "q.indicacao_medica", "target": "q.segunda_opinião", "priority": 0 },
+    { "source": "q.segunda_opinião", "target": "q.plano_saude", "priority": 0 },
+    
+
+    { "source": "q.plano_saude", "target": "q.urgencia_atendimento", "priority": 0 },
+    { "source": "q.urgencia_atendimento", "target": "q.horario_preferencia", "priority": 0 },
+    { "source": "q.horario_preferencia", "target": "q.contato_paciente", "priority": 0 },
+    
+
+    { "source": "q.contato_paciente", "target": "t.agendamento_rotina", "guard": { "fn": "answers_has", "args": { "key": "ultima_limpeza" } }, "priority": 0 },
+    { "source": "q.contato_paciente", "target": "t.emergencia_encaminhada", "guard": { "fn": "answers_has", "args": { "key": "intensidade_dor" } }, "priority": 1 },
+    { "source": "q.contato_paciente", "target": "t.ortodontia_avaliacao", "guard": { "fn": "answers_has", "args": { "key": "interesse_ortodontia" } }, "priority": 2 },
+    { "source": "q.contato_paciente", "target": "t.procedimento_agendado", "guard": { "fn": "answers_has", "args": { "key": "procedimento_especifico" } }, "priority": 3 }
+  ]
+}

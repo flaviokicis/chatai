@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from app.core.llm import LLMClient
 
 from app import dev_config
+from app.core.prompt_logger import prompt_logger
 
 from .state import FlowContext
 from .tool_schemas import (
@@ -114,9 +115,34 @@ class LLMFlowResponder:
         # Call LLM with tools
         try:
             result = self._llm.extract(instruction, tools)
+            
+            # Log the tool calling prompt and response
+            prompt_logger.log_prompt(
+                prompt_type="tool_calling",
+                instruction=instruction,
+                input_text=user_message or "",
+                response=json.dumps(result, ensure_ascii=False) if result else "None",
+                model=getattr(self._llm, 'model_name', 'unknown'),
+                metadata={
+                    "pending_field": pending_field,
+                    "tools": [t.__name__ if hasattr(t, '__name__') else str(t) for t in tools],
+                    "allowed_values": allowed_values
+                }
+            )
+            
             if dev_config.debug:
                 print(f"[DEBUG] LLM result: {result}")
         except Exception as e:
+            # Log the error
+            prompt_logger.log_prompt(
+                prompt_type="tool_calling_error",
+                instruction=instruction,
+                input_text=user_message or "",
+                response=f"ERROR: {e}",
+                model=getattr(self._llm, 'model_name', 'unknown'),
+                metadata={"error": str(e), "pending_field": pending_field}
+            )
+            
             if dev_config.debug:
                 print(f"[DEBUG] LLM extraction failed: {e}")
             # Fallback response on error
@@ -212,8 +238,14 @@ Recent Conversation:
         instruction += """
 
         Choose the most appropriate tool based on the user's intent:
-        - UpdateAnswersFlow: use when you can extract a concise answer for the CURRENT pending field.
-          Guidance for extraction: ignore greetings and filler words; use the meaningful noun phrase or value the user provided. Keep the value short.
+        - UpdateAnswersFlow: use when you can extract an answer for the CURRENT pending field.
+          Guidance for extraction: ignore greetings and filler words; use the meaningful noun phrase or value the user provided.
+          CRITICAL: Preserve qualifiers, comparators and units from the user's wording.
+          - Do NOT remove words like: "até"/"up to", "no máximo"/"at most", "pelo menos"/"at least",
+            "mais de"/"more than", "menos de"/"less than", "cerca de"/"about", "aprox."/"approximately",
+            ranges like "entre X e Y", tildes "~", and currency/measurement units (ex.: "reais", "R$", "m", "lux").
+          - Prefer capturing the exact span the user said (e.g., "até 1000 reais") over a normalized value ("1000 reais").
+          - When in doubt, include more of the original phrase to preserve meaning rather than shortening it.
         - ProvideInformation: use for meta-level acknowledgments or brief information that does NOT change state
           (e.g., reassuring the user that their case is fine, answering "is that a problem?", or offering a quick tip).
         - ClarifyQuestion: use if the user is asking about the meaning/purpose/options/format of the CURRENT question.

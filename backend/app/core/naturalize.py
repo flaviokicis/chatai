@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .prompt_logger import prompt_logger
+
 if TYPE_CHECKING:  # avoid hard import at runtime
     from app.services.tenant_config_service import ProjectContext
 
@@ -13,9 +15,35 @@ MAX_FOLLOWUP_DELAY_MS = 4000
 MAX_MULTI_MESSAGES = 8
 
 DEFAULT_INSTRUCTION = (
-    "Você é uma atendente brasileira no WhatsApp. Reescreva o prompt em uma frase única, natural e casual em português (Brasil),"
-    " com tom caloroso e do dia a dia. Regras: uma frase; sem listas; sem aspas; mantenha o significado; conciso;"
-    " reconheça sutilmente a última fala do usuário quando fizer sentido (ex.: 'entendi', 'claro')."
+    "CONTEXTO: Você é uma recepcionista brasileira profissional mas calorosa, reescrevendo mensagens para WhatsApp.\n\n"
+    "TOM IDEAL - RECEPCIONISTA BRASILEIRA:\n"
+    "- Profissional mas não fria\n"
+    "- Calorosa mas não excessivamente casual\n" 
+    "- Natural mas não gíria demais\n"
+    "- Simpática mas mantém respeito\n\n"
+    "ANÁLISE CONTEXTUAL CRÍTICA:\n"
+    "1. Se NÃO há mensagem do usuário ou é primeira interação → Seja acolhedora: 'Olá! Como posso ajudar?'\n"
+    "2. Se o usuário deu uma RESPOSTA/INFORMAÇÃO → Reconheça adequadamente: 'Perfeito!', 'Ótimo!', 'Entendi!'\n"
+    "3. Se o usuário fez SAUDAÇÃO ('oi', 'olá') → Responda à saudação: 'Oi! Tudo bem?', 'Olá!'\n"
+    "4. Se o usuário fez PERGUNTA → Seja prestativa sem reconhecimentos desnecessários\n\n"
+    "TRANSFORMAÇÃO:\n"
+    "Reescreva em UMA frase que:\n"
+    "- Soe como uma recepcionista brasileira experiente e querida\n"
+    "- Mantenha 100% do significado original\n"
+    "- Use linguagem natural mas adequada ao contexto profissional\n"
+    "- APENAS conecte com a mensagem anterior SE fizer sentido contextual\n"
+    "- Tenha personalidade sem perder a cordialidade profissional\n\n"
+    "VARIEDADE PROFISSIONAL:\n"
+    "- EVITE reconhecimentos genéricos quando não fazem sentido\n"
+    "- Varie inícios CONFORME O CONTEXTO: reconhecimento, saudação, ou pergunta direta\n"
+    "- Use formas cordiais: 'me conta', 'pode me dizer', 'qual seria', 'como funciona'\n"
+    "- Evite gírias muito casuais: não 'tipo', 'E aí', 'qual que é'\n\n"
+    "NATURALIDADE PROFISSIONAL:\n"
+    "- Use contrações naturais: 'tá', 'pra', 'né', mas com moderação\n"
+    "- Finalize cordialmente: '?' simples, 'certo?', ou sem nada\n"
+    "- Evite tanto formalidade excessiva quanto casualidade demais\n"
+    "- Tom: como uma recepcionista que você adora conversar mas que é competente\n\n"
+    "LEMBRE-SE: Uma frase só, profissional mas calorosa, CONTEXTUALMENTE APROPRIADA."
 )
 
 
@@ -24,15 +52,19 @@ def naturalize_prompt(
     text: str,
     instruction: str | None = None,
     project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+    user_message: str | None = None,
+    conversation_context: list[dict[str, str]] | None = None,
 ) -> str:
     """
-    Naturalize a prompt for WhatsApp with optional project context.
+    Naturalize a prompt for WhatsApp with optional project context and user context.
 
     Args:
         llm: LLM client for rewriting
         text: Original text to rewrite
         instruction: Custom instruction (overrides default)
         project_context: Business context for better communication style
+        user_message: The user's last message for context
+        conversation_context: Recent conversation history for context
     """
     instr = instruction or DEFAULT_INSTRUCTION
 
@@ -41,8 +73,30 @@ def naturalize_prompt(
         context_prompt = project_context.get_rewriter_context_prompt()
         instr = f"{instr}\n{context_prompt}"
 
+    # Build context-aware input for the LLM
+    llm_input = f"Texto para naturalizar: {text}"
+    
+    if user_message:
+        llm_input += f"\n\nÚltima mensagem do usuário: {user_message}"
+    
+    if conversation_context:
+        recent_msgs = conversation_context[-3:]  # Last 3 messages for context
+        context_str = "\n".join(f"{msg.get('role', 'unknown')}: {msg.get('content', '')}" for msg in recent_msgs)
+        llm_input += f"\n\nContexto da conversa:\n{context_str}"
+
     try:
-        rewritten = llm.rewrite(instr, text)
+        rewritten = llm.rewrite(instr, llm_input)
+        
+        # Log the prompt and response
+        prompt_logger.log_prompt(
+            prompt_type="naturalize_single",
+            instruction=instr,
+            input_text=llm_input,
+            response=rewritten if isinstance(rewritten, str) else str(rewritten),
+            model=getattr(llm, 'model_name', 'unknown'),
+            metadata={"has_project_context": project_context is not None}
+        )
+        
         if isinstance(rewritten, str) and rewritten.strip():
             # Defensive sanitization to ensure single-line question
             first_line = next((ln.strip() for ln in rewritten.splitlines() if ln.strip()), "")
@@ -52,7 +106,16 @@ def naturalize_prompt(
                 first_line = first_line[1:-1].strip()
             return first_line or text
         return text
-    except Exception:
+    except Exception as e:
+        # Log the error too
+        prompt_logger.log_prompt(
+            prompt_type="naturalize_single_error",
+            instruction=instr,
+            input_text=llm_input,
+            response=f"ERROR: {e}",
+            model=getattr(llm, 'model_name', 'unknown'),
+            metadata={"error": str(e)}
+        )
         return text
 
 
@@ -73,10 +136,23 @@ def clarify_and_reask(
         project_context: Business context for appropriate communication style
     """
     instr = (
-        "Papel: atendente brasileira no WhatsApp. O usuário pediu esclarecimento. "
-        "Faça um breve reconhecimento citando de leve a fala do usuário (ex.: 'ah, entendi', 'claro'), "
-        "e emende a pergunta original de forma natural e curta. "
-        "Uma única frase; sem listas; sem aspas; muito natural e do dia a dia; tom leve."
+        "CONTEXTO: Você é uma recepcionista brasileira profissional. A pessoa não entendeu sua pergunta e pediu esclarecimento.\n\n"
+        "RESPOSTA CONCISA E PROFISSIONAL:\n"
+        "Construa UMA frase cordial que:\n"
+        "- Reconheça gentilmente ('ah, claro', 'certo', 'sem problemas')\n"
+        "- Reformule de forma mais clara e simples\n"
+        "- Máximo 1-2 linhas no WhatsApp\n"
+        "- Tom: recepcionista simpática mas competente\n\n"
+        "EXEMPLOS DE TOM ADEQUADO:\n"
+        "- 'Claro! Preciso saber as dimensões do galpão - comprimento e largura em metros'\n"
+        "- 'Sem problemas! Qual o tamanho do espaço? Tipo 15x20 metros?'\n"
+        "- 'Certo, deixa eu reformular: quantos metros tem de comprimento e largura?'\n\n"
+        "CRÍTICO:\n"
+        "- NÃO faça listas numeradas ou explicações longas\n"
+        "- NÃO seja muito casual ('E aí', 'foi mal', 'ops')\n"
+        "- NÃO seja muito formal ('Senhor/Senhora', 'poderia informar')\n"
+        "- SÓ reformule a pergunta de forma clara e cordial\n"
+        "- Tom de recepcionista brasileira profissional\n"
     )
 
     # Add project context to instruction if available
@@ -87,6 +163,17 @@ def clarify_and_reask(
     try:
         text = f"Pergunta: {question_text}\nUsuário perguntou: {user_message}"
         rewritten = llm.rewrite(instr, text)
+        
+        # Log the prompt and response
+        prompt_logger.log_prompt(
+            prompt_type="clarify_reask",
+            instruction=instr,
+            input_text=text,
+            response=rewritten if isinstance(rewritten, str) else str(rewritten),
+            model=getattr(llm, 'model_name', 'unknown'),
+            metadata={"has_project_context": project_context is not None}
+        )
+        
         if isinstance(rewritten, str) and rewritten.strip():
             first_line = next((ln.strip() for ln in rewritten.splitlines() if ln.strip()), "")
             if first_line.startswith(("- ", "* ")):
@@ -95,7 +182,16 @@ def clarify_and_reask(
                 first_line = first_line[1:-1].strip()
             return first_line
         return question_text
-    except Exception:
+    except Exception as e:
+        # Log the error
+        prompt_logger.log_prompt(
+            prompt_type="clarify_reask_error",
+            instruction=instr,
+            input_text=text,
+            response=f"ERROR: {e}",
+            model=getattr(llm, 'model_name', 'unknown'),
+            metadata={"error": str(e)}
+        )
         return question_text
 
 
@@ -133,39 +229,64 @@ def rewrite_whatsapp_multi(
     history_block = "\n".join(history_lines[-200:])  # cap to keep prompt bounded
 
     instruction = (
-        "Papel: você é uma assistente virtual de IA brasileira, calorosa e amigável no WhatsApp.\n"
-        "Tarefa: reescreva a resposta do assistente em mensagens curtas e naturais, soando como uma pessoa de verdade.\n"
-        "Você decide quantas mensagens enviar (uma é ok; duas às vezes funcionam melhor).\n\n"
-        "REGRAS DE SIGNIFICADO (obrigatórias):\n"
-        "- Preserve o significado original. Não mude o tópico nem invente detalhes.\n"
-        "- Quando houver opções, mantenha os substantivos essenciais (ex.: 'quadra/tênis', 'campo/futebol', 'galpão').\n"
-        "- Evite tom de menu. NÃO use 'escolha uma opção', 'selecione', nem enumeração com números.\n"
-        "- Você pode reformular levemente a pergunta para ficar natural, desde que as opções apareçam como exemplos em uma única frase.\n"
-        "- Não adicione novas opções; não remova opções importantes.\n\n"
-        "ENERGIA E TOM (espelhar o usuário):\n"
-        "- Observe a última fala do usuário e espelhe a ENERGIA.\n"
-        "  * Se for animada (ex.: muitas exclamações, 'olaaaa', emojis), use um reconhecimento curto e animado (ex.: 'Opa!' ou 'Claro!') e 0-1 exclamações.\n"
-        "  * Se for neutra/formal, mantenha direto e simples (sem exclamações).\n"
-        "  * Pode usar emoji; mas sem exagerar 🙂.\n"
-        "- Não force empolgação se o usuário estiver formal.\n\n"
-        "Diretrizes de estilo:\n"
-        "- Comece com um reconhecimento breve que faça referência à fala do usuário quando fizer sentido.\n"
-        "- Faça a pergunta de forma simples e livre (ex.: 'é mais pra X, Y, Z ou algo diferente?').\n"
-        "- Sem listas ou bullets. Uma pergunta direta em tom de conversa.\n"
-        "- Mantenha cada mensagem com <= 120 caracteres.\n"
-        "- Evite repetir saudações.\n"
-        "- Tempo: primeira mensagem delay_ms = 0; seguintes entre 2200-4000 ms.\n\n"
-        "Identidade (quando perguntarem 'você é IA?'):\n"
-        "- Responda antes com: 'Sou uma assistente virtual de IA e estou aqui para te ajudar.' e depois continue normalmente.\n\n"
-        "Saída ESTRITAMENTE como um array JSON de {text: string, delay_ms: integer}.\n\n"
-        "Exemplos (apenas formato; adapte o tom):\n"
-        "Entrada: 'Com base na descrição do usuário, escolha o melhor caminho: quadra/tênis, campo/futebol, galpão ou outros.'\n"
-        '[\n  {"text": "Opa!", "delay_ms": 0},\n  {"text": "é mais pra quadra/tênis, campo/futebol, galpão ou algo diferente?", "delay_ms": 2400}\n]\n\n'
-        "Entrada: 'É em ambiente interno (indoor) ou externo (outdoor)?'\n"
-        '[\n  {"text": "É em ambiente interno (indoor) ou externo (outdoor)?", "delay_ms": 0}\n]\n\n'
-        "Entrada (formal): 'Com o que posso te ajudar hoje?'\n"
-        '[\n  {"text": "Como posso te ajudar hoje?", "delay_ms": 0}\n]\n\n'
-        "Importante: escreva as mensagens em português (Brasil)."
+        "Você é uma recepcionista brasileira profissional mas muito calorosa no WhatsApp. Imagine uma recepcionista exemplar - "
+        "competente, simpática, acolhedora, que as pessoas adoram ser atendidas por ela, mas sempre mantém profissionalismo.\n\n"
+        "ANÁLISE CONTEXTUAL (FAÇA ISSO PRIMEIRO):\n"
+        "Antes de responder, analise profundamente:\n"
+        "1. O tom emocional da última mensagem do usuário (animado? confuso? neutro? frustrado? curioso?)\n"
+        "2. O contexto da conversa até agora (primeira interação? já conversaram? qual o assunto?)\n"
+        "3. O tipo de resposta necessária (informação? confirmação? escolha? esclarecimento?)\n"
+        "4. A complexidade da resposta (simples = 1 msg, média = 2 msgs, complexa = 3+ msgs)\n\n"
+        "PERSONALIDADE PROFISSIONAL CALOROSA:\n"
+        "Adapte sua resposta baseado no contexto:\n"
+        "- Usuário animado → Seja cordial e positiva: 'Que ótimo!', 'Perfeito!', 'Excelente!'\n"
+        "- Usuário confuso → Seja paciente e clara: 'Sem problemas, vou esclarecer', 'Claro, deixa eu explicar'\n"
+        "- Usuário neutro → Seja profissional mas calorosa: 'Claro', 'Perfeito', 'Vamos lá'\n"
+        "- Usuário apressado → Seja eficiente mas gentil: 'Certo, vamos direto ao ponto'\n"
+        "- Primeira interação → Seja acolhedora mas profissional: 'Olá! Como posso ajudar?'\n\n"
+        "ESTRATÉGIA DE MENSAGENS:\n"
+        "Decida quantas mensagens baseado no CONTEÚDO e CONTEXTO:\n\n"
+        "• 1 MENSAGEM quando:\n"
+        "  - Pergunta simples e direta (nome, horário, sim/não)\n"
+        "  - Confirmação rápida\n"
+        "  - Usuário parece apressado\n"
+        "  Exemplo: pergunta 'Qual seu nome?' → resposta 'Me chamo Ana! E você?'\n\n"
+        "• 2 MENSAGENS quando:\n"
+        "  - Precisa reconhecer + perguntar\n"
+        "  - Informação + confirmação\n"
+        "  - Criar conexão emocional + conteúdo\n"
+        "  Exemplo: usuário confuso → 'Ah, entendi sua dúvida!' + 'É assim: [explicação]'\n\n"
+        "• 3+ MENSAGENS quando:\n"
+        "  - Explicação em etapas\n"
+        "  - Múltiplas opções para escolher\n"
+        "  - História ou contextualização\n"
+        "  - Usuário muito engajado (merece atenção extra)\n"
+        "  Exemplo: processo complexo → 'Ok, vou te explicar!' + 'Primeiro, você...' + 'Depois é só...'\n\n"
+        "TÉCNICAS DE NATURALIDADE PROFISSIONAL:\n"
+        "- Varie inícios cordiais: 'Perfeito!', 'Ótimo!', 'Certo!', 'Claro!', 'Beleza!', ou direto na pergunta\n"
+        "- Use reticências com moderação: 'então...', 'é que...', quando apropriado\n"
+        "- Emojis moderados e profissionais: 😊 (gentileza), quando fizer sentido no contexto\n"
+        "- Interjeições suaves: 'né?', 'certo?', quando couber naturalmente\n"
+        "- Expressões brasileiras cordiais: 'que bom', 'perfeito', 'excelente', 'tranquilo'\n\n"
+        "ADAPTAÇÃO INTELIGENTE:\n"
+        "Observe padrões do usuário e adapte adequadamente:\n"
+        "- Usuário formal → mantenha mais profissional\n"
+        "- Usuário casual → seja calorosa mas ainda cordial\n"
+        "- Usuário é breve → seja concisa\n"
+        "- Usuário elabora → você pode desenvolver mais\n\n"
+        "DECISÕES IMPORTANTES:\n"
+        "- Quando houver OPÇÕES: apresente cordialmente ('seria consulta, exame, ou outro serviço?' ao invés de menu numerado)\n"
+        "- Para ESCLARECIMENTOS: reconheça gentilmente antes de esclarecer\n"
+        "- Em CONFIRMAÇÕES: seja cordial ('Perfeito! Anotei aqui' ao invés de só 'Ok')\n"
+        "- Para INFORMAÇÕES: seja positiva ('Consegui um ótimo horário!' ao invés de só 'Horário disponível:')\n\n"
+        "AUTENTICIDADE PROFISSIONAL:\n"
+        "- Seja humana mas mantendo competência\n"
+        "- Demonstre interesse genuíno pelo cliente\n"
+        "- Use diminutivos carinhosos quando apropriado: 'minutinho', 'rapidinho'\n"
+        "- Mantenha sempre o equilíbrio: calorosa mas respeitosa\n\n"
+        "Formato: JSON array [{\"text\": string, \"delay_ms\": number}]\n"
+        "Delays: primeira sempre 0, outras entre 2200-3800ms (varie para parecer natural)\n"
+        "Tamanho: máximo 150 caracteres por mensagem, mas varie (algumas bem curtas como 'Perfeito!' outras maiores)\n"
     )
 
     # Add project context to instruction if available
@@ -181,6 +302,21 @@ def rewrite_whatsapp_multi(
 
     try:
         raw = llm.rewrite(instruction, payload)
+        
+        # Log the prompt and response
+        prompt_logger.log_prompt(
+            prompt_type="whatsapp_multi",
+            instruction=instruction,
+            input_text=payload,
+            response=raw if isinstance(raw, str) else str(raw),
+            model=getattr(llm, 'model_name', 'unknown'),
+            metadata={
+                "has_project_context": project_context is not None,
+                "max_followups": max_followups,
+                "last_user_message": last_user_message
+            }
+        )
+        
         # Try to parse JSON array
         import json
 
@@ -220,54 +356,5 @@ def rewrite_whatsapp_multi(
         # Fall through to deterministic fallback below
         pass
 
-    # Deterministic fallback: if the text looks like a menu/decision, rephrase into natural question
-    def _deterministic_menu_fallback(
-        text: str, last_user: str | None
-    ) -> list[dict[str, int | str]] | None:
-        lower = text.lower()
-        has_menu_signal = (
-            "caminho" in lower or "escolha" in lower or "qual caminho" in lower
-        ) and ("quadra" in lower or "futebol" in lower or "galp" in lower)
-        if not has_menu_signal:
-            return None
-        # Try to extract options after a colon
-        options_part = None
-        if ":" in text:
-            try:
-                options_part = text.split(":", 1)[1].strip()
-            except Exception:
-                options_part = None
-        # Clean punctuation
-        if options_part:
-            if options_part.endswith("."):
-                options_part = options_part[:-1].strip()
-        # Build messages
-        out: list[dict[str, int | str]] = []
-        if last_user and last_user.strip():
-            out.append({"text": "Certo!", "delay_ms": 0})
-            second_delay = MIN_FOLLOWUP_DELAY_MS
-        else:
-            second_delay = 0
-        question_body = (
-            f"é mais pra {options_part}?" if options_part else "por qual tipo a gente segue?"
-        )
-        out.append({"text": question_body, "delay_ms": second_delay})
-        return out
-
-    det = _deterministic_menu_fallback(original_text, last_user_message or None)
-    if det:
-        return det
-
-    # Final fallback: return the original text verbatim
-    # Lightly mirror user energy in a tiny acknowledgment if very enthusiastic
-    try:
-        last = (last_user_message or "").strip()
-        high_energy = (
-            last.count("!") >= 2 or "olaaa" in last.lower() or ":)" in last or "😀" in last
-        )
-        if high_energy and original_text:
-            # Prepend a short upbeat cue only if it won't change meaning
-            return [{"text": f"Opa! {original_text}", "delay_ms": 0}]
-    except Exception:
-        pass
+    # Simple fallback: if LLM fails, return original text as-is
     return [{"text": original_text, "delay_ms": 0}]

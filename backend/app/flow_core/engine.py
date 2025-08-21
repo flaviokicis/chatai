@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 from app import dev_config
+from app.core.naturalize import naturalize_prompt
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
@@ -674,9 +675,31 @@ class LLMFlowEngine:
 
         # Add context if relevant
         if ctx.turn_count > 0 and self._should_add_context(node, ctx):
-            return self._add_conversational_context(base_prompt, ctx)
+            base_prompt = self._add_conversational_context(base_prompt, ctx)
 
-        return base_prompt
+        # Naturalize the prompt to make it sound more conversational and Brazilian
+        try:
+            # Get recent conversation history for context
+            recent_history = ctx.get_recent_history(3)
+            conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
+            
+            # Get the last user message if available
+            last_user_message = None
+            for turn in reversed(ctx.history):
+                if getattr(turn, "role", "") == "user":
+                    last_user_message = getattr(turn, "content", "")
+                    break
+            
+            naturalized = naturalize_prompt(
+                self._llm, 
+                base_prompt,
+                user_message=last_user_message,
+                conversation_context=conversation_context
+            )
+            return naturalized
+        except Exception:
+            # Fall back to original prompt if naturalization fails
+            return base_prompt
 
     def _is_clarification_request(self, message: str, ctx: FlowContext) -> bool:
         """Detect if user is asking for clarification using proper decision-making tools."""
@@ -714,18 +737,18 @@ class LLMFlowEngine:
             current_answers = ", ".join(f"{k}={v}" for k, v in ctx.answers.items()) or "nothing yet"
 
             instruction = (
-                "O usuário está pedindo um esclarecimento sobre uma pergunta. Sua tarefa é explicar:\n"
-                "1. Qual informação específica você precisa\n"
-                "2. Por que essa informação é necessária (o que ela ajuda a decidir)\n"
-                "3. Dê 2–3 exemplos concretos para ficar muito claro\n"
-                "4. Use uma linguagem simples e amigável, como se estivesse ajudando um amigo\n\n"
-                f"Pergunta do usuário: '{user_message}'\n"
-                f"O que você perguntou: '{node.prompt}'\n"
-                f"Contexto: Estamos ajudando com {ctx.user_intent or 'a solicitação da pessoa'}\n"
-                f"O que já sabemos: {current_answers}\n"
-                f"Conversa recente:\n{history_text}\n\n"
-                "Gere uma explicação útil em português do Brasil que deixe claro o que você precisa e por quê. "
-                "Seja acolhedor, paciente e ofereça exemplos específicos com os quais a pessoa possa se identificar."
+                "Você é uma recepcionista brasileira profissional. O usuário não entendeu sua pergunta no WhatsApp.\n\n"
+                "RESPONDA DE FORMA CONCISA E CORDIAL:\n"
+                "- Reconheça gentilmente ('claro', 'certo', 'sem problemas')\n" 
+                "- Reformule a pergunta de forma mais clara\n"
+                "- Máximo 1-2 frases cordiais\n"
+                "- Sem listas numeradas ou explicações longas\n"
+                "- Tom: recepcionista simpática mas competente\n\n"
+                f"Pergunta original: '{node.prompt}'\n"
+                f"Usuário perguntou: '{user_message}'\n"
+                f"Contexto: {ctx.user_intent or 'ajudar a pessoa'}\n\n"
+                "Exemplo: 'Claro! Preciso saber as dimensões do espaço - comprimento e largura em metros.'\n"
+                "Seja cordial, clara e profissional."
             )
             return self._llm.rewrite(instruction, "")
         except Exception:
@@ -842,20 +865,80 @@ class LLMFlowEngine:
         ctx: FlowContext,
         project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     ) -> str:
-        # If a custom decision_prompt is provided in the flow, use it verbatim
+        # If a custom decision_prompt is provided in the flow, naturalize it
         if getattr(node, "decision_prompt", None):
-            return str(node.decision_prompt)
+            base_prompt = str(node.decision_prompt)
+            try:
+                # Get recent conversation history for context
+                recent_history = ctx.get_recent_history(3)
+                conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
+                
+                # Get the last user message if available
+                last_user_message = None
+                for turn in reversed(ctx.history):
+                    if getattr(turn, "role", "") == "user":
+                        last_user_message = getattr(turn, "content", "")
+                        break
+                
+                naturalized = naturalize_prompt(
+                    self._llm, 
+                    base_prompt, 
+                    project_context=project_context,
+                    user_message=last_user_message,
+                    conversation_context=conversation_context
+                )
+                return naturalized
+            except Exception:
+                return base_prompt
 
         # Default fallback: concise neutral question listing options
         labels = [str(o["label"]) for o in options]
         base = "Qual caminho faz mais sentido para a gente seguir?"
         if not labels:
-            return base
+            try:
+                # Get conversation context
+                recent_history = ctx.get_recent_history(3)
+                conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
+                last_user_message = None
+                for turn in reversed(ctx.history):
+                    if getattr(turn, "role", "") == "user":
+                        last_user_message = getattr(turn, "content", "")
+                        break
+                
+                return naturalize_prompt(
+                    self._llm, 
+                    base, 
+                    project_context=project_context,
+                    user_message=last_user_message,
+                    conversation_context=conversation_context
+                )
+            except Exception:
+                return base
         if len(labels) == 1:
             opt_text = labels[0]
         else:
             opt_text = ", ".join(labels[:-1]) + f" ou {labels[-1]}"
-        return f"{base} {opt_text}."
+        
+        full_prompt = f"{base} {opt_text}."
+        try:
+            # Get conversation context
+            recent_history = ctx.get_recent_history(3)
+            conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
+            last_user_message = None
+            for turn in reversed(ctx.history):
+                if getattr(turn, "role", "") == "user":
+                    last_user_message = getattr(turn, "content", "")
+                    break
+            
+            return naturalize_prompt(
+                self._llm, 
+                full_prompt, 
+                project_context=project_context,
+                user_message=last_user_message,
+                conversation_context=conversation_context
+            )
+        except Exception:
+            return full_prompt
 
     def _select_edge_by_candidate(self, candidate: str, options: list[dict[str, Any]]):
         """Resolve an edge by matching the candidate against option key, label, or target node id.
@@ -1041,9 +1124,26 @@ class LLMFlowEngine:
 
     def _generate_revisit_prompt(self, node: QuestionNode, ctx: FlowContext) -> str:
         """Generate prompt for revisiting a question."""
-        # Do not add extra framing here; return the base prompt so that
-        # the rewrite layer controls all user-facing phrasing.
-        return node.prompt
+        # Naturalize the prompt but don't add extra framing
+        base_prompt = node.prompt
+        try:
+            # Get conversation context for revisit
+            recent_history = ctx.get_recent_history(3)
+            conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
+            last_user_message = None
+            for turn in reversed(ctx.history):
+                if getattr(turn, "role", "") == "user":
+                    last_user_message = getattr(turn, "content", "")
+                    break
+            
+            return naturalize_prompt(
+                self._llm, 
+                base_prompt,
+                user_message=last_user_message,
+                conversation_context=conversation_context
+            )
+        except Exception:
+            return base_prompt
 
     def _should_add_context(self, node: QuestionNode, ctx: FlowContext) -> bool:
         """Determine if context should be added to prompt."""
