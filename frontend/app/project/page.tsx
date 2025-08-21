@@ -1,14 +1,16 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
+import { SaveButton } from "@/components/ui/save-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/ui/page-header";
-import { Globe, Users, MessageCircle, Save, FileText, Loader2 } from "lucide-react";
+import { Globe, Users, MessageCircle, FileText, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTenant, useUpdateTenantConfig } from "@/lib/hooks/use-api";
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 
 export default function ProjectPage() {
   const router = useRouter();
@@ -22,6 +24,7 @@ export default function ProjectPage() {
   });
 
   const [hasChanges, setHasChanges] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   useEffect(() => {
     if (tenant) {
@@ -44,11 +47,21 @@ export default function ProjectPage() {
     updateTenantConfig.mutate(formData, {
       onSuccess: () => {
         setHasChanges(false);
-        alert("Configurações salvas com sucesso!");
+        setSaveSuccess(true);
+        toast.success("Configurações salvas com sucesso!", {
+          description: "Suas configurações globais foram atualizadas e já estão ativas.",
+          duration: 4000,
+        });
+        // Reset success state after animation
+        setTimeout(() => setSaveSuccess(false), 2500);
       },
       onError: (error) => {
         console.error("Erro ao salvar:", error);
-        alert("Erro ao salvar configurações. Tente novamente.");
+        setSaveSuccess(false);
+        toast.error("Erro ao salvar configurações", {
+          description: "Houve um problema ao salvar suas configurações. Tente novamente.",
+          duration: 5000,
+        });
       },
     });
   };
@@ -198,19 +211,13 @@ Quanto mais exemplos você fornecer, melhor a IA pode soar como você!"
           </Card>
 
           <div className="flex gap-3">
-            <Button 
-              size="lg" 
-              className="gap-2"
-              onClick={handleSave}
-              disabled={!hasChanges || updateTenantConfig.isPending}
-            >
-              {updateTenantConfig.isPending ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Save className="h-4 w-4" />
-              )}
-              {updateTenantConfig.isPending ? "Salvando..." : "Salvar configurações globais"}
-            </Button>
+            <SaveButton
+              size="lg"
+              isLoading={updateTenantConfig.isPending}
+              isSuccess={saveSuccess}
+              hasChanges={hasChanges}
+              onSave={handleSave}
+            />
             <Button variant="outline" size="lg" onClick={() => router.push('/')}>
               Cancelar
             </Button>

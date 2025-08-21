@@ -3,7 +3,7 @@
  * Provides type-safe methods for interacting with the backend API
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
 // Types based on the API documentation
 export interface Tenant {
@@ -137,9 +137,9 @@ async function apiRequest<T>(endpoint: string, options: RequestInit = {}): Promi
   return data;
 }
 
-// Default tenant handling: try localStorage -> fallback to first tenant from API
-let DEFAULT_TENANT_ID: string | null = null;
-if (typeof window !== 'undefined') {
+// Default tenant handling: try env var -> localStorage -> fallback to first tenant from API
+let DEFAULT_TENANT_ID: string | null = process.env.NEXT_PUBLIC_DEMO_TENANT_ID || null;
+if (!DEFAULT_TENANT_ID && typeof window !== 'undefined') {
   DEFAULT_TENANT_ID = window.localStorage.getItem('tenant_id');
 }
 

@@ -4,12 +4,16 @@ import argparse
 import json
 import os
 from pathlib import Path
+from uuid import UUID
 
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 
 from app.core.channel_adapter import CLIAdapter, ConversationalRewriter
 from app.core.langchain_adapter import LangChainToolsLLM
+from app.db.session import create_session
+from app.services.tenant_config_service import TenantConfigService, ProjectContext
+from app.db.repository import get_active_tenants, get_flows_by_tenant
 
 from .compiler import compile_flow
 from .ir import Flow
@@ -60,16 +64,22 @@ def run_cli() -> None:
         action="store_true",
         help="Enable debug output showing internal flow state",
     )
+    parser.add_argument(
+        "--tenant",
+        type=str,
+        help="Use tenant from database. Provide tenant ID, channel identifier (e.g., 'whatsapp:+14155238886'), or 'default' for first tenant. Loads flow and communication style from database.",
+    )
     args = parser.parse_args()
 
-    data = json.loads(args.json_path.read_text(encoding="utf-8"))
-    # Normalize legacy payloads to current schema version
-    if isinstance(data, dict) and data.get("schema_version") != "v2":
-        data["schema_version"] = "v2"
-    flow = Flow.model_validate(data)
+    # Load flow and tenant configuration
+    flow, project_context = _load_flow_and_tenant(args)
     compiled = compile_flow(flow)
 
     print(f"Flow: {flow.id}")
+    if project_context:
+        print(f"[tenant] Using tenant: {project_context.tenant_id}")
+        print(f"[tenant] Communication style: {'✓' if project_context.communication_style else '✗'}")
+        print(f"[tenant] Project description: {'✓' if project_context.project_description else '✗'}")
 
     # Setup LLM and runner - LLM is always required
     if not args.llm:
@@ -93,7 +103,7 @@ def run_cli() -> None:
         f"[mode] LLM mode: model={args.model}, rewrite={rewrite_status}, delays={delay_status}, debug={debug_status}"
     )
 
-    # Setup channel adapter and rewriter
+    # Setup channel adapter and rewriter with tenant context
     cli_adapter = CLIAdapter(enable_delays=not args.no_delays, debug_mode=args.debug)
     rewriter = ConversationalRewriter(llm_client if not args.no_rewrite else None)
 
@@ -123,9 +133,13 @@ def run_cli() -> None:
                 flow_context_history=getattr(ctx, "history", None)
             )
 
-            # Rewrite into multi-message format
+            # Rewrite into multi-message format with tenant context
+            # This ensures ALL messages (including first prompt) get tenant styling
             messages = rewriter.rewrite_message(
-                display_text, chat_history, enable_rewrite=not args.no_rewrite
+                display_text, 
+                chat_history, 
+                enable_rewrite=not args.no_rewrite,
+                project_context=project_context
             )
 
             # Display with debug info
@@ -144,6 +158,73 @@ def run_cli() -> None:
             )
 
         # Next loop waits for next user input (no auto-prompt)
+
+
+def _load_flow_and_tenant(args) -> tuple[Flow, ProjectContext | None]:
+    """Load flow and tenant configuration based on CLI arguments."""
+    if not args.tenant:
+        # Use file-based flow (original behavior)
+        data = json.loads(args.json_path.read_text(encoding="utf-8"))
+        # Normalize legacy payloads to current schema version
+        if isinstance(data, dict) and data.get("schema_version") != "v2":
+            data["schema_version"] = "v2"
+        flow = Flow.model_validate(data)
+        return flow, None
+
+    # Load from database using tenant
+    session = create_session()
+    try:
+        tenant_service = TenantConfigService(session)
+        project_context = None
+
+        if args.tenant == "default":
+            # Get first tenant
+            tenants = get_active_tenants(session)
+            if not tenants:
+                print("[error] No tenants found in database. Create one first with seed_database.py")
+                exit(1)
+            project_context = tenant_service.get_project_context_by_tenant_id(tenants[0].id)
+        elif args.tenant.startswith(("whatsapp:", "instagram:")):
+            # Channel identifier
+            project_context = tenant_service.get_project_context_by_channel_identifier(args.tenant)
+        else:
+            # Try as tenant ID
+            try:
+                tenant_id = UUID(args.tenant)
+                project_context = tenant_service.get_project_context_by_tenant_id(tenant_id)
+            except ValueError:
+                print(f"[error] Invalid tenant identifier: {args.tenant}")
+                print("Use: tenant_id, channel identifier (e.g., 'whatsapp:+14155238886'), or 'default'")
+                exit(1)
+
+        if not project_context:
+            print(f"[error] Tenant not found: {args.tenant}")
+            exit(1)
+
+        # Get tenant's flows
+        flows = get_flows_by_tenant(session, project_context.tenant_id)
+        if not flows:
+            print(f"[error] No flows found for tenant {project_context.tenant_id}")
+            print("Create flows via the admin API or seed_database.py")
+            exit(1)
+
+        # Use the first active flow
+        active_flows = [f for f in flows if f.is_active]
+        if not active_flows:
+            print(f"[error] No active flows found for tenant {project_context.tenant_id}")
+            exit(1)
+
+        flow_data = active_flows[0].definition
+        # Ensure schema version
+        if isinstance(flow_data, dict) and flow_data.get("schema_version") != "v2":
+            flow_data["schema_version"] = "v2"
+        
+        flow = Flow.model_validate(flow_data)
+        print(f"[database] Loaded flow '{active_flows[0].name}' from database")
+        return flow, project_context
+
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":

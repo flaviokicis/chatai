@@ -163,7 +163,7 @@ class LLMFlowEngine:
             )
 
         # Generate the prompt (potentially contextual)
-        prompt = self._generate_contextual_prompt(node, ctx)
+        prompt = self._generate_contextual_prompt(node, ctx, project_context)
         # Add light cohesion: if we just captured a value this turn, prepend a short acknowledgement
         return EngineResponse(
             kind="prompt",
@@ -293,7 +293,7 @@ class LLMFlowEngine:
             if revisit_updated:
                 return EngineResponse(
                     kind="prompt",
-                    message=self._generate_contextual_prompt(node, ctx),
+                    message=self._generate_contextual_prompt(node, ctx, project_context),
                     node_id=node.id,
                 )
 
@@ -317,7 +317,7 @@ class LLMFlowEngine:
             # If no target could be determined, remain on current node
             return EngineResponse(
                 kind="prompt",
-                message=self._generate_contextual_prompt(node, ctx),
+                message=self._generate_contextual_prompt(node, ctx, project_context),
                 node_id=node.id,
             )
 
@@ -334,7 +334,7 @@ class LLMFlowEngine:
             # The rewriter will handle adding a brief empathetic acknowledgement.
             return EngineResponse(
                 kind="prompt",
-                message=self._generate_contextual_prompt(node, ctx),
+                message=self._generate_contextual_prompt(node, ctx, project_context),
                 node_id=node.id,
             )
 
@@ -367,7 +367,7 @@ class LLMFlowEngine:
                 return _with_ack(self.process(ctx, None, None, project_context))
             return EngineResponse(
                 kind="prompt",
-                message=self._generate_contextual_prompt(node, ctx),
+                message=self._generate_contextual_prompt(node, ctx, project_context),
                 node_id=node.id,
             )
 
@@ -404,7 +404,7 @@ class LLMFlowEngine:
             # If we can't find the right path, stay on current node
             return EngineResponse(
                 kind="prompt",
-                message=self._generate_contextual_prompt(node, ctx),
+                message=self._generate_contextual_prompt(node, ctx, project_context),
                 node_id=node.id,
             )
 
@@ -475,7 +475,21 @@ class LLMFlowEngine:
                     return self.process(ctx, None, None, project_context)
             return self._handle_no_valid_transition(ctx, node, project_context)
 
-        # decision_type is llm_assisted or user_choice -> interactive path selection
+        # Handle llm_assisted vs user_choice differently
+        if decision_type == "llm_assisted":
+            # LLM-assisted should be processed internally, never shown to user
+            selected_edge = self._select_edge_with_llm_decision(node, edges, ctx, event, project_context)
+            if selected_edge:
+                ctx.current_node_id = selected_edge.target
+                return self.process(ctx, None, None, project_context)
+            # If LLM can't decide, fall back to first valid edge or error
+            valid_edges = [e for e in edges if self._evaluate_guard(e, ctx, event)]
+            if valid_edges:
+                ctx.current_node_id = valid_edges[0].target
+                return self.process(ctx, None, None, project_context)
+            return self._handle_no_valid_transition(ctx, node, project_context)
+
+        # decision_type is user_choice -> interactive path selection
         options: list[dict[str, Any]] = []
         valid_edges: list[Any] = []
         for edge in edges:
@@ -661,7 +675,7 @@ class LLMFlowEngine:
             node_id=ctx.current_node_id,
         )
 
-    def _generate_contextual_prompt(self, node: QuestionNode, ctx: FlowContext) -> str:
+    def _generate_contextual_prompt(self, node: QuestionNode, ctx: FlowContext, project_context: ProjectContext | None = None) -> str:
         """Generate a context-aware prompt."""
         base_prompt = node.prompt
 
@@ -679,22 +693,15 @@ class LLMFlowEngine:
 
         # Naturalize the prompt to make it sound more conversational and Brazilian
         try:
-            # Get recent conversation history for context
-            recent_history = ctx.get_recent_history(3)
+            # Get recent conversation history for context (10 messages for rich context)
+            recent_history = ctx.get_recent_history(10)
             conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
-            
-            # Get the last user message if available
-            last_user_message = None
-            for turn in reversed(ctx.history):
-                if getattr(turn, "role", "") == "user":
-                    last_user_message = getattr(turn, "content", "")
-                    break
             
             naturalized = naturalize_prompt(
                 self._llm, 
                 base_prompt,
-                user_message=last_user_message,
-                conversation_context=conversation_context
+                conversation_context=conversation_context,
+                project_context=project_context
             )
             return naturalized
         except Exception:
@@ -796,6 +803,83 @@ class LLMFlowEngine:
         except Exception as e:
             logger.warning(f"Guard evaluation failed: {e}")
             return False
+
+    def _select_edge_with_llm_decision(
+        self,
+        node: Any,
+        edges: list,
+        ctx: FlowContext,
+        event: dict[str, Any] | None,
+        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+    ) -> Any:
+        """Use LLM responder to make a decision for llm_assisted decision nodes."""
+        from .llm_responder import LLMFlowResponder
+        from .tool_schemas import SelectFlowPath
+        
+        decision_prompt = getattr(node, "decision_prompt", None)
+        if not decision_prompt:
+            # Fall back to standard edge selection
+            return self._select_edge_intelligently(edges, ctx, event, project_context)
+        
+        # Get the user's last message for context
+        last_user_message = ""
+        for turn in reversed(ctx.history):
+            if turn.role == "user":
+                last_user_message = turn.content
+                break
+
+        if not last_user_message:
+            # No user message to base decision on, use fallback
+            return self._select_edge_intelligently(edges, ctx, event, project_context)
+
+        # Set up available paths in context for the responder
+        path_options = []
+        for edge in edges:
+            condition_desc = getattr(edge, "condition_description", "")
+            if condition_desc:
+                # Extract path name from condition description
+                if ":" in condition_desc:
+                    path_name = condition_desc.split(":", 1)[1].strip()
+                else:
+                    path_name = condition_desc
+                path_options.append(path_name)
+            else:
+                target_node = self._flow.nodes.get(edge.target)
+                if target_node:
+                    path_options.append(target_node.label or target_node.id)
+                else:
+                    path_options.append(f"option_{edge.target}")
+
+        # Update context with available paths
+        ctx.available_paths = path_options
+
+        # Use the responder to make the decision
+        responder = LLMFlowResponder(self._llm, use_all_tools=False)
+        
+        # Create a custom prompt that includes the decision prompt
+        decision_question = f"{decision_prompt}\n\nBased on the user's response, which path should we take?"
+        
+        try:
+            response = responder.respond(
+                prompt=decision_question,
+                pending_field=None,
+                ctx=ctx,
+                user_message=last_user_message,
+                extra_tools=[SelectFlowPath]
+            )
+            
+            # If we got a path selection, find the corresponding edge
+            if response.tool_name == "SelectFlowPath" and "selected_path" in response.updates:
+                selected_path = response.updates["selected_path"]
+                for i, path in enumerate(path_options):
+                    if path == selected_path:
+                        return edges[i]
+        except Exception as e:
+            import logging
+            logging.warning(f"LLM responder decision failed: {e}")
+
+        # No confident selection, use fallback
+        return self._select_edge_intelligently(edges, ctx, event, project_context)
 
     def _select_edge_intelligently(
         self,

@@ -215,7 +215,11 @@ class FlowTurnRunner:
             engine_event["revisit_updated"] = True
 
         # Process the tool event with engine
-        final_response = self._engine.process(ctx, user_message, engine_event)
+        final_response = self._engine.process(ctx, None, engine_event)
+
+        # Record assistant message in history
+        if final_response.message:
+            ctx.add_turn("assistant", final_response.message, final_response.node_id)
 
         # Calculate answers diff
         answers_diff = {}

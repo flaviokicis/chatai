@@ -132,4 +132,15 @@
   html {
     scrollbar-gutter: stable;
   }
+
+  /* Custom animations for enhanced components */
+  @keyframes bounce-in {
+    0% { transform: scale(0.8); opacity: 0; }
+    50% { transform: scale(1.1); opacity: 1; }
+    100% { transform: scale(1); opacity: 1; }
+  }
+  
+  .animate-bounce-in {
+    animation: bounce-in 0.4s ease-out;
+  }
 }
