@@ -27,7 +27,7 @@
     { "source": "d.route_use_case", "target": "q.court_type", "guard": { "fn": "always", "args": { "if": "projeto indica quadra/tênis" } }, "priority": 0, "condition_description": "Caminho: quadra/tênis" },
     { "source": "d.route_use_case", "target": "q.field_size", "guard": { "fn": "always", "args": { "if": "projeto indica campo/futebol" } }, "priority": 1, "condition_description": "Caminho: campo/futebol" },
     { "source": "d.route_use_case", "target": "q.warehouse_use", "guard": { "fn": "always", "args": { "if": "projeto indica galpão" } }, "priority": 2, "condition_description": "Caminho: galpão" },
-    { "source": "d.route_use_case", "target": "q.other_details", "guard": { "fn": "always", "args": { "if": "projeto não é quadra/tênis, campo/futebol ou galpão" } }, "priority": 3, "condition_description": "Caminho: outros" },
+    { "source": "d.route_use_case", "target": "q.other_details", "guard": { "fn": "always", "args": { "if": "projeto não é quadra de tênis, campo de futebol ou galpão" } }, "priority": 3, "condition_description": "Caminho: outros" },
 
     { "source": "q.court_type", "target": "q.dimensions", "priority": 0 },
     { "source": "q.dimensions", "target": "q.lighting_level", "priority": 0 },

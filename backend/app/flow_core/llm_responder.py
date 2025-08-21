@@ -15,6 +15,7 @@ from .state import FlowContext
 from .tool_schemas import (
     FLOW_TOOLS,
     ClarifyQuestion,
+    PathCorrection,
     ProvideInformation,
     RequestHumanHandoff,
     RestartConversation,
@@ -164,8 +165,7 @@ class LLMFlowResponder:
         # Build current state summary
         answers_summary = self._summarize_answers(ctx.answers)
 
-        # Detect conversation patterns
-        patterns = self._detect_patterns(ctx, user_message)
+        # Let LLM infer user patterns from context (no hardcoded detection)
 
         # Previously answered fields and most recent
         previously_answered = [k for k, v in ctx.answers.items() if v not in (None, "")]
@@ -173,6 +173,18 @@ class LLMFlowResponder:
         most_recent_answer_val = (
             ctx.answers.get(most_recent_answer_key) if most_recent_answer_key else None
         )
+
+        # Add flow structure awareness if we have path information
+        flow_structure_info = ""
+        if ctx.available_paths:
+            flow_structure_info = f"\n\nAvailable flow paths: {', '.join(ctx.available_paths)}"
+        if ctx.active_path:
+            flow_structure_info += f"\nCurrently on path: {ctx.active_path}"
+
+        # Check if we recently made a path selection
+        selected_path = ctx.answers.get("selected_path")
+        if selected_path:
+            flow_structure_info += f"\nPreviously selected path: {selected_path}"
 
         instruction = f"""You are helping a user through a conversational flow. Analyze their message and choose the correct tool.
 
@@ -183,7 +195,7 @@ Current Context:
 - Conversation style: {ctx.conversation_style or "adaptive"}
 - Previous clarifications: {ctx.clarification_count}
 - Previously answered fields: {previously_answered or "none"}
-- Most recent previous answer: {most_recent_answer_key} = {most_recent_answer_val}
+- Most recent previous answer: {most_recent_answer_key} = {most_recent_answer_val}{flow_structure_info}
 
 Collected Information:
 {answers_summary}
@@ -191,8 +203,6 @@ Collected Information:
 Recent Conversation:
 {history_text}
 
-Detected Patterns:
-- User seems to be: {", ".join(patterns) if patterns else "engaged normally"}
 """
 
         if allowed_values:
@@ -214,13 +224,25 @@ Detected Patterns:
           * question_key: choose from previously answered fields (prefer the most recent) if the message suggests a correction.
           * revisit_value: extract the new value from the user's message when possible.
           If you cannot extract a clear new value, set revisit_value to null.
+          IMPORTANT: If the user is correcting a PATH SELECTION (e.g., "actually it's football" after choosing "outros"),
+          use PathCorrection tool instead (if available) or SelectFlowPath with the corrected path.
+        - PathCorrection: use when the user is correcting a path selection they made earlier.
+          Common signals: "actually it's...", "I meant...", "no, it's...", "sorry, it's...", "na verdade é...", "quer dizer...".
+          IMPORTANT: For corrected_path, choose EXACTLY from the available flow paths list above. 
+          Map the user's correction to the correct path name (e.g., "quadra de tenis" → "quadra/tênis").
         - RequestHumanHandoff: use when the user is genuinely stuck, frustrated, or needs complex help.
           Watch for signs of confusion, repeated clarification requests on the same topic, expressions of frustration,
           or when the user's needs are too complex/specific for the current flow.
         - RestartConversation: STRICTLY use only if the user explicitly and unequivocally requests to "restart from scratch", "start over from the beginning", or equivalent explicit phrases. Do NOT use for vague restart-like language.
 
         CRITICAL DECISION RULES:
-        - If the user's message includes correction signals like "meant", "actually", "sorry", "not ...", "change", "switch", "update" then DO NOT use UnknownAnswer; use RevisitQuestion instead.
+        - If the user's message includes correction signals like "meant", "actually", "sorry", "not ...", "change", "switch", "update":
+          * For path corrections (e.g., "actually it's a football field", "na verdade é campo de futebol"):
+            - First choice: use PathCorrection if available (it will normalize the path)
+            - Second choice: use SelectFlowPath with the corrected path
+            - Last resort: use RevisitQuestion with question_key="selected_path" and the corrected value
+          * For answer corrections: use RevisitQuestion
+          * DO NOT use UnknownAnswer for any corrections.
         - If the user's message expresses that their case doesn't match offered examples/options, but they are NOT asking about the current question's meaning, prefer ProvideInformation with a short positive acknowledgment.
         - Use RequestHumanHandoff when you detect user frustration, confusion after multiple clarifications, or complex requirements that don't fit the standard flow.
           Signs to watch for: repeated questions, expressions of confusion/frustration, very specific technical needs, or asking to speak to someone else.
@@ -260,6 +282,9 @@ Detected Patterns:
         # Add contextual tools
         if ctx.answers:  # User has answered something
             basic_tools.append(RevisitQuestion)
+            # Add PathCorrection if we have a selected path
+            if ctx.answers.get("selected_path") or ctx.active_path:
+                basic_tools.append(PathCorrection)
 
         if ctx.available_paths:  # Multi-path flow
             basic_tools.append(SelectFlowPath)
@@ -409,7 +434,11 @@ Detected Patterns:
                 updates={},
                 message="",
                 tool_name=tool_name,
-                metadata={"field": field, "reason": reason, "reasoning": result.get("reasoning")},
+                metadata={
+                    "field": field,
+                    "reason": reason,
+                    "reasoning": result.get("reasoning"),
+                },
             )
 
         if tool_name == "ProvideInformation":
@@ -446,6 +475,24 @@ Detected Patterns:
                 navigation=result.get("target_node"),
                 metadata={
                     "navigation_type": result.get("navigation_type"),
+                    "reasoning": result.get("reasoning"),
+                },
+            )
+
+        if tool_name == "PathCorrection":
+            corrected_path = result.get("corrected_path")
+            original_path = result.get("original_path")
+
+            # LLM should have already chosen from available paths, no normalization needed
+            return FlowResponse(
+                updates={"selected_path": corrected_path} if corrected_path else {},
+                message="",
+                tool_name=tool_name,
+                confidence=result.get("confidence", 0.8),
+                metadata={
+                    "corrected_path": corrected_path,
+                    "normalized_path": corrected_path,  # Same as corrected_path now
+                    "original_path": original_path,
                     "reasoning": result.get("reasoning"),
                 },
             )
@@ -515,22 +562,12 @@ Detected Patterns:
 
         return "\n".join(lines) if lines else "No information collected yet"
 
-    def _detect_patterns(self, ctx: FlowContext, user_message: str) -> list[str]:
-        """Detect simple conversation patterns deterministically for tests/UX hints."""
-        patterns: list[str] = []
-        text = (user_message or "").lower()
-        # Frustration signals
-        if any(
-            t in text for t in ["frustrat", "confusing", "annoying", "annoyed", "upset", "angry"]
-        ):
-            patterns.append("frustrated")
-        # Clarification need based on prior turns
-        if getattr(ctx, "clarification_count", 0) >= 1:
-            patterns.append("needing clarification")
-        return patterns
+    # Removed hardcoded pattern detection - LLM can infer user state from context
 
     def _find_node_for_key(self, ctx: FlowContext, question_key: str) -> str | None:
         """Find the node ID for a question key."""
         # This would need access to the compiled flow
         # For now, return None and let the engine handle it
         return None
+
+    # Removed _normalize_path_name - PathCorrection tool now directly returns normalized paths

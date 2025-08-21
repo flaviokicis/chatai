@@ -143,7 +143,11 @@ class FlowTurnRunner:
             agent_custom_instructions=self._instruction_prefix,
         )
 
-        # Debug logging
+        # Apply updates to context first
+        for k, v in responder_result.updates.items():
+            ctx.answers[k] = v
+
+        # Debug logging (after updates are applied)
         if dev_config.debug:
             print(f"[DEBUG] Tool chosen: {responder_result.tool_name}")
             print(f"[DEBUG] Updates: {responder_result.updates}")
@@ -160,12 +164,8 @@ class FlowTurnRunner:
                     else None
                 )
             print(f"[DEBUG] Reasoning: {reasoning}")
-            print(f"[DEBUG] Current answers: {ctx.answers}")
+            print(f"[DEBUG] Current answers (after update): {ctx.answers}")
             print(f"[DEBUG] Pending field: {ctx.pending_field}")
-
-        # Apply updates to context
-        for k, v in responder_result.updates.items():
-            ctx.answers[k] = v
 
         # Special handling for RevisitQuestion: if the model indicated a revisit,
         # apply the new value if provided and navigate to the appropriate node.

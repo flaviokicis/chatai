@@ -63,6 +63,8 @@ class FlowContext:
     active_path: str | None = None
     path_confidence: dict[str, float] = field(default_factory=dict)
     path_locked: bool = False
+    path_labels: dict[str, str] = field(default_factory=dict)  # Maps path keys to human-readable labels
+    path_corrections: int = 0  # Track how many times user has corrected path
 
     # LLM context hints
     user_intent: str | None = None

@@ -166,6 +166,28 @@ class NavigateFlow(FlowResponse):
     )
 
 
+class PathCorrection(FlowResponse):
+    """Correct a previously selected path in the flow.
+    
+    Use this when the user is correcting a path choice they made earlier,
+    typically with phrases like "actually it's...", "I meant...", "sorry, it's...".
+    This is different from RevisitQuestion which is for changing answer values.
+    """
+    
+    corrected_path: str = Field(
+        ...,
+        description="The corrected path - choose EXACTLY from the available flow paths list. Do not use the raw user description, but the actual path name from available options."
+    )
+    original_path: str | None = Field(
+        default=None,
+        description="The original path that was selected (if known)"
+    )
+    confidence: float = Field(
+        default=0.8,
+        description="Confidence in the path correction (0-1)"
+    )
+
+
 class RestartConversation(FlowResponse):
     """Hard reset of the conversation/flow context to the very beginning.
 
@@ -186,6 +208,7 @@ FLOW_TOOLS = [
     SkipQuestion,
     RevisitQuestion,
     SelectFlowPath,
+    PathCorrection,
     RequestHumanHandoff,
     ProvideInformation,
     ConfirmCompletion,

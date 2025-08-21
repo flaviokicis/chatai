@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from app import dev_config
+
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
     from app.services.tenant_config_service import ProjectContext
@@ -259,6 +261,28 @@ class LLMFlowEngine:
             revisit_value = event.get("revisit_value")
             revisit_updated = bool(event.get("revisit_updated"))
 
+            # Special handling for path corrections (when selected_path is being revised)
+            if revisit_key == "selected_path" and revisit_value:
+                # This is actually a path correction
+                # Try to normalize the path value
+                normalized = self._normalize_path_value(revisit_value, ctx)
+                if normalized:
+                    ctx.answers["selected_path"] = normalized
+                    ctx.active_path = normalized
+                    
+                    # Navigate to the correct path
+                    decision_node_id = self._find_decision_node_for_path(ctx)
+                    if decision_node_id:
+                        edges = self._flow.edges_from.get(decision_node_id, [])
+                        for edge in edges:
+                            if self._edge_matches_path(edge, normalized):
+                                ctx.current_node_id = edge.target
+                                return EngineResponse(
+                                    kind="prompt",
+                                    message=f"Certo, entendi! Vamos seguir pelo caminho de {normalized}.",
+                                    node_id=edge.target,
+                                )
+
             # Update the answer if a value was provided
             if isinstance(revisit_key, str) and revisit_value is not None:
                 ctx.answers[revisit_key] = revisit_value
@@ -340,6 +364,43 @@ class LLMFlowEngine:
             if isinstance(target, str) and target:
                 ctx.current_node_id = target
                 return _with_ack(self.process(ctx, None, None, project_context))
+            return EngineResponse(
+                kind="prompt",
+                message=self._generate_contextual_prompt(node, ctx),
+                node_id=node.id,
+            )
+
+        if tool_name == "PathCorrection":
+            # Handle path correction - navigate back to decision node or update path  
+            # Use normalized path for matching, not the original user input
+            corrected_path = event.get("normalized_path") or event.get("corrected_path")
+            
+            if corrected_path:
+                # Update the selected path
+                ctx.answers["selected_path"] = corrected_path
+                ctx.active_path = corrected_path
+                
+                # Try to find the decision node that led to this path
+                decision_node_id = self._find_decision_node_for_path(ctx)
+                    
+                if decision_node_id:
+                    # Navigate to the target of the corrected path
+                    edges = self._flow.edges_from.get(decision_node_id, [])
+                        
+                    for edge in edges:
+                        # Check if this edge matches the corrected path
+                        if self._edge_matches_path(edge, corrected_path):
+                            ctx.current_node_id = edge.target
+                            # Process the new node to get its actual question
+                            # Add acknowledgment as context for the rewriter
+                            next_response = self.process(ctx, None, None, project_context)
+                            if next_response.kind == "prompt" and next_response.message:
+                                # Prepend acknowledgment to the actual question
+                                ack_message = f"Certo, entendi! {corrected_path}."
+                                next_response.message = f"{ack_message}\n\n{next_response.message}"
+                            return next_response
+                
+            # If we can't find the right path, stay on current node
             return EngineResponse(
                 kind="prompt",
                 message=self._generate_contextual_prompt(node, ctx),
@@ -431,11 +492,20 @@ class LLMFlowEngine:
                 label = str(getattr(target_node, "id", "opção"))
             else:
                 label = "opção"
-            # Prefer the concrete target node id as the canonical key
-            key = str(edge.target)
-            options.append({"key": key, "label": label, "edge": edge})
+            
+            # Extract human-readable path name from condition_description 
+            # e.g., "Caminho: campo/futebol" -> "campo/futebol"
+            path_name = label
+            if label and ":" in label:
+                path_name = label.split(":", 1)[1].strip()
+            
+            # Use path name as key for LLM selection, but keep node ID for navigation
+            options.append({"key": path_name, "label": label, "edge": edge, "target_node": edge.target})
 
+        # Store human-readable path names for LLM selection
         ctx.available_paths = [opt["key"] for opt in options]
+        # Store mapping from path names to labels
+        ctx.path_labels = {opt["key"]: opt["label"] for opt in options}
 
         # First, try to resolve an explicit candidate (can be node id, label, or key)
         selected_edge = None
@@ -791,14 +861,15 @@ class LLMFlowEngine:
         """Resolve an edge by matching the candidate against option key, label, or target node id.
 
         Supports selecting by:
-        - key (slug of label)
-        - label (slug equality/contains)
-        - target node id (exact)
+        - key (path name like "campo/futebol")
+        - label (full label with "Caminho: ...")
+        - target node id (for backward compatibility)
         """
         cand = (candidate or "").strip()
         if not cand:
             return None
-        # 1) Match by key (node id canonical)
+            
+        # 1) Match by path name (key)
         for opt in options:
             if cand == str(opt.get("key", "")):
                 return opt.get("edge")
@@ -810,15 +881,19 @@ class LLMFlowEngine:
             lab_lower = label.lower()
             if cand_lower == lab_lower or cand_lower in lab_lower:
                 return opt.get("edge")
-
-        # 3) Match by target node id (exact)
+                
+        # 3) Match by target node id (backward compatibility)
         for opt in options:
-            edge = opt.get("edge")
-            try:
-                if edge and getattr(edge, "target", None) == cand:
-                    return edge
-            except Exception:
-                continue
+            target_node = opt.get("target_node")
+            if target_node and cand == str(target_node):
+                return opt.get("edge")
+
+        # 4) Partial matching for path names
+        for opt in options:
+            key = str(opt.get("key", ""))
+            key_lower = key.lower()
+            if cand_lower in key_lower or key_lower in cand_lower:
+                return opt.get("edge")
 
         return None
 
@@ -991,3 +1066,82 @@ class LLMFlowEngine:
             return self._llm.rewrite(instruction, "")
         except Exception:
             return prompt
+    
+    def _find_decision_node_for_path(self, ctx: FlowContext) -> str | None:
+        """Find the decision node that controls path selection."""
+        # Look for decision nodes in the flow
+        for node_id, node in self._flow.nodes.items():
+            if isinstance(node, DecisionNode):
+                # Check if this decision node has edges to paths
+                edges = self._flow.edges_from.get(node_id, [])
+                for edge in edges:
+                    if hasattr(edge, 'condition_description'):
+                        # This looks like a path decision node
+                        return node_id
+        return None
+    
+    def _edge_matches_path(self, edge: Any, path: str) -> bool:
+        """Check if an edge matches a given path name."""
+        if not edge or not path:
+            return False
+            
+        path_lower = path.lower()
+        
+        # Check condition_description
+        if hasattr(edge, 'condition_description'):
+            desc = str(edge.condition_description).lower()
+            # Remove "caminho: " prefix if present
+            desc = desc.replace("caminho:", "").strip()
+            if path_lower == desc or path_lower in desc or desc in path_lower:
+                return True
+        
+        # Check label
+        if hasattr(edge, 'label'):
+            label = str(edge.label).lower()
+            if path_lower == label or path_lower in label or label in path_lower:
+                return True
+        
+        # Check guard args for path hints
+        if hasattr(edge, 'guard_args') and isinstance(edge.guard_args, dict):
+            if_cond = edge.guard_args.get('if', '').lower()
+            if path_lower in if_cond:
+                return True
+        
+        return False
+    
+    def _normalize_path_value(self, value: str, ctx: FlowContext) -> str | None:
+        """Let the LLM decide which available path best matches the value.
+        
+        Delegates to LLM for intelligent path matching.
+        """
+        if not value or not ctx.available_paths:
+            return value
+            
+        try:
+            # Build instruction for LLM to choose best path
+            available_paths_str = ", ".join(f"'{path}'" for path in ctx.available_paths)
+            
+            instruction = f"""The user said: "{value}"
+            
+Available paths: {available_paths_str}
+            
+Which available path best matches what the user meant? 
+Return EXACTLY one of the available paths, or 'none' if no good match.
+            
+Respond with just the path name, nothing else."""
+            
+            result = self._llm.rewrite(instruction, "")
+            normalized = result.strip().strip("'\"")
+            
+            # Verify the result is actually one of the available paths
+            if normalized in ctx.available_paths:
+                return normalized
+            elif normalized.lower() == "none":
+                return value  # No good match, return original
+            else:
+                # LLM returned something invalid, fall back to original
+                return value
+                
+        except Exception:
+            # If LLM call fails, return original input
+            return value
