@@ -69,6 +69,11 @@ def run_cli() -> None:
         type=str,
         help="Use tenant from database. Provide tenant ID, channel identifier (e.g., 'whatsapp:+14155238886'), or 'default' for first tenant. Loads flow and communication style from database.",
     )
+    parser.add_argument(
+        "--flow-id",
+        type=str,
+        help="When using --tenant, select a specific flow by its flow_id. Defaults to the first active flow if omitted.",
+    )
     args = parser.parse_args()
 
     # Load flow and tenant configuration
@@ -142,6 +147,13 @@ def run_cli() -> None:
                 project_context=project_context
             )
 
+            # Update conversation history with the rewritten version for future context
+            if messages and not args.no_rewrite:
+                # Combine all rewritten messages into a single string for history
+                rewritten_content = " ".join(msg.get("text", "") for msg in messages if msg.get("text"))
+                if rewritten_content.strip():
+                    ctx.update_last_assistant_message(rewritten_content)
+
             # Display with debug info
             debug_info = None
             if args.debug:
@@ -208,19 +220,36 @@ def _load_flow_and_tenant(args) -> tuple[Flow, ProjectContext | None]:
             print("Create flows via the admin API or seed_database.py")
             exit(1)
 
-        # Use the first active flow
+        # Select flow: either by provided --flow-id or first active
         active_flows = [f for f in flows if f.is_active]
         if not active_flows:
             print(f"[error] No active flows found for tenant {project_context.tenant_id}")
             exit(1)
 
-        flow_data = active_flows[0].definition
+        selected_flow = None
+        if getattr(args, "flow_id", None):
+            for f in active_flows:
+                if f.flow_id == args.flow_id:
+                    selected_flow = f
+                    break
+            if not selected_flow:
+                print(
+                    f"[error] Flow with flow_id='{args.flow_id}' not found for tenant {project_context.tenant_id}"
+                )
+                print("Available active flows:")
+                for f in active_flows:
+                    print(f" - {f.flow_id} ({f.name})")
+                exit(1)
+        else:
+            selected_flow = active_flows[0]
+
+        flow_data = selected_flow.definition
         # Ensure schema version
         if isinstance(flow_data, dict) and flow_data.get("schema_version") != "v2":
             flow_data["schema_version"] = "v2"
         
         flow = Flow.model_validate(flow_data)
-        print(f"[database] Loaded flow '{active_flows[0].name}' from database")
+        print(f"[database] Loaded flow '{selected_flow.name}' (flow_id='{selected_flow.flow_id}') from database")
         return flow, project_context
 
     finally:

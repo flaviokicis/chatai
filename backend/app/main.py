@@ -53,13 +53,19 @@ set_app_context(
 @app.on_event("startup")
 def _init_llm() -> None:
     settings = get_settings()
-    os.environ["GOOGLE_API_KEY"] = settings.google_api_key
+    
+    # Configure API keys based on provider
+    if settings.llm_provider == "openai":
+        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+    else:
+        os.environ["GOOGLE_API_KEY"] = settings.google_api_key
+    
     # Default bootstrap LLM; per-agent overrides supported via config
-    chat = init_chat_model(settings.llm_model, model_provider="google_genai")
+    chat = init_chat_model(settings.llm_model, model_provider=settings.llm_provider)
     ctx = get_app_context(app)
     ctx.llm = LangChainToolsLLM(chat)
     ctx.llm_model = settings.llm_model
-    logger.info("Default LLM initialized: model=%s provider=%s", settings.llm_model, "google_genai")
+    logger.info("Default LLM initialized: model=%s provider=%s", settings.llm_model, settings.llm_provider)
     # Load multitenant config from JSON if provided
     config_path = os.environ.get("CONFIG_JSON_PATH") or os.getenv("CONFIG_JSON_PATH")
     if config_path:

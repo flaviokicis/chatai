@@ -11,7 +11,7 @@
           {
             "instance_id": "sq_default",
             "agent_type": "sales_qualifier",
-            "llm": { "provider": "google_genai", "model": "gemini-2.5-flash" },
+            "llm": { "provider": "openai", "model": "gpt-4o" },
             "params": {
               "question_graph": {
                 "global": [

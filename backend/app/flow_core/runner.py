@@ -217,7 +217,7 @@ class FlowTurnRunner:
         # Process the tool event with engine
         final_response = self._engine.process(ctx, None, engine_event)
 
-        # Record assistant message in history
+        # Record assistant message in history (will be updated with rewritten version by channel adapter)
         if final_response.message:
             ctx.add_turn("assistant", final_response.message, final_response.node_id)
 

@@ -126,6 +126,15 @@ class FlowContext:
             for turn in recent
         ]
 
+    def update_last_assistant_message(self, new_content: str) -> None:
+        """Update the content of the last assistant message with rewritten version."""
+        # Find the last assistant message and update its content
+        for i in range(len(self.history) - 1, -1, -1):
+            if self.history[i].role == "assistant":
+                self.history[i].content = new_content
+                self.updated_at = datetime.now()
+                break
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dict for persistence."""
         return {

@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Bot,
   MessageSquareMore,
@@ -66,13 +67,14 @@ function getAgentNames(definition?: any): string[] {
 export default function FlowsPage() {
   const { data: flows, isLoading: flowsLoading, isError: flowsError } = useFlows();
   const { data: channels, isLoading: channelsLoading } = useChannels();
-  const [enabledFlows, setEnabledFlows] = useState<Record<number, boolean>>({});
+  const [enabledFlows, setEnabledFlows] = useState<Record<string, boolean>>({});
+  const router = useRouter();
 
   // Create a map of channel instances for quick lookup
   const channelMap = channels?.reduce((acc, channel) => {
     acc[channel.id] = channel;
     return acc;
-  }, {} as Record<number, any>) || {};
+  }, {} as Record<string, any>) || {};
   const isLoading = flowsLoading || channelsLoading;
 
   if (isLoading) {
@@ -152,10 +154,22 @@ export default function FlowsPage() {
               const isEnabled = enabledFlows[flow.id] ?? true;
 
               return (
-                <Card key={flow.id} className="relative">
+                <Card
+                  key={flow.id}
+                  className="relative cursor-pointer transition-shadow hover:shadow-md"
+                  role="link"
+                  tabIndex={0}
+                  onClick={() => router.push(`/flows/${flow.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      router.push(`/flows/${flow.id}`);
+                    }
+                  }}
+                >
                   <CardHeader className="pb-4">
                     <div className="flex items-start justify-between">
-                      <Link href={`/flows/${flow.id}`} className="flex items-center gap-3 group">
+                      <Link href={`/flows/${flow.id}`} className="flex items-center gap-3 group" onClick={(e) => e.stopPropagation()}>
                         <div className="h-10 w-10 rounded-lg grid place-items-center bg-primary/10 ring-1 ring-primary/20">
                           <Icon className="h-5 w-5 text-primary" />
                         </div>
@@ -172,6 +186,7 @@ export default function FlowsPage() {
                           setEnabledFlows(prev => ({ ...prev, [flow.id]: checked }));
                           // TODO: Implement API call to update flow status
                         }}
+                        onClick={(e) => e.stopPropagation()}
                       />
                     </div>
                   </CardHeader>
@@ -195,11 +210,12 @@ export default function FlowsPage() {
                       <Link
                         href={`/flows/${flow.id}`}
                         className={cn(buttonVariants({ variant: "outline", size: "sm" }), "flex-1")}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         <Settings className="h-3.5 w-3.5 mr-1.5" />
                         Configurar
                       </Link>
-                      <Button variant="outline" size="sm" className="flex-1">
+                      <Button variant="outline" size="sm" className="flex-1" onClick={(e) => e.stopPropagation()}>
                         <Clock className="h-3.5 w-3.5 mr-1.5" />
                         Histórico
                       </Button>

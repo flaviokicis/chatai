@@ -18,7 +18,9 @@ class Settings(BaseSettings):
     twilio_account_sid: str | None = Field(default=None, alias="TWILIO_ACCOUNT_SID")
     public_base_url: str | None = Field(default=None, alias="PUBLIC_BASE_URL")
     google_api_key: str = Field(default="test", alias="GOOGLE_API_KEY")
+    openai_api_key: str = Field(default="test", alias="OPENAI_API_KEY")
     llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
+    llm_provider: str = Field(default="google_genai", alias="LLM_PROVIDER")
     redis_url: str | None = Field(default=None, alias="REDIS_URL")
     # Optional components to compose a URL when REDIS_URL is not provided
     redis_host: str | None = Field(default=None, alias="REDIS_HOST")

@@ -64,6 +64,7 @@ DEFAULT_INSTRUCTION = (
     "- O ASSUNTO da pergunta original NUNCA pode ser alterado\n"
     "- Você pode mudar apenas o ESTILO, JAMAIS o CONTEÚDO ou ASSUNTO\n\n"
     "- EVITE MAIS DE UMA OU DUAS PERGUNTAS EM UMA MENSAGEM OU TURNO. Mesmo que a pergunta seja curta. Muitas interrogações podem ser chamativas e desagradáveis.\n\n"
+    "- NAO USE MAIS DE UMA SAUDACAO, POR EXEMPLO E AÍ, POR CONVERSA.\n\n"
 )
 
 

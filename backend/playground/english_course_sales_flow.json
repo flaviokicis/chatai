@@ -1,0 +1,84 @@
+{
+  "schema_version": "v1",
+  "id": "flow.vendas_curso_ingles",
+  "entry": "q.motivo_interesse",
+  "policies": {
+    "path_selection": { "lock_threshold": 3, "allow_switch_before_lock": true },
+    "conversation": { "allow_clarifications": true, "max_clarifications": 3, "allow_revisit": true }
+  },
+  "nodes": [
+    { "id": "q.motivo_interesse", "kind": "Question", "key": "motivo_interesse", "prompt": "Oi! Sou da equipe do curso de inglês. O que te motivou a buscar inglês agora?" },
+
+    { "id": "d.triagem_objetivo", "kind": "Decision", "label": "Triagem por objetivo", "decision_type": "llm_assisted", "decision_prompt": "Com base no que a pessoa descreveu, qual o melhor caminho: conversação/fluência, carreira/entrevista, viagem/intercâmbio, ou reforço escolar/ENEM/vestibular?" },
+
+    { "id": "q.nivel_atual", "kind": "Question", "key": "nivel_atual", "prompt": "Qual é seu nível atual de inglês?", "allowed_values": ["iniciante", "básico", "intermediário", "avançado" ] },
+    { "id": "d.avaliacao_nivel", "kind": "Decision", "label": "Avaliação do nível", "decision_type": "llm_assisted", "decision_prompt": "Com base no nível atual, direcionar para trilhas de estudo adequadas: iniciante, intermediário, avançado" },
+
+    { "id": "q.disponibilidade", "kind": "Question", "key": "disponibilidade", "prompt": "Quantas horas por semana você pode dedicar ao curso?", "allowed_values": ["1-2h", "3-4h", "5-6h", "7h+" ] },
+    { "id": "q.formato_preferido", "kind": "Question", "key": "formato_preferido", "prompt": "Prefere aulas ao vivo, gravadas, ou um mix?", "allowed_values": ["ao vivo", "gravadas", "híbrido"] },
+
+    { "id": "q.prioridade_conversacao", "kind": "Question", "key": "prioridade_conversacao", "prompt": "Em conversação, você busca destravar a fala, ganhar vocabulário, ou treinar com nativos?", "allowed_values": ["destravar fala", "vocabulário", "treino com nativos"] },
+    { "id": "q.situacoes_conversacao", "kind": "Question", "key": "situacoes_conversacao", "prompt": "Em quais situações quer conversar melhor? (reuniões, networking, dia a dia)" },
+
+    { "id": "q.objetivo_carreira", "kind": "Question", "key": "objetivo_carreira", "prompt": "Seu foco é entrevista, certificação (TOEIC/TOEFL/IELTS) ou reuniões internacionais?", "allowed_values": ["entrevista", "certificação", "reuniões"] },
+    { "id": "q.prazo_carreira", "kind": "Question", "key": "prazo_carreira", "prompt": "Qual o prazo que você tem para esse objetivo?" },
+
+    { "id": "q.plano_viagem", "kind": "Question", "key": "plano_viagem", "prompt": "Quando pretende viajar e para onde?" },
+    { "id": "q.prioridades_viagem", "kind": "Question", "key": "prioridades_viagem", "prompt": "Quais situações de viagem mais te preocupam? (imigração, hotel, restaurante, transporte)" },
+
+    { "id": "q.reforco_disciplina", "kind": "Question", "key": "reforco_disciplina", "prompt": "Qual disciplina/competência precisa reforçar? (leitura, gramática, redação, interpretação)" },
+    { "id": "q.calendar_escolar", "kind": "Question", "key": "calendar_escolar", "prompt": "Para quando é a sua prova/vestibular?" },
+
+    { "id": "q.orcamento", "kind": "Question", "key": "orcamento", "prompt": "Você tem uma faixa de investimento mensal em mente?", "allowed_values": ["até 150", "150-300", "300-500", "500+"] },
+    { "id": "q.preferencia_horario", "kind": "Question", "key": "preferencia_horario", "prompt": "Qual seu horário preferido para estudar? (manhã, tarde, noite)", "allowed_values": ["manhã", "tarde", "noite"] },
+    { "id": "q.contato", "kind": "Question", "key": "contato", "prompt": "Qual o melhor telefone/WhatsApp para falarmos e finalizar sua matrícula?" },
+
+    { "id": "t.matricula_conversacao", "kind": "Terminal", "reason": "Plano de conversação encaminhado para matrícula" },
+    { "id": "t.matricula_carreira", "kind": "Terminal", "reason": "Plano focado na carreira encaminhado para matrícula" },
+    { "id": "t.matricula_viagem", "kind": "Terminal", "reason": "Plano para viagem encaminhado para matrícula" },
+    { "id": "t.matricula_reforco", "kind": "Terminal", "reason": "Plano de reforço encaminhado para matrícula" }
+  ],
+  "edges": [
+    { "source": "q.motivo_interesse", "target": "d.triagem_objetivo", "guard": { "fn": "answers_has", "args": { "key": "motivo_interesse" } }, "priority": 0 },
+
+    { "source": "d.triagem_objetivo", "target": "q.nivel_atual", "guard": { "fn": "always", "args": { "if": "busca conversação/fluência" } }, "priority": 0, "condition_description": "Caminho: conversação" },
+    { "source": "d.triagem_objetivo", "target": "q.objetivo_carreira", "guard": { "fn": "always", "args": { "if": "foco em carreira/entrevista/certificação" } }, "priority": 1, "condition_description": "Caminho: carreira" },
+    { "source": "d.triagem_objetivo", "target": "q.plano_viagem", "guard": { "fn": "always", "args": { "if": "viagem/intercâmbio" } }, "priority": 2, "condition_description": "Caminho: viagem" },
+    { "source": "d.triagem_objetivo", "target": "q.reforco_disciplina", "guard": { "fn": "always", "args": { "if": "reforço escolar/provas" } }, "priority": 3, "condition_description": "Caminho: reforço" },
+
+    { "source": "q.nivel_atual", "target": "d.avaliacao_nivel", "priority": 0 },
+    { "source": "d.avaliacao_nivel", "target": "q.disponibilidade", "guard": { "fn": "always", "args": { "if": "nível definido" } }, "priority": 0 },
+    { "source": "q.disponibilidade", "target": "q.formato_preferido", "priority": 0 },
+    { "source": "q.formato_preferido", "target": "q.prioridade_conversacao", "priority": 0 },
+    { "source": "q.prioridade_conversacao", "target": "q.situacoes_conversacao", "priority": 0 },
+    { "source": "q.situacoes_conversacao", "target": "q.orcamento", "priority": 0 },
+
+    { "source": "q.objetivo_carreira", "target": "q.prazo_carreira", "priority": 0 },
+    { "source": "q.prazo_carreira", "target": "q.nivel_atual", "priority": 0 },
+    { "source": "q.nivel_atual", "target": "q.disponibilidade", "priority": 0 },
+    { "source": "q.disponibilidade", "target": "q.formato_preferido", "priority": 0 },
+    { "source": "q.formato_preferido", "target": "q.orcamento", "priority": 0 },
+
+    { "source": "q.plano_viagem", "target": "q.prioridades_viagem", "priority": 0 },
+    { "source": "q.prioridades_viagem", "target": "q.nivel_atual", "priority": 0 },
+    { "source": "q.nivel_atual", "target": "q.disponibilidade", "priority": 0 },
+    { "source": "q.disponibilidade", "target": "q.formato_preferido", "priority": 0 },
+    { "source": "q.formato_preferido", "target": "q.orcamento", "priority": 0 },
+
+    { "source": "q.reforco_disciplina", "target": "q.calendar_escolar", "priority": 0 },
+    { "source": "q.calendar_escolar", "target": "q.nivel_atual", "priority": 0 },
+    { "source": "q.nivel_atual", "target": "q.disponibilidade", "priority": 0 },
+    { "source": "q.disponibilidade", "target": "q.formato_preferido", "priority": 0 },
+    { "source": "q.formato_preferido", "target": "q.orcamento", "priority": 0 },
+
+    { "source": "q.orcamento", "target": "q.preferencia_horario", "priority": 0 },
+    { "source": "q.preferencia_horario", "target": "q.contato", "priority": 0 },
+
+    { "source": "q.contato", "target": "t.matricula_conversacao", "guard": { "fn": "answers_has", "args": { "key": "prioridade_conversacao" } }, "priority": 0 },
+    { "source": "q.contato", "target": "t.matricula_carreira", "guard": { "fn": "answers_has", "args": { "key": "objetivo_carreira" } }, "priority": 1 },
+    { "source": "q.contato", "target": "t.matricula_viagem", "guard": { "fn": "answers_has", "args": { "key": "plano_viagem" } }, "priority": 2 },
+    { "source": "q.contato", "target": "t.matricula_reforco", "guard": { "fn": "answers_has", "args": { "key": "reforco_disciplina" } }, "priority": 3 }
+  ]
+}
+
+
