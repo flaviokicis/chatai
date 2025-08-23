@@ -12,6 +12,8 @@ from app.db.models import (
     ChatThread,
     Contact,
     Flow,
+    FlowChatMessage,
+    FlowChatRole,
     Message,
     MessageDirection,
     MessageStatus,
@@ -124,6 +126,56 @@ def create_message(
     session.add(message)
     session.flush()
     return message
+
+
+def create_flow_chat_message(
+    session: Session,
+    *,
+    flow_id: UUID,
+    role: FlowChatRole,
+    content: str,
+) -> FlowChatMessage:
+    """Persist a flow editor chat message."""
+
+    message = FlowChatMessage(flow_id=flow_id, role=role, content=content)
+    session.add(message)
+    session.flush()
+    return message
+
+
+def list_flow_chat_messages(session: Session, flow_id: UUID) -> Sequence[FlowChatMessage]:
+    """Return all chat messages for a flow ordered by creation time."""
+
+    return (
+        session.execute(
+            select(FlowChatMessage)
+            .where(
+                FlowChatMessage.flow_id == flow_id,
+                FlowChatMessage.deleted_at.is_(None),
+            )
+            .order_by(FlowChatMessage.created_at)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_latest_assistant_message(
+    session: Session, flow_id: UUID
+) -> FlowChatMessage | None:
+    return (
+        session.execute(
+            select(FlowChatMessage)
+            .where(
+                FlowChatMessage.flow_id == flow_id,
+                FlowChatMessage.role == FlowChatRole.assistant,
+                FlowChatMessage.deleted_at.is_(None),
+            )
+            .order_by(desc(FlowChatMessage.created_at))
+        )
+        .scalars()
+        .first()
+    )
 
 
 # --- Tenant Repository Functions ---

@@ -19,33 +19,44 @@ class LangChainToolsLLM(LLMClient):
     def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
         with_tools = self._chat.bind_tools(tools)
         result = with_tools.invoke(prompt)
-        tool_calls: list[dict[str, Any]] = getattr(result, "tool_calls", [])
-        if not tool_calls:
-            return {}
 
-        chosen = None
-        for name in ("UpdateAnswersFlow", "RequestHumanHandoff"):
-            chosen = next((tc for tc in tool_calls if tc.get("name") == name), None)
-            if chosen:
-                break
-        if chosen is None:
-            chosen = tool_calls[0]
-        args_raw = chosen.get("args", {}) or {}
-        args: dict[str, Any] | None
-        if isinstance(args_raw, str):
-            try:
-                parsed = json.loads(args_raw)
-                args = parsed if isinstance(parsed, dict) else {}
-            except Exception:
+        content = getattr(result, "content", None)
+        raw_calls: list[dict[str, Any]] = getattr(result, "tool_calls", [])
+
+        calls: list[dict[str, Any]] = []
+        for tc in raw_calls:
+            name = tc.get("name")
+            args_raw = tc.get("args", {}) or {}
+            args: dict[str, Any] | None
+            if isinstance(args_raw, str):
+                try:
+                    parsed = json.loads(args_raw)
+                    args = parsed if isinstance(parsed, dict) else {}
+                except Exception:
+                    args = {}
+            elif isinstance(args_raw, dict):
+                args = args_raw
+            else:
                 args = {}
-        elif isinstance(args_raw, dict):
-            args = args_raw
-        else:
-            args = {}
+            calls.append({"name": name, "arguments": args})
 
-        if "__tool_name__" not in args:
-            args["__tool_name__"] = str(chosen.get("name", ""))
-        return args
+        out: dict[str, Any] = {"content": content, "tool_calls": calls}
+
+        # Backwards compatibility: expose first tool call's args at top level
+        if calls:
+            chosen = None
+            for name in ("UpdateAnswersFlow", "RequestHumanHandoff"):
+                chosen = next((c for c in calls if c.get("name") == name), None)
+                if chosen:
+                    break
+            if chosen is None:
+                chosen = calls[0]
+            flat_args = dict(chosen.get("arguments") or {})
+            if "__tool_name__" not in flat_args:
+                flat_args["__tool_name__"] = str(chosen.get("name", ""))
+            out.update(flat_args)
+
+        return out
 
     def rewrite(self, instruction: str, text: str) -> str:  # type: ignore[override]
         try:
