@@ -37,7 +37,7 @@ if TYPE_CHECKING:
     from app.core.app_context import AppContext
 
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 
 def _get_adapter(settings) -> WhatsAppAdapter:  # type: ignore[no-untyped-def]

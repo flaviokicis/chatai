@@ -13,6 +13,9 @@ if TYPE_CHECKING:
     from app.core.app_context import AppContext
 
 
+logger = logging.getLogger(__name__)
+
+
 def _resolve_session_policy(app_context: AppContext) -> SessionPolicy:
     if app_context.session_policy is not None:
         return app_context.session_policy  # type: ignore[return-value]
@@ -65,7 +68,7 @@ def run_agent_turn(
                 )
     except Exception:
         # Never block the turn on rate limiter failures
-        logging.getLogger("uvicorn.error").warning(
+        logger.warning(
             "Rate limiter check failed; proceeding without limiting", exc_info=True
         )
 

@@ -17,7 +17,7 @@ if TYPE_CHECKING:  # pragma: no cover - import-time only for typing
     from app.flow_core.compiler import CompiledFlow
 
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)

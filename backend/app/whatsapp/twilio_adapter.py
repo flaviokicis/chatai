@@ -24,7 +24,7 @@ class TwilioWhatsAppAdapter:
         from .twilio import TwilioWhatsAppHandler
 
         self._handler = TwilioWhatsAppHandler(settings)
-        self._logger = logging.getLogger("uvicorn.error")
+        self._logger = logging.getLogger(__name__)
 
     async def validate_and_parse(self, request: Request, x_signature: str | None) -> dict[str, Any]:
         # Monkeypatch-friendly: tests patch TwilioWhatsAppHandler.validate_and_parse
