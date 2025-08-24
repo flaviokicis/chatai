@@ -44,7 +44,7 @@ export default function FlowDetailPage() {
                 <FlowExperience flow={flow} />
               </div>
               <div>
-                <FlowEditorChat />
+                <FlowEditorChat flowId={id} />
               </div>
             </div>
             <SubflowSection subflows={flow.subflows} />

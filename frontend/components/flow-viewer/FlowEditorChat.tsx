@@ -1,20 +1,52 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { FlowChatMessage } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
 
-export function FlowEditorChat() {
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([
-    { role: "assistant", text: "Oi! Me diga como você quer ajustar este fluxo e eu preparo as mudanças." },
-    { role: "assistant", text: "Cole uma conversa de WhatsApp inteira para criar ou modificar o fluxo de conversa." },
-  ]);
+interface Props {
+  flowId: string;
+}
+
+export function FlowEditorChat({ flowId }: Props) {
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([]);
   const [input, setInput] = useState("");
 
-  function onSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    api.flowChat
+      .list(flowId)
+      .then((msgs) =>
+        setMessages(msgs.map((m: FlowChatMessage) => ({ role: m.role, text: m.content })))
+      )
+      .catch(() =>
+        setMessages([
+          {
+            role: "assistant",
+            text: "Oi! Me diga como você quer ajustar este fluxo e eu preparo as mudanças.",
+          },
+          {
+            role: "assistant",
+            text: "Cole uma conversa de WhatsApp inteira para criar ou modificar o fluxo de conversa.",
+          },
+        ])
+      );
+  }, [flowId]);
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
     setMessages((m) => [...m, { role: "user", text }]);
     setInput("");
+    try {
+      const responses = await api.flowChat.send(flowId, text);
+      setMessages((m) => [
+        ...m,
+        ...responses.map((r) => ({ role: r.role as "user" | "assistant", text: r.content })),
+      ]);
+    } catch {
+      // ignore errors for now
+    }
   }
 
   return (
