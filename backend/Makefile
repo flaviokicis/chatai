@@ -14,7 +14,7 @@ dev:
 	. .venv/bin/activate && CONFIG_JSON_PATH=$(CONFIG) uvicorn $(APP) --reload --host $(HOST) --port $(PORT)
 
 test:
-	. .venv/bin/activate && uv run pytest -q
+	. .venv/bin/activate && PYTHONPATH=. uv run pytest -q -m "not integration and not llm"
 
 # Run basic LLM integration tests (requires GOOGLE_API_KEY)
 .PHONY: test-integration
@@ -44,7 +44,7 @@ fmt:
 	. .venv/bin/activate && uv run ruff format .
 
 typecheck:
-	. .venv/bin/activate && uv run mypy --config-file pyproject.toml app tests
+	. .venv/bin/activate && PYTHONPATH=. uv run mypy --config-file pyproject.toml app tests
 
 ci: lint fmt typecheck test
 

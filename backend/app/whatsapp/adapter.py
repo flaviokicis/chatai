@@ -26,9 +26,15 @@ class WhatsAppAdapter(Protocol):
         to_number: str,
         from_number: str,
         plan: list[dict[str, object]] | None,
+        reply_id: str | None = None,
+        store: Any = None,
     ) -> None:
         """Send follow-up messages with delays, best-effort (may run in background).
 
         Implementations should skip the first item of the plan (it was already sent
         synchronously in the initial webhook response).
+        
+        Args:
+            reply_id: Unique ID for this conversation turn, used for interruption handling
+            store: Redis store for checking if reply is still current
         """

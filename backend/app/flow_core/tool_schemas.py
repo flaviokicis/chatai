@@ -37,17 +37,7 @@ class UpdateAnswersFlow(FlowResponse):
     )
 
 
-class ClarifyQuestion(FlowResponse):
-    """Request clarification about the current question."""
 
-    clarification_type: Literal["meaning", "options", "purpose", "format"] = Field(
-        default="meaning",
-        description="Type of clarification needed",
-    )
-    original_question: str | None = Field(
-        default=None,
-        description="The question being clarified",
-    )
 
 
 class SkipQuestion(FlowResponse):
@@ -204,7 +194,6 @@ class RestartConversation(FlowResponse):
 # Tool registry for flow interactions
 FLOW_TOOLS = [
     UpdateAnswersFlow,
-    ClarifyQuestion,
     SkipQuestion,
     RevisitQuestion,
     SelectFlowPath,
@@ -224,34 +213,24 @@ EscalateToHuman = RequestHumanHandoff
 
 
 class UnknownAnswer(FlowResponse):
-    """User doesn't know the answer or needs clarification."""
+    """User doesn't know the answer, needs clarification, or is confused."""
 
     field: str | None = Field(
         default=None,
         description="Field key that the user explicitly does not know; if null, assume the pending field",
     )
-    reason: Literal["unknown", "clarification_needed", "not_applicable"] = Field(
-        default="unknown",
-        description="Reason for unknown answer",
+    reason: Literal["clarification_needed", "incoherent_or_confused", "requested_by_user"] = Field(
+        default="clarification_needed",
+        description=(
+            "Reason for unknown answer:\n"
+            "- clarification_needed: User asks 'what do you mean?', 'como assim?', needs question explained\n"
+            "- incoherent_or_confused: User gives nonsensical/unrelated response, seems lost or confused\n"
+            "- requested_by_user: User explicitly says 'I don't know', 'não sei', wants to skip"
+        ),
     )
 
 
 # Decision-making tools (separate from message generation)
-class DetectClarificationRequest(BaseModel):
-    """Determine if user is asking for clarification about the current question."""
-
-    is_clarification: bool = Field(
-        ...,
-        description="True if the user is asking for clarification, False otherwise",
-    )
-    confidence: float = Field(
-        default=1.0,
-        description="Confidence level in this detection (0-1)",
-    )
-    reasoning: str | None = Field(
-        default=None,
-        description="Brief explanation of why this is or isn't a clarification request",
-    )
 
 
 class SelectFlowEdge(BaseModel):
@@ -290,7 +269,6 @@ class SelectNextQuestion(BaseModel):
 
 # Decision-making tool registry
 DECISION_TOOLS = [
-    DetectClarificationRequest,
     SelectFlowEdge,
     SelectNextQuestion,
 ]

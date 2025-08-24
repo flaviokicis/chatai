@@ -97,9 +97,12 @@ def _patch_signature_validation(monkeypatch):
     monkeypatch.setattr(TwilioWhatsAppHandler, "validate_and_parse", _ok)
 
 
+@pytest.mark.integration
 def test_whatsapp_like_flow(monkeypatch, config_json):
     # Ensure app startup loads our test config
     monkeypatch.setenv("CONFIG_JSON_PATH", str(config_json))
+    # Force use of Twilio adapter for form data tests
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
 
     _patch_signature_validation(monkeypatch)
 
@@ -152,7 +155,10 @@ def test_whatsapp_like_flow(monkeypatch, config_json):
     assert state.get("answers", {}).get("intention") == "buy leds"
 
 
+@pytest.mark.integration
 def test_ambiguous_paths_escalate_to_human(monkeypatch, tmp_path):
+    # Force use of Twilio adapter for form data tests
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
     # Build config with two paths and entry predicates that won't match our inputs
     cfg = {
         "default": {
@@ -305,7 +311,10 @@ def test_ambiguous_paths_escalate_to_human(monkeypatch, tmp_path):
     assert state.get("active_path") in (None, "")
 
 
+@pytest.mark.integration
 def test_paths_selection_and_questions_flow(monkeypatch, tmp_path):
+    # Force use of Twilio adapter for form data tests
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
     # Config with paths and immediate lock upon first predicate match
     cfg = {
         "default": {

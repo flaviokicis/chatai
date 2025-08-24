@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:  # avoid import cycles at runtime
     from app.core.llm import LLMClient
 from .normalize import choose_option
-from .tool_schemas import DetectClarificationRequest, RequestHumanHandoff, UnknownAnswer, UpdateAnswersFlow
+from .tool_schemas import RequestHumanHandoff, UnknownAnswer, UpdateAnswersFlow
 
 
 @dataclass(slots=True)
@@ -62,20 +62,7 @@ class LLMResponder(Responder):
     def __init__(self, llm: LLMClient) -> None:  # type: ignore[name-defined]
         self._llm = llm
 
-    def _is_clarification(self, question_text: str, user_message: str) -> bool:
-        try:
-            prompt = (
-                f"Question: {question_text}\n"
-                f"User message: {user_message}\n\n"
-                f"Determine if the user is requesting clarification of the question. "
-                f"Consider phrases that indicate confusion or need for more explanation."
-            )
-            result = self._llm.extract(prompt, [DetectClarificationRequest])
-            if result.get("__tool_name__") == "DetectClarificationRequest":
-                return result.get("is_clarification", False)
-            return False
-        except Exception:
-            return False
+
 
     def respond(
         self,

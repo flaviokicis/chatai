@@ -9,6 +9,7 @@ import pytest
 from app.core.llm import LLMClient
 from app.flow_core.compiler import FlowCompiler
 from app.flow_core.engine import LLMFlowEngine
+from tests.test_flow_core import MockLLM
 from app.flow_core.ir import (
     ActionNode,
     DecisionNode,
@@ -527,7 +528,10 @@ class TestFlowNavigation:
         compiler = FlowCompiler()
         compiled = compiler.compile(flow)
 
-        mock_llm = SequentialMockLLM(
+        # Create separate mocks for engine and responder to avoid interference
+        engine_mock = SequentialMockLLM([])  # Engine doesn't need specific responses for this test
+        
+        responder_mock = SequentialMockLLM(
             [
                 # Skip first question
                 {
@@ -556,8 +560,8 @@ class TestFlowNavigation:
             ]
         )
 
-        engine = LLMFlowEngine(compiled, mock_llm, strict_mode=False)
-        responder = LLMFlowResponder(mock_llm)
+        engine = LLMFlowEngine(compiled, engine_mock, strict_mode=False)
+        responder = LLMFlowResponder(responder_mock)
         ctx = engine.initialize_context()
 
         # Process flow with skips and revisits
@@ -603,12 +607,15 @@ class TestFlowNavigation:
         compiler = FlowCompiler()
         compiled = compiler.compile(flow)
 
-        mock_llm = SequentialMockLLM(
+        # Create separate mocks for engine and responder
+        engine_mock = SequentialMockLLM([])  # Engine doesn't need specific responses for this test
+        
+        responder_mock = SequentialMockLLM(
             [
                 # First, ask for clarification
                 {
-                    "__tool_name__": "ClarifyQuestion",
-                    "clarification_type": "meaning",
+                    "__tool_name__": "UnknownAnswer",
+                    "reason": "clarification_needed",
                 },
                 # Then provide answer
                 {
@@ -618,7 +625,7 @@ class TestFlowNavigation:
             ]
         )
 
-        engine = LLMFlowEngine(compiled, mock_llm, strict_mode=False)
+        engine = LLMFlowEngine(compiled, engine_mock, strict_mode=False)
         ctx = engine.initialize_context()
 
         # Ask complex question
@@ -628,17 +635,17 @@ class TestFlowNavigation:
         # User asks for clarification using responder pattern
         from app.flow_core.llm_responder import LLMFlowResponder
 
-        responder = LLMFlowResponder(mock_llm)
+        responder = LLMFlowResponder(responder_mock)
 
         clarification_response = responder.respond(
             response.message or "", ctx.pending_field, ctx, "What does that mean?"
         )
 
         # LLM should return clarification and update context
-        assert clarification_response.tool_name == "ClarifyQuestion"
+        assert clarification_response.tool_name == "UnknownAnswer"
         assert ctx.clarification_count > 0
         assert clarification_response.metadata is not None
-        assert clarification_response.metadata.get("clarification_type") == "meaning"
+        assert clarification_response.metadata.get("reason") == "clarification_needed"
         assert clarification_response.metadata.get("is_clarification") is True
 
         # User now provides answer using responder pattern

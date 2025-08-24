@@ -15,7 +15,6 @@ from app.core.prompt_logger import prompt_logger
 from .state import FlowContext
 from .tool_schemas import (
     FLOW_TOOLS,
-    ClarifyQuestion,
     PathCorrection,
     ProvideInformation,
     RequestHumanHandoff,
@@ -235,10 +234,11 @@ Recent Conversation:
             values_str = ", ".join(allowed_values)
             instruction += f"\n\nIMPORTANT: If updating '{pending_field}', the value MUST be one of: {values_str}"
 
-        instruction += """
+        instruction += f"""
 
         Choose the most appropriate tool based on the user's intent:
         - UpdateAnswersFlow: use when you can extract an answer for the CURRENT pending field.
+          CRITICAL: You MUST populate the "updates" field with the extracted value: {{"updates": {{"{pending_field}": "extracted_value"}}}}
           Guidance for extraction: ignore greetings and filler words; use the meaningful noun phrase or value the user provided.
           CRITICAL: Preserve qualifiers, comparators and units from the user's wording.
           - Do NOT remove words like: "até"/"up to", "no máximo"/"at most", "pelo menos"/"at least",
@@ -246,10 +246,10 @@ Recent Conversation:
             ranges like "entre X e Y", tildes "~", and currency/measurement units (ex.: "reais", "R$", "m", "lux").
           - Prefer capturing the exact span the user said (e.g., "até 1000 reais") over a normalized value ("1000 reais").
           - When in doubt, include more of the original phrase to preserve meaning rather than shortening it.
+          Example: If pending field is "budget" and user says "até 1000 reais", return: {{"updates": {{"budget": "até 1000 reais"}}, "validated": true}}
         - ProvideInformation: use for meta-level acknowledgments or brief information that does NOT change state
           (e.g., reassuring the user that their case is fine, answering "is that a problem?", or offering a quick tip).
-        - ClarifyQuestion: use if the user is asking about the meaning/purpose/options/format of the CURRENT question.
-          The system will generate a detailed explanation with examples to help the user understand.
+
         - SkipQuestion: use if the user explicitly wants to skip (and skipping is allowed by policy).
         - RevisitQuestion: use when the user is correcting or changing any PREVIOUS answer (not the current question).
           Provide:
@@ -278,8 +278,16 @@ Recent Conversation:
         - If the user's message expresses that their case doesn't match offered examples/options, but they are NOT asking about the current question's meaning, prefer ProvideInformation with a short positive acknowledgment.
         - Use RequestHumanHandoff when you detect user frustration, confusion after multiple clarifications, or complex requirements that don't fit the standard flow.
           Signs to watch for: repeated questions, expressions of confusion/frustration, very specific technical needs, or asking to speak to someone else.
-        - Use UnknownAnswer ONLY when the user explicitly indicates they do not know the answer to the CURRENT question, and no correction is being made.
-        - ClarifyQuestion should be used liberally when users ask for clarification - it will generate helpful explanations with examples.
+        - Use UnknownAnswer in three specific scenarios (choose the appropriate reason):
+          * reason="clarification_needed": When user asks "what do you mean?", "como assim?", "can you explain?", 
+            "I don't understand the question", or any request to clarify/explain what the current question is asking.
+            Examples: "Como assim plano de saúde?", "What do you mean by that?", "I don't get it", "Can you rephrase?"
+          * reason="incoherent_or_confused": When user gives a completely unrelated/nonsensical response that doesn't 
+            make sense in context, seems disoriented, or gives mixed-up answers that suggest confusion.
+            Examples: Random words, talking about unrelated topics, seeming lost in conversation, garbled responses
+          * reason="requested_by_user": When user explicitly says they don't know the answer and want to skip.
+            Examples: "I don't know", "não sei", "I have no idea", "skip this", "I can't answer that"
+
         - Use RestartConversation ONLY if the message contains explicit phrases like: "restart from scratch", "start over from scratch", "start over", "reset everything", "let's begin again from the start".
           Ignore weak signals like "restart", "again", or "let's try that" unless accompanied by an explicit from-scratch request.
 
@@ -306,7 +314,6 @@ Recent Conversation:
         basic_tools = [
             UpdateAnswersFlow,
             UnknownAnswer,
-            ClarifyQuestion,
             ProvideInformation,
             RequestHumanHandoff,
         ]
@@ -370,18 +377,7 @@ Recent Conversation:
                 metadata={"validated": validated, "reasoning": result.get("reasoning")},
             )
 
-        if tool_name == "ClarifyQuestion":
-            ctx.clarification_count += 1
-            return FlowResponse(
-                updates={},
-                message="",
-                tool_name=tool_name,
-                metadata={
-                    "clarification_type": result.get("clarification_type"),
-                    "is_clarification": True,
-                    "reasoning": result.get("reasoning"),
-                },
-            )
+
 
         if tool_name == "SkipQuestion":
             skip_to = result.get("skip_to")
@@ -436,7 +432,11 @@ Recent Conversation:
                 message="",
                 tool_name=tool_name,
                 confidence=path_confidence,
-                metadata={"path": path, "reasoning": result.get("reasoning")},
+                metadata={
+                    "path": path, 
+                    "reasoning": result.get("reasoning"),
+                    "navigate_to_decision": True  # Signal to engine to find decision node
+                },
             )
 
         if tool_name == "RequestHumanHandoff" or tool_name == "EscalateToHuman":
@@ -455,7 +455,11 @@ Recent Conversation:
 
         if tool_name == "UnknownAnswer":
             field = result.get("field") or pending_field
-            reason = result.get("reason", "unknown")
+            reason = result.get("reason", "clarification_needed")
+
+            # Increment clarification count when user needs clarification
+            if reason == "clarification_needed":
+                ctx.clarification_count += 1
 
             # Mark field as attempted but unknown
             if field:
@@ -470,6 +474,7 @@ Recent Conversation:
                     "field": field,
                     "reason": reason,
                     "reasoning": result.get("reasoning"),
+                    "is_clarification": (reason == "clarification_needed"),  # For test compatibility
                 },
             )
 

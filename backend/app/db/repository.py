@@ -257,6 +257,29 @@ def get_channel_instances_by_tenant(session: Session, tenant_id: UUID) -> Sequen
     )
 
 
+def update_channel_instance_phone_number(
+    session: Session,
+    channel_id: UUID,
+    new_phone_number: str,
+    new_identifier: str | None = None,
+) -> ChannelInstance | None:
+    """Update the phone number and optionally identifier of a channel instance."""
+    channel = session.execute(
+        select(ChannelInstance).where(
+            ChannelInstance.id == channel_id,
+            ChannelInstance.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+    if channel:
+        channel.phone_number = new_phone_number
+        if new_identifier:
+            channel.identifier = new_identifier
+        session.flush()
+
+    return channel
+
+
 # --- Flow Repository Functions ---
 
 

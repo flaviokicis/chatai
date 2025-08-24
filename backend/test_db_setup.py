@@ -114,7 +114,7 @@ def test_database_setup():
             session.close()
 
         print("🎉 All database tests passed!")
-        return True
+        assert True
 
     except Exception as exc:
         print(f"❌ Database test failed: {exc}")

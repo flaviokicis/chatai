@@ -401,17 +401,41 @@ class TestLLMFlowEngine:
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
 
-        mock_llm = MockLLM([])
+        # Create a contextual mock that handles clarification requests via UnknownAnswer
+        class ClarificationMockLLM(MockLLM):
+            def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
+                # Check if user is asking for clarification
+                if "what do you mean" in prompt.lower():
+                    return {
+                        "__tool_name__": "UnknownAnswer",
+                        "reason": "clarification_needed",
+                        "reasoning": "User is asking for clarification about the question"
+                    }
+                
+                # Default empty response for other calls
+                return {}
+        
+        mock_llm = ClarificationMockLLM([])
         engine = LLMFlowEngine(compiled, mock_llm, strict_mode=False)
         ctx = engine.initialize_context()
 
         # Move to name question
         engine.process(ctx)
 
-        # Ask for clarification
-        response = engine.process(ctx, "What do you mean by name?")
-        assert response.kind == "prompt"
-        assert ctx.clarification_count > 0
+        # Ask for clarification - this should be handled by the responder
+        from app.flow_core.llm_responder import LLMFlowResponder
+        responder = LLMFlowResponder(mock_llm)
+        
+        # Process clarification request
+        response = engine.process(ctx)  # Get the current question
+        clarification_response = responder.respond(
+            response.message or "", ctx.pending_field, ctx, "What do you mean by name?"
+        )
+        
+        # Should detect clarification request
+        assert clarification_response.tool_name == "UnknownAnswer"
+        assert clarification_response.metadata is not None
+        assert clarification_response.metadata.get("reason") == "clarification_needed"
 
     def test_branching_flow_execution(self, branching_flow: Flow) -> None:
         """Test executing a branching flow."""
@@ -473,8 +497,8 @@ class TestLLMFlowResponder:
         mock_llm = MockLLM(
             [
                 {
-                    "__tool_name__": "ClarifyQuestion",
-                    "clarification_type": "format",
+                    "__tool_name__": "UnknownAnswer",
+                    "reason": "clarification_needed",
                 }
             ]
         )
@@ -490,10 +514,9 @@ class TestLLMFlowResponder:
         )
 
         assert response.updates == {}
-        assert response.tool_name == "ClarifyQuestion"
+        assert response.tool_name == "UnknownAnswer"
         assert response.metadata is not None
-        assert response.metadata.get("clarification_type") == "format"
-        assert response.metadata.get("is_clarification") is True
+        assert response.metadata.get("reason") == "clarification_needed"
         assert ctx.clarification_count == 1
 
     def test_responder_escalation(self) -> None:
@@ -568,8 +591,10 @@ class TestLLMFlowResponder:
             "This is so confusing and annoying!",
         )
 
-        assert "frustrated" in mock_llm.last_prompt
-        assert "needing clarification" in mock_llm.last_prompt
+        # Check that context includes clarification information
+        assert "Previous clarifications: 2" in mock_llm.last_prompt
+        # Check that the prompt includes the user's message
+        assert "This is so confusing and annoying!" in mock_llm.last_prompt
 
 
 class TestEndToEndFlows:
@@ -645,24 +670,51 @@ class TestEndToEndFlows:
         compiler = FlowCompiler()
         compiled = compiler.compile(flow_with_policies)
 
-        mock_llm = MockLLM(
-            [
-                {
-                    "__tool_name__": "ClarifyQuestion",
-                    "clarification_type": "purpose",
-                },
-                {
-                    "__tool_name__": "SkipQuestion",
-                    "reason": "prefer_not_to_answer",
-                },
-                {
+        # Create contextual mock for the responder that handles both clarification and skip
+        class ResponderMockLLM(MockLLM):
+            def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
+                if "Why do you need this?" in prompt:
+                    return {
+                        "__tool_name__": "UnknownAnswer",
+                        "reason": "clarification_needed",
+                        "reasoning": "User is asking for clarification about purpose"
+                    }
+                elif "rather not say" in prompt.lower() or "prefer not" in prompt.lower():
+                    return {
+                        "__tool_name__": "SkipQuestion", 
+                        "reason": "prefer_not_to_answer",
+                        "reasoning": "User prefers not to answer this question"
+                    }
+                elif "Here's my answer to question 2" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow",
+                        "updates": {"question2": "answer2"},
+                        "validated": True,
+                        "reasoning": "User provided answer for question2"
+                    }
+                
+                return {
                     "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"question2": "answer2"},
-                },
-            ]
-        )
+                    "updates": {},
+                    "validated": False,
+                    "reasoning": "Default response"
+                }
+        
+        responder_mock = ResponderMockLLM()
 
-        engine = LLMFlowEngine(compiled, mock_llm, strict_mode=False)
+        # Create main mock for engine operations
+        engine_mock = MockLLM([
+            {
+                "__tool_name__": "SkipQuestion",
+                "reason": "prefer_not_to_answer",
+            },
+            {
+                "__tool_name__": "UpdateAnswersFlow",
+                "updates": {"question2": "answer2"},
+            },
+        ])
+
+        engine = LLMFlowEngine(compiled, engine_mock, strict_mode=False)
         ctx = engine.initialize_context()
 
         # Start flow
@@ -672,17 +724,17 @@ class TestEndToEndFlows:
         # Ask for clarification using the responder pattern
         from app.flow_core.llm_responder import LLMFlowResponder
 
-        responder = LLMFlowResponder(mock_llm)
+        responder = LLMFlowResponder(responder_mock)
 
         # Process user clarification request
         llm_response = responder.respond(
             response.message or "", ctx.pending_field, ctx, "Why do you need this?"
         )
 
-        # The LLM should return a clarification
-        assert llm_response.tool_name == "ClarifyQuestion"
+        # The LLM should return an unknown answer with clarification needed reason
+        assert llm_response.tool_name == "UnknownAnswer"
         assert llm_response.metadata is not None
-        assert llm_response.metadata.get("clarification_type") == "purpose"
+        assert llm_response.metadata.get("reason") == "clarification_needed"
         assert llm_response.metadata.get("is_clarification") is True
 
         # Skip the question using responder pattern
@@ -727,28 +779,40 @@ class TestFlowTurnRunnerEndToEnd:
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
 
-        mock_llm = MockLLM(
-            [
-                # Name question
-                {
+        # Create a smarter mock that returns the correct field based on pending field
+        class ContextualMockLLM(MockLLM):
+            def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
+                # Extract the field to fill from the prompt
+                if "Field to fill: name" in prompt and "Alice" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow",
+                        "updates": {"name": "Alice"},
+                        "validated": True,
+                        "reasoning": "User provided their name"
+                    }
+                elif "Field to fill: age" in prompt and "30" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow", 
+                        "updates": {"age": "30"},
+                        "validated": True,
+                        "reasoning": "User provided their age"
+                    }
+                elif "Field to fill: email" in prompt and "alice@example.com" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow",
+                        "updates": {"email": "alice@example.com"},
+                        "validated": True,
+                        "reasoning": "User provided their email"
+                    }
+                # Default response for unknown cases
+                return {
                     "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"name": "Alice"},
-                    "validated": True,
-                },
-                # Age question
-                {
-                    "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"age": "30"},
-                    "validated": True,
-                },
-                # Email question
-                {
-                    "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"email": "alice@example.com"},
-                    "validated": True,
-                },
-            ]
-        )
+                    "updates": {},
+                    "validated": False,
+                    "reasoning": "Could not parse input"
+                }
+        
+        mock_llm = ContextualMockLLM([])
 
         runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
         ctx = runner.initialize_context()
@@ -789,21 +853,37 @@ class TestFlowTurnRunnerEndToEnd:
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
 
-        mock_llm = MockLLM(
-            [
-                # Clarification request
-                {
-                    "__tool_name__": "ClarifyQuestion",
-                    "clarification_type": "purpose",
-                },
-                # Then provide answer
-                {
+        # Create a mock that recognizes clarification requests and then answers
+        class ClarificationMockLLM(MockLLM):
+            def __init__(self):
+                super().__init__([])
+                self.step = 0
+                
+            def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
+                # Check for current user message - look at the most recent message
+                if "User's message: Why do you need my name?" in prompt:
+                    return {
+                        "__tool_name__": "UnknownAnswer",
+                        "reason": "clarification_needed",
+                        "reasoning": "User is asking for clarification about purpose"
+                    }
+                # Check for name response  
+                elif "User's message: Bob" in prompt and "Field to fill: name" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow",
+                        "updates": {"name": "Bob"},
+                        "validated": True,
+                        "reasoning": "User provided their name"
+                    }
+                
+                return {
                     "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"name": "Bob"},
-                    "validated": True,
-                },
-            ]
-        )
+                    "updates": {},
+                    "validated": False,
+                    "reasoning": "Could not parse input"
+                }
+        
+        mock_llm = ClarificationMockLLM()
 
         runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
         ctx = runner.initialize_context()
@@ -814,7 +894,7 @@ class TestFlowTurnRunnerEndToEnd:
 
         # User asks for clarification
         result = runner.process_turn(ctx, "Why do you need my name?")
-        assert result.tool_name == "ClarifyQuestion"
+        assert result.tool_name == "UnknownAnswer"
         assert not result.terminal
 
         # User provides answer after clarification
@@ -830,28 +910,46 @@ class TestFlowTurnRunnerEndToEnd:
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
 
-        mock_llm = MockLLM(
-            [
-                # First answer
-                {
+        # Create a contextual mock for revisit test
+        class RevisitMockLLM(MockLLM):
+            def __init__(self):
+                super().__init__([])
+                self.step = 0
+                
+            def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
+                # Check for revisit scenario first
+                if "Actually, my name is Jonathan" in prompt or "actually" in prompt.lower() and "jonathan" in prompt.lower():
+                    return {
+                        "__tool_name__": "RevisitQuestion",
+                        "question_key": "name",
+                        "revisit_value": "Jonathan",
+                        "reasoning": "User wants to correct their name"
+                    }
+                    
+                # Check field-specific updates
+                if "Field to fill: name" in prompt and "John" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow",
+                        "updates": {"name": "John"},
+                        "validated": True,
+                        "reasoning": "User provided name John"
+                    }
+                elif "Field to fill: age" in prompt and "25" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow",
+                        "updates": {"age": "25"},
+                        "validated": True,
+                        "reasoning": "User provided age 25"
+                    }
+                
+                return {
                     "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"name": "John"},
-                    "validated": True,
-                },
-                # Second answer
-                {
-                    "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"age": "25"},
-                    "validated": True,
-                },
-                # Revisit name
-                {
-                    "__tool_name__": "RevisitQuestion",
-                    "question_key": "name",
-                    "revisit_value": "Jonathan",
-                },
-            ]
-        )
+                    "updates": {},
+                    "validated": False,
+                    "reasoning": "Could not parse input"
+                }
+        
+        mock_llm = RevisitMockLLM()
 
         runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
         ctx = runner.initialize_context()
@@ -866,7 +964,7 @@ class TestFlowTurnRunnerEndToEnd:
         result = runner.process_turn(ctx, "25")  # Answer
         assert ctx.answers.get("age") == "25"
 
-        # User wants to change name
+        # User wants to change name  
         result = runner.process_turn(ctx, "Actually, my name is Jonathan")
         assert result.tool_name == "RevisitQuestion"
         assert ctx.answers.get("name") == "Jonathan"  # Should be updated
@@ -879,16 +977,25 @@ class TestFlowTurnRunnerEndToEnd:
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
 
-        mock_llm = MockLLM(
-            [
-                # Unknown answer
-                {
-                    "__tool_name__": "UnknownAnswer",
-                    "reason": "unknown",
-                    "field": "age",
-                },
-            ]
-        )
+        # Create a mock that recognizes "I don't know"
+        class UnknownMockLLM(MockLLM):
+            def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
+                if "I don't know" in prompt or "don't know" in prompt.lower():
+                    return {
+                        "__tool_name__": "UnknownAnswer",
+                        "reason": "user_doesnt_know",
+                        "field": "age",
+                        "reasoning": "User explicitly said they don't know"
+                    }
+                
+                return {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {},
+                    "validated": False,
+                    "reasoning": "Could not parse input"
+                }
+        
+        mock_llm = UnknownMockLLM([])
 
         runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
         ctx = runner.initialize_context()
@@ -917,15 +1024,25 @@ class TestFlowTurnRunnerEndToEnd:
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
 
-        mock_llm = MockLLM(
-            [
-                {
-                    "__tool_name__": "RequestHumanHandoff",
-                    "reason": "complex_request",
-                    "urgency": "high",
-                },
-            ]
-        )
+        # Create a mock that detects escalation requests
+        class EscalationMockLLM(MockLLM):
+            def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
+                if "complicated" in prompt.lower() and "special help" in prompt.lower():
+                    return {
+                        "__tool_name__": "RequestHumanHandoff",
+                        "reason": "complex_request", 
+                        "urgency": "high",
+                        "reasoning": "User is requesting special help for complex issue"
+                    }
+                
+                return {
+                    "__tool_name__": "UpdateAnswersFlow",
+                    "updates": {},
+                    "validated": False,
+                    "reasoning": "Default response"
+                }
+        
+        mock_llm = EscalationMockLLM()
 
         runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
         ctx = runner.initialize_context()
@@ -947,22 +1064,32 @@ class TestFlowTurnRunnerEndToEnd:
         compiler = FlowCompiler()
         compiled = compiler.compile(branching_flow)
 
-        mock_llm = MockLLM(
-            [
-                # Choose "new" customer
-                {
+        # Create contextual mock for branching flow
+        class BranchingMockLLM(MockLLM):
+            def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
+                if "User's message: new" in prompt and "Field to fill: user_type" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow",
+                        "updates": {"user_type": "new"},
+                        "validated": True,
+                        "reasoning": "User specified they are a new customer"
+                    }
+                elif "exploring options" in prompt and "signup_reason" in prompt:
+                    return {
+                        "__tool_name__": "UpdateAnswersFlow",
+                        "updates": {"signup_reason": "exploring options"},
+                        "validated": True,
+                        "reasoning": "User provided signup reason"
+                    }
+                
+                return {
                     "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"user_type": "new"},
-                    "validated": True,
-                },
-                # Answer signup question
-                {
-                    "__tool_name__": "UpdateAnswersFlow",
-                    "updates": {"signup_reason": "exploring options"},
-                    "validated": True,
-                },
-            ]
-        )
+                    "updates": {},
+                    "validated": False,
+                    "reasoning": "Default response"
+                }
+        
+        mock_llm = BranchingMockLLM()
 
         runner = FlowTurnRunner(compiled, mock_llm, strict_mode=False)
         ctx = runner.initialize_context()

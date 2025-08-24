@@ -74,6 +74,8 @@ def naturalize_prompt(
     instruction: str | None = None,
     project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     conversation_context: list[dict[str, str]] | None = None,
+    *,
+    is_completion: bool = False,
 ) -> str:
     """
     Naturalize a prompt for WhatsApp with optional project context and conversation history.
@@ -84,15 +86,29 @@ def naturalize_prompt(
         instruction: Custom instruction (overrides default)
         project_context: Business context for better communication style
         conversation_context: Recent conversation history for context
+        is_completion: Whether this is the final message/completion of the conversation
     """
     # If project context has a communication style, use it to build custom instruction
     if project_context and project_context.communication_style:
         instr = _build_custom_style_instruction(
-            project_context.communication_style, is_single_message=True
+            project_context.communication_style, is_single_message=True, is_completion=is_completion
         )
     else:
         # Use default instruction for standard tone (no custom style)
-        instr = instruction or DEFAULT_INSTRUCTION
+        completion_context = ""
+        if is_completion:
+            completion_context = (
+                "CONTEXTO CRÍTICO - FINALIZAÇÃO DA CONVERSA:\n"
+                "Esta é a ÚLTIMA interação da conversa. O fluxo foi completado.\n"
+                "- RESPONDA com uma mensagem genérica de agradecimento e que retornará em breve\n"
+                "- Use algo como: 'Ok. Obrigado! Vou entrar em contato com você em breve.'\n"
+                "- OU similar: 'Perfeito! Vou verificar isso e te retorno.'\n"
+                "- NÃO mencione especificamente 'humano' mas indique que retornará\n"
+                "- Seja cordial mas deixe claro que a conversa está pausada temporariamente\n"
+                "- Mantenha tom profissional e reassegurador\n\n"
+            )
+        
+        instr = instruction or f"{completion_context}{DEFAULT_INSTRUCTION}"
         # Add minimal project context if available but no communication style
         if project_context and project_context.has_rewriter_context():
             context_prompt = project_context.get_rewriter_context_prompt()
@@ -149,101 +165,7 @@ def naturalize_prompt(
         return text
 
 
-def clarify_and_reask(
-    llm: LLMClient,  # type: ignore[name-defined]
-    question_text: str,
-    user_message: str,
-    project_context: ProjectContext | None = None,  # type: ignore[name-defined]
-) -> str:
-    """
-    Produce a brief, casual PT-BR acknowledgement referencing the user's words,
-    then restate the original question succinctly in one sentence.
 
-    Args:
-        llm: LLM client for rewriting
-        question_text: The original question to clarify
-        user_message: The user's clarification request
-        project_context: Business context for appropriate communication style
-    """
-    # If project context has a communication style, use it for clarification
-    if project_context and project_context.communication_style:
-        instr = (
-            "CONTEXTO: O usuário não entendeu sua pergunta e pediu esclarecimento. "
-            "Você precisa reconhecer gentilmente e reformular a pergunta de forma mais clara.\n\n"
-        )
-
-        # Add the custom style instruction
-        style_instruction = _build_custom_style_instruction(
-            project_context.communication_style, is_single_message=True
-        )
-        instr += style_instruction
-        instr += "\nRESPOSTA REQUERIDA: Uma frase que reconheça a dúvida do usuário e reformule a pergunta original de forma mais clara, seguindo exatamente o padrão de comunicação especificado.\n"
-    else:
-        # Default clarification style
-        instr = (
-            "CONTEXTO: Você é uma recepcionista brasileira profissional. A pessoa não entendeu sua pergunta e pediu esclarecimento.\n\n"
-            "RESPOSTA CONCISA E PROFISSIONAL:\n"
-            "Construa UMA frase cordial que:\n"
-            "- Reconheça gentilmente ('ah, claro', 'certo', 'sem problemas')\n"
-            "- Reformule de forma mais clara e simples\n"
-            "- Máximo 1-2 linhas no WhatsApp\n"
-            "- Tom: recepcionista simpática mas competente\n\n"
-            "EXEMPLOS DE TOM ADEQUADO:\n"
-            "- 'Claro! Preciso saber as dimensões do galpão - comprimento e largura em metros'\n"
-            "- 'Sem problemas! Qual o tamanho do espaço? Tipo 15x20 metros?'\n"
-            "- 'Certo, deixa eu reformular: quantos metros tem de comprimento e largura?'\n\n"
-            "CRÍTICO:\n"
-            "- NÃO faça listas numeradas ou explicações longas\n"
-            "- NÃO seja muito casual ('E aí', 'foi mal', 'ops')\n"
-            "- NÃO seja muito formal ('Senhor/Senhora', 'poderia informar')\n"
-            "- SÓ reformule a pergunta de forma clara e cordial\n"
-            "- Tom de recepcionista brasileira profissional\n"
-        )
-
-        # Add minimal project context if available but no communication style
-        if project_context and project_context.has_rewriter_context():
-            context_prompt = project_context.get_rewriter_context_prompt()
-            instr = f"{instr}\n{context_prompt}"
-
-    try:
-        text = f"Pergunta: {question_text}\nUsuário perguntou: {user_message}"
-        rewritten = llm.rewrite(instr, text)
-
-        # Log the prompt and response
-        prompt_logger.log_prompt(
-            prompt_type="clarify_reask",
-            instruction=instr,
-            input_text=text,
-            response=rewritten if isinstance(rewritten, str) else str(rewritten),
-            model=getattr(llm, "model_name", "unknown"),
-            metadata={"has_project_context": project_context is not None},
-        )
-
-        if isinstance(rewritten, str) and rewritten.strip():
-            first_line = next(
-                (ln.strip() for ln in rewritten.splitlines() if ln.strip()), ""
-            )
-            if first_line.startswith(("- ", "* ")):
-                first_line = first_line[2:].strip()
-            if (
-                first_line.startswith('"')
-                and first_line.endswith('"')
-                and len(first_line) > 1
-            ):
-                first_line = first_line[1:-1].strip()
-            return first_line
-        return question_text
-    except Exception as e:
-        # Log the error
-        prompt_logger.log_prompt(
-            prompt_type="clarify_reask_error",
-            instruction=instr,
-            input_text=text,
-            response=f"ERROR: {e}",
-            model=getattr(llm, "model_name", "unknown"),
-            metadata={"error": str(e)},
-        )
-        return question_text
 
 
 def rewrite_whatsapp_multi(
@@ -253,11 +175,15 @@ def rewrite_whatsapp_multi(
     *,
     max_followups: int = 2,
     project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+    is_completion: bool = False,
 ) -> list[dict[str, int | str]]:
     """Rewrite an assistant reply into human-like WhatsApp-style messages.
 
     Returns a list of {"text": str, "delay_ms": int} objects. The first message should have
     delay_ms=0. Follow-ups should be paced to feel human.
+
+    Args:
+        is_completion: Whether this is the final message/completion of the conversation flow
 
     If rewriting fails, returns a single message with original_text.
     """
@@ -279,11 +205,25 @@ def rewrite_whatsapp_multi(
     # Use custom style instruction if communication style is provided
     if project_context and project_context.communication_style:
         instruction = _build_custom_style_instruction(
-            project_context.communication_style, is_single_message=False
+            project_context.communication_style, is_single_message=False, is_completion=is_completion
         )
     else:
         # Default instruction when no custom communication style is provided
+        completion_context = ""
+        if is_completion:
+            completion_context = (
+                "CONTEXTO CRÍTICO - FINALIZAÇÃO DA CONVERSA:\n"
+                "Esta é a ÚLTIMA interação da conversa. O fluxo foi completado.\n"
+                "- RESPONDA com uma mensagem genérica de agradecimento e que retornará em breve\n"
+                "- Use algo como: 'Ok. Obrigado! Vou entrar em contato com você em breve.'\n"
+                "- OU similar: 'Perfeito! Vou verificar isso e te retorno.'\n"
+                "- NÃO mencione especificamente 'humano' mas indique que retornará\n"
+                "- Seja cordial mas deixe claro que a conversa está pausada temporariamente\n"
+                "- Mantenha tom profissional e reassegurador\n\n"
+            )
+        
         instruction = (
+            f"{completion_context}"
             "Você está naturalizando mensagens para soar mais brasileira e calorosa no WhatsApp.\n\n"
             "REGRA FUNDAMENTAL - PRESERVE O ASSUNTO ORIGINAL:\n"
             "- JAMAIS adicione assuntos que não estão na mensagem original\n"
@@ -347,8 +287,7 @@ def rewrite_whatsapp_multi(
             "DECISÕES IMPORTANTES:\n"
             "- Quando houver OPÇÕES: apresente cordialmente ('seria consulta, exame, ou outro serviço?' ao invés de menu numerado)\n"
             "- Para ESCLARECIMENTOS: reconheça gentilmente antes de esclarecer\n"
-            "- Em CONFIRMAÇÕES: seja cordial ('Perfeito! Anotei aqui' ao invés de só 'Ok')\n"
-            "- Para INFORMAÇÕES: seja positiva ('Consegui um ótimo horário!' ao invés de só 'Horário disponível:')\n\n"
+            "- Em CONFIRMAÇÕES: seja cordial ('Perfeito! Anotei aqui' ao invés de só 'Ok')\n\n"
             "AUTENTICIDADE PROFISSIONAL:\n"
             "- Seja humana mas mantendo competência\n"
             "- Demonstre interesse genuíno pelo cliente\n"
@@ -446,7 +385,7 @@ def rewrite_whatsapp_multi(
 
 
 def _build_custom_style_instruction(
-    communication_style: str, is_single_message: bool = False
+    communication_style: str, is_single_message: bool = False, is_completion: bool = False
 ) -> str:
     """
     Build a custom instruction that mimics the provided communication style.
@@ -454,6 +393,7 @@ def _build_custom_style_instruction(
     Args:
         communication_style: The tenant's communication style (could be instructions or examples)
         is_single_message: If True, builds instruction for single message rewrite
+        is_completion: If True, builds instruction for conversation completion/closure
     """
     # Determine if the communication_style looks like conversation examples or instructions
     # Check for actual conversation formats (WhatsApp exports, chat logs, etc.)
@@ -488,7 +428,21 @@ def _build_custom_style_instruction(
     )
 
     # Build instruction focused on following the custom style naturally
+    completion_context = ""
+    if is_completion:
+        completion_context = (
+            "CONTEXTO CRÍTICO - FINALIZAÇÃO DA CONVERSA:\n"
+            "Esta é a ÚLTIMA interação da conversa. O fluxo foi completado.\n"
+            "- RESPONDA no estilo do cliente com mensagem genérica que retornará em breve\n"
+            "- Use algo como: 'Ok. Obrigado! Vou entrar em contato com você em breve.' (adaptado ao estilo)\n"
+            "- OU similar: 'Perfeito! Vou verificar isso e te retorno.' (no estilo do cliente)\n"
+            "- NÃO mencione especificamente 'humano' mas indique que retornará\n"
+            "- Aplique o estilo do cliente para expressar essa pausa temporária cordialmente\n"
+            "- Mantenha tom do cliente mas seja reassegurador\n\n"
+        )
+    
     base_instruction = (
+        f"{completion_context}"
         "Você deve seguir o ESTILO DE COMUNICAÇÃO do cliente descrito abaixo, aplicando-o naturalmente.\n\n"
         "ESTILO DE COMUNICAÇÃO DO CLIENTE:\n"
         f"{communication_style}\n\n"
@@ -505,6 +459,10 @@ def _build_custom_style_instruction(
         "• O ASSUNTO da mensagem original é sagrado - nunca misture outros tópicos\n"
         "• Se a mensagem é sobre plano de saúde → fale apenas sobre plano de saúde\n"
         "• Se é sobre disponibilidade → fale apenas sobre disponibilidade\n"
+        + ("• FINALIZAÇÃO: Responda com handoff temporário no estilo do cliente\n"
+           "• Use algo como 'Vou te retornar em breve' adaptado ao estilo\n" if is_completion else
+           "• PRESERVE PERGUNTAS: Se a mensagem original termina com '?', MANTENHA como pergunta\n"
+           "• NUNCA transforme perguntas em afirmações ou suposições\n") +
         "• Aplique o estilo do cliente MAS preserve o conteúdo original\n\n"
     )
 
@@ -515,16 +473,27 @@ def _build_custom_style_instruction(
             "FORMATO DE SAÍDA:\n"
             "• Reescreva em UMA frase natural seguindo o estilo do cliente\n"
             "• Mantenha 100% do significado original\n"
+            "• CRITICAL: Se a mensagem original termina com '?', sua resposta DEVE terminar com '?'\n"
             "• Aplique apenas o tom, não altere o conteúdo\n"
         )
     else:
         # Multi-message instruction
-        return (
-            f"{base_instruction}"
-            "ESTRATÉGIA DE MÚLTIPLAS MENSAGENS:\n"
+        strategy_text = (
+            "• FINALIZAÇÃO: Divida a mensagem de handoff temporário no estilo do cliente\n"
+            "• Primeira mensagem: Agradecimento/reconhecimento no estilo\n"
+            "• Última mensagem: 'Vou entrar em contato em breve' no estilo do cliente\n"
+            "• NÃO faça perguntas - expresse pausa cordial e retorno futuro\n\n" if is_completion else
             "• Siga o estilo natural do cliente\n"
             "• Divida o conteúdo de forma conversacional\n"
-            "• Última mensagem sempre deve ser a pergunta principal\n\n"
+            "• Última mensagem sempre deve ser a pergunta principal\n"
+            "• CRITICAL: Se a mensagem original termina com '?', a ÚLTIMA mensagem deve terminar com '?'\n"
+            "• NUNCA transforme perguntas em confirmações ou afirmações\n\n"
+        )
+        
+        return (
+            f"{base_instruction}"
+            f"ESTRATÉGIA DE MÚLTIPLAS MENSAGENS:\n"
+            f"{strategy_text}"
             'Formato: JSON array [{"text": string, "delay_ms": number}]\n'
             "Delays: primeira sempre 0, outras entre 2000-4000ms\n"
         )
