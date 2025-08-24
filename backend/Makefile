@@ -51,7 +51,7 @@ ci: lint fmt typecheck test
 # Danger: Drop and recreate all tables (useful after UUID migration)
 .PHONY: reset-db
 reset-db:
-	. .venv/bin/activate && uv run python -c "from app.db.base import Base; from app.db.session import get_engine; eng=get_engine(); Base.metadata.drop_all(bind=eng); Base.metadata.create_all(bind=eng); print('✅ Dropped and recreated all tables')"
+	. .venv/bin/activate && uv run python -c "from app.db.models import *; from app.db.base import Base; from app.db.session import get_engine; eng=get_engine(); Base.metadata.drop_all(bind=eng); Base.metadata.create_all(bind=eng); print('✅ Dropped and recreated all tables')"
 
 # Seed the database with example tenant, channel, and flow
 .PHONY: seed-db

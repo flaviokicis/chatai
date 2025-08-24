@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from typing import Any, Callable, Sequence
+from uuid import UUID
 
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.llm import LLMClient
 
@@ -24,32 +26,139 @@ class FlowChatAgent:
         self.llm = llm
         self.tools = {t.name: t for t in tools or []}
 
-    def process(self, flow: dict[str, Any], history: Sequence[dict[str, str]]) -> list[str]:
+    def process(
+        self, 
+        flow: dict[str, Any], 
+        history: Sequence[dict[str, str]], 
+        flow_id: UUID | None = None, 
+        session: Session | None = None
+    ) -> list[str]:
         """Process conversation and return assistant responses."""
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"FlowChatAgent.process called with flow_id={flow_id}, history_len={len(history)}")
 
         messages = list(history)
         outputs: list[str] = []
-        tool_schemas = [t.args_schema for t in self.tools.values() if t.args_schema]
+        
+        # Create custom tool mapping to handle LangChain's class name convention
+        tool_schemas = []
+        schema_to_tool_map = {}  # Maps schema class name -> actual tool name
+        
+        for tool in self.tools.values():
+            if tool.args_schema:
+                schema_class_name = tool.args_schema.__name__  # e.g., "SetEntireFlowRequest"
+                actual_tool_name = tool.name  # e.g., "set_entire_flow"
+                
+                tool_schemas.append(tool.args_schema)
+                schema_to_tool_map[schema_class_name] = actual_tool_name
+        
+        logger.info(f"Available tools: {list(self.tools.keys())}")
+        logger.info(f"Schema to tool mapping: {schema_to_tool_map}")
+        logger.info(f"Tool schemas: {len(tool_schemas)}")
+        
         # Simple loop allowing multiple tool invocations
-        for _ in range(10):  # hard limit to avoid infinite loops
+        for iteration in range(10):  # hard limit to avoid infinite loops
+            logger.info(f"Agent iteration {iteration+1}: Building prompt...")
             prompt = self._build_prompt(flow, messages)
+            logger.info(f"Agent iteration {iteration+1}: Calling LLM extract with prompt length {len(prompt)}")
+            
             result = self.llm.extract(prompt, tool_schemas)
             content = result.get("content")
+            tool_calls = result.get("tool_calls") or []
+            
+            logger.info(f"Agent iteration {iteration+1}: LLM returned content_len={len(content) if content else 0}, tool_calls_count={len(tool_calls)}")
             if content:
+                content_preview = content[:150] + "..." if len(content) > 150 else content
+                logger.info(f"Agent iteration {iteration+1}: Content preview: '{content_preview}'")
+            if tool_calls:
+                for i, call in enumerate(tool_calls):
+                    logger.info(f"Agent iteration {iteration+1}: Tool call {i+1}: name={call.get('name')}, args_keys={list(call.get('arguments', {}).keys())}")
+            
+            # If we have tool calls, prioritize them over content
+            if tool_calls:
+                # Only add content if it's not a massive JSON dump
+                if content and len(content) < 500 and not content.strip().startswith('{'):
+                    logger.info(f"Agent iteration {iteration+1}: Adding content (not JSON dump)")
+                    outputs.append(content)
+                    messages.append({"role": "assistant", "content": content})
+                else:
+                    logger.info(f"Agent iteration {iteration+1}: Filtering out JSON dump content (len={len(content) if content else 0})")
+            elif content:
+                # No tool calls, so include the content
+                logger.info(f"Agent iteration {iteration+1}: Adding content (no tool calls)")
                 outputs.append(content)
                 messages.append({"role": "assistant", "content": content})
-            tool_calls = result.get("tool_calls") or []
+                
             if not tool_calls:
+                logger.info(f"Agent iteration {iteration+1}: No tool calls, breaking loop")
                 break
             for call in tool_calls:
-                name = call.get("name")
+                schema_name = call.get("name")  # This will be the schema class name
+                actual_tool_name = schema_to_tool_map.get(schema_name, schema_name)  # Map to actual tool name
                 args = call.get("arguments", {})
-                tool = self.tools.get(name)
+                tool = self.tools.get(actual_tool_name)
+                
                 if not tool:
+                    logger.warning(f"Agent iteration {iteration+1}: Tool '{schema_name}' -> '{actual_tool_name}' not found in available tools")
                     continue
-                tool_output = tool.func(**args)
+                
+                logger.info(f"Agent iteration {iteration+1}: Executing tool '{schema_name}' -> '{actual_tool_name}'")
+                
+                # All tools need special handling to inject flow_definition and other context
+                modification_tools = ["add_node", "update_node", "delete_node", 
+                                    "add_edge", "update_edge", "delete_edge"]
+                read_only_tools = ["validate_flow", "get_flow_summary"]
+                
+                try:
+                    if actual_tool_name == "set_entire_flow":
+                        # set_entire_flow: flow_definition is provided by LLM
+                        flow_def = args.get('flow_definition', {})
+                        user_msg = args.get('user_message')
+                        logger.info(f"Agent iteration {iteration+1}: Calling set_entire_flow with {len(flow_def.get('nodes', []))} nodes")
+                        tool_output = tool.func(flow_def, user_message=user_msg, flow_id=flow_id, session=session)
+                        # Update local flow if successful
+                        if "✅" in tool_output or (user_msg and user_msg in tool_output):
+                            flow = flow_def
+                    elif actual_tool_name in modification_tools:
+                        # Modification tools: inject flow as first parameter
+                        logger.info(f"Agent iteration {iteration+1}: Calling '{actual_tool_name}' with args: {list(args.keys())}")
+                        # Extract user_message if present
+                        user_msg = args.pop('user_message', None)
+                        # Provide defaults for optional parameters
+                        if 'updates' in args and args['updates'] is None:
+                            args['updates'] = {}
+                        # Call with flow_definition as first parameter
+                        tool_output = tool.func(flow, **args, user_message=user_msg, flow_id=flow_id, session=session)
+                        # Update flow on success (flow is modified in-place by the function)
+                        if "✅" in tool_output or (user_msg and user_msg in tool_output):
+                            # The flow was modified in-place, no need to update
+                            pass
+                    elif actual_tool_name in read_only_tools:
+                        # Read-only tools: inject flow as the flow_definition parameter
+                        logger.info(f"Agent iteration {iteration+1}: Calling '{actual_tool_name}'")
+                        tool_output = tool.func(flow)
+                    else:
+                        # Unknown tool, call as-is
+                        logger.info(f"Agent iteration {iteration+1}: Calling tool '{actual_tool_name}' with args: {list(args.keys())}")
+                        tool_output = tool.func(**args)
+                except TypeError as e:
+                    logger.error(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' failed: {e}")
+                    # Provide helpful error message
+                    if "missing" in str(e) and "required" in str(e):
+                        tool_output = f"Error: {actual_tool_name} is missing required arguments. {str(e)}"
+                    else:
+                        tool_output = f"Tool call failed: {actual_tool_name}. Error: {str(e)}"
+                except Exception as e:
+                    logger.error(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' unexpected error: {e}")
+                    tool_output = f"Unexpected error calling {actual_tool_name}: {str(e)}"
+                
+                logger.info(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' returned: '{tool_output}'")
                 outputs.append(tool_output)
                 messages.append({"role": "assistant", "content": tool_output})
+        
+        logger.info(f"FlowChatAgent.process complete: returning {len(outputs)} outputs")
         return outputs
 
     def _build_prompt(self, flow: dict[str, Any], history: Sequence[dict[str, str]]) -> str:
@@ -147,13 +256,17 @@ class FlowChatAgent:
         # Instructions
         lines.extend([
             "## Instructions:",
-            "- Always provide complete, valid JSON flow definitions",
+            "- **CRITICAL: ALWAYS use tools - NEVER output flow JSON directly to the user!**",
+            "- For flow modifications: Call `set_entire_flow` tool with the complete modified flow",
+            "- For validation: Call `validate_flow` tool", 
+            "- For summaries: Call `get_flow_summary` tool",
+            "- **IMPORTANT: Always provide 'user_message' parameter** with a friendly message in the user's language",
+            "  - Example (Portuguese): user_message: \"Escala de dor alterada de 1-10 para 1-5 com sucesso!\"",
+            "  - Example (English): user_message: \"Pain scale successfully updated from 1-10 to 1-5!\"",
+            "- **ABSOLUTELY FORBIDDEN: Outputting raw JSON to user** - always use appropriate tools",
             "- Use meaningful IDs: `q.field_name` for questions, `d.description` for decisions, `t.outcome` for terminals",
             "- Include `condition_description` on edges to explain routing logic",
             "- Set up proper priorities on edges (lower numbers = higher priority)",
-            "- Add `decision_prompt` to decision nodes for LLM-assisted routing",
-            "- Use `allowed_values` for constrained choices",
-            "- Include helpful metadata like flow name, description, and UI labels",
             "",
             "## When User Provides WhatsApp Conversation:",
             "1. Analyze the conversation flow and identify main paths/scenarios",
@@ -161,7 +274,7 @@ class FlowChatAgent:
             "3. Identify decision points where conversation branches",
             "4. Create appropriate subgraphs for different scenarios",
             "5. Set up global questions that apply to all paths",
-            "6. Provide complete flow JSON ready for immediate use",
+            "6. Use `set_entire_flow` tool to create the complete flow when needed (creating a new one from scratch) (NEVER output JSON directly). For punctual changes, use the other tools.",
             "",
         ])
         
@@ -182,6 +295,27 @@ class FlowChatAgent:
             lines.append("")
         
         lines.append("How can I help you modify or create your flow?")
+        
+        return "\n".join(lines)
+    
+    def _build_final_message_prompt(self, messages: list[dict[str, str]]) -> str:
+        """Build prompt for generating final user-friendly message after tool execution."""
+        recent_messages = messages[-3:] if len(messages) >= 3 else messages
+        
+        lines = [
+            "Based on the recent conversation and tool results below, provide a brief, friendly message to the user in Portuguese.",
+            "Keep it under 50 words. Focus on what was accomplished, not technical details.",
+            "",
+            "Recent conversation:"
+        ]
+        
+        for msg in recent_messages:
+            lines.append(f"{msg['role'].title()}: {msg['content'][:200]}...")
+        
+        lines.extend([
+            "",
+            "Provide a concise, friendly response:"
+        ])
         
         return "\n".join(lines)
     

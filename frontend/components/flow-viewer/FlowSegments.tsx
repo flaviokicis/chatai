@@ -139,7 +139,10 @@ export function FlowSegments({
                     .map((nodeId) => (
                     <div key={nodeId} className="relative pl-6">
                       <div className="absolute left-[14px] top-5 h-2 w-2 rounded-full bg-border" />
-                      <NodeCard node={{ ...flow.nodes[nodeId], isEntry: flow.entry === nodeId, outgoing: flow.edges_from[nodeId] ?? [] }} variant="compact" />
+                      <NodeCard 
+                        node={{ ...flow.nodes[nodeId], isEntry: flow.entry === nodeId, outgoing: flow.edges_from[nodeId] ?? [] }} 
+                        variant="compact" 
+                      />
                     </div>
                   ))}
                 </div>
@@ -165,11 +168,12 @@ export function FlowSegments({
                 <button
                   type="button"
                   onClick={() => onSelect?.(seg.decisionId, b.id)}
-                  className={`mb-3 w-full text-left text-sm font-medium px-3 py-2 rounded-lg border cursor-pointer ${
+                  className={`mb-3 w-full text-left text-sm font-medium px-3 py-2 rounded-lg border cursor-pointer transition-all duration-200 ${
                     selection && selection[seg.decisionId] === b.id
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-muted/40 hover:bg-muted border-border"
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-muted/40 hover:bg-muted/60 hover:border-primary/30 border-border hover:shadow-sm"
                   }`}
+                  title={`Clique para ver o caminho: ${b.label}`}
                 >
                   {b.label}
                 </button>

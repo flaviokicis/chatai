@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { PositionedNode, QuestionNodeSummary } from "./types";
+import type { PositionedNode, QuestionNodeSummary, DecisionNodeSummary, TerminalNodeSummary, ActionNodeSummary } from "./types";
 import styles from "./styles.module.css";
 
 function KindBadge({ kind }: { kind: string }) {
@@ -14,9 +14,29 @@ export function NodeCard({ node, highlighted, variant = "default", flat }: { nod
   const showMeta = variant === "default";
   const showBadge = variant === "default";
   const accent = variant === "default" ? (node.kind === "Question" ? styles.qAccent : node.kind === "Decision" ? styles.dAccent : styles.tAccent) : "";
-  const questionPrompt: string | undefined = node.kind === "Question" ? (node as unknown as QuestionNodeSummary).prompt : undefined;
-  const isExpandable: boolean = !!questionPrompt;
-  const kindLabel = node.kind === "Question" ? "Pergunta" : node.kind === "Decision" ? "Decisão" : "Terminal";
+  
+  // Extract meaningful content for different node types
+  const questionPrompt: string | undefined = node.kind === "Question" ? (node as QuestionNodeSummary).prompt : undefined;
+  const decisionPrompt: string | undefined = node.kind === "Decision" ? (node as DecisionNodeSummary).decision_prompt || undefined : undefined;
+  const terminalReason: string | undefined = node.kind === "Terminal" ? (node as TerminalNodeSummary).reason || undefined : undefined;
+  const actionType: string | undefined = node.kind === "Action" ? (node as ActionNodeSummary).action_type : undefined;
+  
+  // Node is expandable if it has meaningful content to show
+  const expandableContent = questionPrompt || decisionPrompt || terminalReason || actionType;
+  const isExpandable: boolean = !!expandableContent;
+  
+  const getKindLabel = (kind: string) => {
+    switch (kind) {
+      case "Question": return "Pergunta";
+      case "Decision": return "Decisão";
+      case "Terminal": return "Terminal";
+      case "Action": return "Ação";
+      case "Subflow": return "Subfluxo";
+      default: return kind;
+    }
+  };
+  
+  const kindLabel = getKindLabel(node.kind);
 
   const [isOverlayOpen, setIsOverlayOpen] = useState(false);
 
@@ -40,16 +60,17 @@ export function NodeCard({ node, highlighted, variant = "default", flat }: { nod
   }, [isOverlayOpen]);
 
   const nodeTitle = useMemo(() => {
-    return node.kind === "Question" && questionPrompt ? questionPrompt : node.label ?? node.id;
-  }, [node, questionPrompt]);
+    return expandableContent || node.label || node.id;
+  }, [expandableContent, node]);
   return (
     <div className={`${styles.nodeCard} ${flat ? styles.nodeCardFlat : ""} ${accent} ${highlighted ? styles.nodeCardActive : ""} ${variant === "compact" ? styles.nodeCardCompact : ""}`}>
       <div className={styles.nodeHeader}>
         <div
-          className={`${variant === "compact" ? styles.nodeTitle : "font-medium truncate"} ${isExpandable ? styles.clickableTitle : ""}`}
+          className={`${variant === "compact" ? styles.nodeTitle : "font-medium truncate"} ${isExpandable ? styles.clickableTitle + " transition-colors" : ""}`}
           onClick={toggleOverlay}
           role={isExpandable ? "button" : undefined}
           tabIndex={isExpandable ? 0 : -1}
+          title={isExpandable ? "Clique para ver detalhes completos" : undefined}
           onKeyDown={(e) => {
             if ((e.key === "Enter" || e.key === " ") && isExpandable) {
               e.preventDefault();
@@ -100,12 +121,43 @@ export function NodeCard({ node, highlighted, variant = "default", flat }: { nod
               <span className={`${styles.badge} ${node.kind === "Question" ? styles.qBadge : node.kind === "Decision" ? styles.dBadge : styles.tBadge}`}>{kindLabel}</span>
               <div className={styles.overlayMeta}>Código: {node.id}</div>
             </div>
-            {questionPrompt ? <div className={styles.overlayBody}>{questionPrompt}</div> : null}
+            
+            {/* Show content based on node type */}
             {questionPrompt ? (
-              <div className={styles.overlayHint}>
-                Observação: as perguntas mostradas aqui são reescritas automaticamente conforme o
-                contexto da conversa para soar naturais ao usuário.
-              </div>
+              <>
+                <div className={styles.overlayBody}>{questionPrompt}</div>
+                <div className={styles.overlayHint}>
+                  Observação: as perguntas mostradas aqui são reescritas automaticamente conforme o
+                  contexto da conversa para soar naturais ao usuário.
+                </div>
+              </>
+            ) : null}
+            
+            {decisionPrompt ? (
+              <>
+                <div className={styles.overlayBody}>{decisionPrompt}</div>
+                <div className={styles.overlayHint}>
+                  Esta é a lógica de decisão que determina o próximo passo no fluxo.
+                </div>
+              </>
+            ) : null}
+            
+            {terminalReason ? (
+              <>
+                <div className={styles.overlayBody}>{terminalReason}</div>
+                <div className={styles.overlayHint}>
+                  Este é um ponto final do fluxo. {(node as TerminalNodeSummary).success ? "Fluxo concluído com sucesso." : "Fluxo finalizado."}
+                </div>
+              </>
+            ) : null}
+            
+            {actionType && !questionPrompt && !decisionPrompt && !terminalReason ? (
+              <>
+                <div className={styles.overlayBody}>Tipo de ação: {actionType}</div>
+                <div className={styles.overlayHint}>
+                  Esta é uma ação executada automaticamente pelo sistema.
+                </div>
+              </>
             ) : null}
           </div>
         </div>

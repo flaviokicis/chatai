@@ -14,6 +14,7 @@ from app.db.models import (
     Flow,
     FlowChatMessage,
     FlowChatRole,
+    FlowVersion,
     Message,
     MessageDirection,
     MessageStatus,
@@ -379,6 +380,34 @@ def get_flow_by_id(session: Session, flow_id: UUID) -> Flow | None:
     ).scalar_one_or_none()
 
 
+def update_flow(
+    session: Session,
+    flow_id: UUID,
+    *,
+    name: str | None = None,
+    definition: dict | None = None,
+    is_active: bool | None = None,
+) -> Flow | None:
+    """Update an existing flow."""
+    flow = session.execute(
+        select(Flow).where(Flow.id == flow_id, Flow.deleted_at.is_(None))
+    ).scalar_one_or_none()
+
+    if not flow:
+        return None
+
+    # Update fields if provided
+    if name is not None:
+        flow.name = name
+    if definition is not None:
+        flow.definition = definition
+    if is_active is not None:
+        flow.is_active = is_active
+
+    session.flush()
+    return flow
+
+
 # --- Chat Repository Functions ---
 
 
@@ -538,3 +567,110 @@ def mark_thread_reviewed_by_human(session: Session, thread_id: UUID) -> bool:
         session.commit()
         return True
     return False
+
+
+# --- Flow Version Repository Functions ---
+
+
+def create_flow_version(
+    session: Session,
+    *,
+    flow_id: UUID,
+    definition_snapshot: dict,
+    change_description: str | None = None,
+    created_by: str | None = None,
+) -> FlowVersion:
+    """Create a new flow version snapshot."""
+    # Get the highest version number for this flow
+    latest_version = session.execute(
+        select(FlowVersion.version_number)
+        .where(FlowVersion.flow_id == flow_id)
+        .order_by(desc(FlowVersion.version_number))
+    ).scalar()
+    
+    next_version = (latest_version or 0) + 1
+    
+    version = FlowVersion(
+        flow_id=flow_id,
+        version_number=next_version,
+        definition_snapshot=definition_snapshot,
+        change_description=change_description,
+        created_by=created_by,
+    )
+    session.add(version)
+    session.flush()
+    
+    # Clean up old versions (keep only last 50)
+    old_versions = session.execute(
+        select(FlowVersion)
+        .where(FlowVersion.flow_id == flow_id)
+        .order_by(desc(FlowVersion.version_number))
+        .offset(50)
+    ).scalars().all()
+    
+    for old_version in old_versions:
+        session.delete(old_version)
+    
+    return version
+
+
+def get_flow_versions(
+    session: Session, 
+    flow_id: UUID, 
+    limit: int = 20
+) -> Sequence[FlowVersion]:
+    """Get flow version history."""
+    return (
+        session.execute(
+            select(FlowVersion)
+            .where(FlowVersion.flow_id == flow_id)
+            .order_by(desc(FlowVersion.version_number))
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_flow_version_by_number(
+    session: Session, 
+    flow_id: UUID, 
+    version_number: int
+) -> FlowVersion | None:
+    """Get a specific flow version by number."""
+    return session.execute(
+        select(FlowVersion)
+        .where(
+            FlowVersion.flow_id == flow_id,
+            FlowVersion.version_number == version_number
+        )
+    ).scalar_one_or_none()
+
+
+def update_flow_with_versioning(
+    session: Session,
+    flow_id: UUID,
+    new_definition: dict,
+    change_description: str | None = None,
+    created_by: str | None = None,
+) -> Flow | None:
+    """Update flow definition and create version snapshot."""
+    flow = get_flow_by_id(session, flow_id)
+    if not flow:
+        return None
+    
+    # Create version snapshot of current state before updating
+    create_flow_version(
+        session,
+        flow_id=flow_id,
+        definition_snapshot=flow.definition,
+        change_description=change_description,
+        created_by=created_by,
+    )
+    
+    # Update the flow
+    flow.definition = new_definition
+    flow.version += 1
+    session.flush()
+    
+    return flow

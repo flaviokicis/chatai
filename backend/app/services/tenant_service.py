@@ -172,3 +172,43 @@ class TenantService:
         # Verify tenant exists
         self.get_tenant_by_id(tenant_id)
         return repository.get_flows_by_tenant(self.session, tenant_id)
+
+    def update_flow(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID,
+        name: str | None = None,
+        definition: dict | None = None,
+        is_active: bool | None = None,
+    ) -> Flow:
+        """Update an existing flow for a tenant."""
+        # Verify tenant exists
+        self.get_tenant_by_id(tenant_id)
+
+        # Get the flow and verify it belongs to the tenant
+        flow = repository.get_flow_by_id(self.session, flow_id)
+        if not flow:
+            raise TenantServiceError(f"Flow {flow_id} not found")
+        
+        if flow.tenant_id != tenant_id:
+            raise TenantServiceError(f"Flow {flow_id} does not belong to tenant {tenant_id}")
+
+        try:
+            updated_flow = repository.update_flow(
+                self.session,
+                flow_id=flow_id,
+                name=name,
+                definition=definition,
+                is_active=is_active,
+            )
+            if not updated_flow:
+                raise TenantServiceError(f"Failed to update flow {flow_id}")
+
+            self.session.commit()
+            logger.info("Updated flow %s for tenant %s", str(flow_id), str(tenant_id))
+            return updated_flow
+        except IntegrityError as exc:
+            self.session.rollback()
+            logger.error("Failed to update flow: %s", exc)
+            raise TenantServiceError("Failed to update flow") from exc

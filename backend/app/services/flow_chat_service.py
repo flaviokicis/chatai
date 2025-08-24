@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Sequence
 from uuid import UUID
 
@@ -29,29 +30,68 @@ class FlowChatService:
         return get_latest_assistant_message(self.session, flow_id)
 
     def send_user_message(self, flow_id: UUID, content: str) -> list[FlowChatMessage]:
+        logger = logging.getLogger(__name__)
+        
         if not self.agent:
             raise RuntimeError("agent required to process messages")
 
-        create_flow_chat_message(
-            self.session, flow_id=flow_id, role=FlowChatRole.user, content=content
-        )
-        history = list_flow_chat_messages(self.session, flow_id)
+        if not content.strip():
+            raise ValueError("message content cannot be empty")
 
-        flow = self.session.get(Flow, flow_id)
-        flow_def = flow.definition if flow else {}
-        history_dicts = [
-            {"role": msg.role.value, "content": msg.content} for msg in history
-        ]
-        responses = self.agent.process(flow_def, history_dicts)
-        saved: list[FlowChatMessage] = []
-        for text in responses:
-            saved.append(
-                create_flow_chat_message(
+        try:
+            # Save user message first
+            create_flow_chat_message(
+                self.session, flow_id=flow_id, role=FlowChatRole.user, content=content
+            )
+            
+            # Get flow and history
+            flow = self.session.get(Flow, flow_id)
+            if not flow:
+                raise ValueError(f"Flow {flow_id} not found")
+            
+            history = list_flow_chat_messages(self.session, flow_id)
+            flow_def = flow.definition if flow else {}
+            history_dicts = [
+                {"role": msg.role.value, "content": msg.content} for msg in history
+            ]
+            
+            # Process with agent (pass flow_id and session for persistence)
+            try:
+                logger.info(f"Calling agent.process for flow {flow_id} with {len(history_dicts)} messages")
+                responses = self.agent.process(flow_def, history_dicts, flow_id=flow_id, session=self.session)
+                logger.info(f"Agent returned {len(responses)} responses")
+                for i, resp in enumerate(responses):
+                    resp_preview = resp[:100] + "..." if len(resp) > 100 else resp
+                    logger.info(f"Agent response {i+1}: length={len(resp)}, preview='{resp_preview}'")
+            except Exception as e:
+                logger.error(f"Agent processing failed for flow {flow_id}: {str(e)}")
+                # Save error message to chat
+                error_msg = create_flow_chat_message(
                     self.session,
                     flow_id=flow_id,
                     role=FlowChatRole.assistant,
-                    content=text,
+                    content=f"❌ Erro ao processar solicitação: {str(e)}",
                 )
-            )
-        self.session.commit()
-        return saved
+                self.session.commit()
+                return [error_msg]
+            
+            # Save assistant responses
+            saved: list[FlowChatMessage] = []
+            for text in responses:
+                saved.append(
+                    create_flow_chat_message(
+                        self.session,
+                        flow_id=flow_id,
+                        role=FlowChatRole.assistant,
+                        content=text,
+                    )
+                )
+            
+            self.session.commit()
+            logger.info(f"Successfully processed message for flow {flow_id}, generated {len(saved)} responses")
+            return saved
+            
+        except Exception as e:
+            logger.error(f"Failed to process message for flow {flow_id}: {str(e)}")
+            self.session.rollback()
+            raise

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Path
@@ -133,6 +133,12 @@ class CreateFlowRequest(BaseModel):
     definition: dict
 
 
+class UpdateFlowRequest(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    definition: Optional[dict] = Field(default=None)
+    is_active: Optional[bool] = Field(default=None)
+
+
 class FlowResponse(BaseModel):
     id: UUID
     name: str
@@ -163,6 +169,36 @@ def create_flow(
         )
     except TenantServiceError as exc:  # pragma: no cover
         raise HTTPException(status_code=500, detail=f"Failed to create flow: {exc}")
+
+
+@router.put("/tenants/{tenant_id}/flows/{flow_id}", response_model=FlowResponse)
+def update_flow(
+    payload: UpdateFlowRequest,
+    tenant_id: UUID = Path(...),
+    flow_id: UUID = Path(...),
+    session: Session = Depends(get_db_session),
+) -> FlowResponse:
+    """Update an existing flow."""
+    service = TenantService(session)
+    try:
+        flow = service.update_flow(
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            name=payload.name,
+            definition=payload.definition,
+            is_active=payload.is_active,
+        )
+        return FlowResponse(
+            id=flow.id,
+            name=flow.name,
+            flow_id=flow.flow_id,
+            channel_instance_id=flow.channel_instance_id,
+        )
+    except TenantServiceError as exc:
+        logger.error("Failed to update flow: %s", exc)
+        if "not found" in str(exc).lower():
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail=f"Failed to update flow: {exc}") from exc
 
 
 @router.get("/tenants", response_model=list[TenantResponse])

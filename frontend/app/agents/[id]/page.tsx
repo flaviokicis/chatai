@@ -7,7 +7,7 @@ import { FlowEditorChat } from "@/components/flow-viewer/FlowEditorChat";
 type Params = Promise<{ id: string }>;
 
 async function fetchCompiledFlow(): Promise<CompiledFlow> {
-  const base = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+  const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
   const res = await fetch(`${base}/flows/example/compiled`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Failed to load flow: ${res.status}`);
@@ -39,7 +39,7 @@ export default async function AgentDetailPage({ params }: { params: Params }) {
             </Suspense>
           </div>
           <div>
-            <FlowEditorChat />
+            <FlowEditorChat flowId={id} />
           </div>
         </div>
         <SubflowSection subflows={flow.subflows} />

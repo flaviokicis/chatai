@@ -63,6 +63,18 @@
 
 .clickableTitle {
   cursor: pointer;
+  user-select: none;
+}
+
+.clickableTitle:hover {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+}
+
+.clickableTitle:focus {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 .badge {
