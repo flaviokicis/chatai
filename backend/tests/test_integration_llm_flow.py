@@ -472,6 +472,8 @@ class TestLLMFlowIntegration:
                 print(f"  ✅ TERMINAL")
             print()
     
+    @pytest.mark.integration
+    @pytest.mark.llm
     def test_path_correction_flow(self, real_llm, comprehensive_flow):
         """
         Test path correction functionality - user starts on wrong path and corrects it.
@@ -510,6 +512,8 @@ class TestLLMFlowIntegration:
         corrected_question = result.assistant_message.lower()
         assert corrected_question != initial_question  # Should be different question
         
+    @pytest.mark.integration
+    @pytest.mark.llm
     def test_escalation_triggers(self, real_llm, comprehensive_flow):
         """
         Test various escalation scenarios.
@@ -536,6 +540,8 @@ class TestLLMFlowIntegration:
             assert result.tool_name == "RequestHumanHandoff"
             assert result.escalate
     
+    @pytest.mark.integration
+    @pytest.mark.llm
     def test_restart_conversation(self, real_llm, comprehensive_flow):
         """
         Test conversation restart functionality.
@@ -564,6 +570,8 @@ class TestLLMFlowIntegration:
             assert len(ctx.answers) < initial_answers_count  # Should have fewer answers
             assert "accomplish today" in result.assistant_message.lower()  # Back to start
     
+    @pytest.mark.integration
+    @pytest.mark.llm
     def test_multiple_path_scenarios(self, real_llm, comprehensive_flow):
         """
         Test different path selections to ensure all routes work.

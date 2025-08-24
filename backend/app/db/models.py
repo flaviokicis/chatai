@@ -208,6 +208,12 @@ class ChatThread(Base, TimestampMixin):
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    
+    # Flow completion and human handoff tracking
+    flow_completion_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    human_handoff_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    human_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="threads")
     contact: Mapped[Contact] = relationship(back_populates="threads")

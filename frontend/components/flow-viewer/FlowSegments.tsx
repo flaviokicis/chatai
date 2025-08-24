@@ -103,11 +103,31 @@ export function FlowSegments({
 }) {
   const segments = useMemo(() => computeSegments(flow), [flow]);
 
+  // Get UI labels from flow metadata, with intelligent fallbacks based on flow ID
+  const getUILabels = () => {
+    const metadata = flow.metadata;
+    const uiLabels = metadata?.ui_labels;
+    
+    // Intelligent defaults based on flow type/ID
+    const isPortuguese = flow.id?.includes('consultorio') || flow.id?.includes('agendamento') || flow.id?.includes('vendas');
+    const defaultGlobalLabel = isPortuguese ? "Perguntas gerais" : "Global Questions";
+    const defaultBranchPrefix = isPortuguese ? "Caminho" : "Path";
+    const defaultLocale = isPortuguese ? "pt-BR" : "en";
+    
+    return {
+      globalSectionLabel: uiLabels?.global_section_label || defaultGlobalLabel,
+      branchSectionPrefix: uiLabels?.branch_section_prefix || defaultBranchPrefix,
+      locale: uiLabels?.locale || defaultLocale
+    };
+  };
+
+  const uiLabels = getUILabels();
+
   return (
     <div className="space-y-4">
       {segments.map((seg, idx) => {
         if (seg.kind === "global") {
-          const label = "Perguntas globais";
+          const label = uiLabels.globalSectionLabel;
           return (
             <div key={`g-${idx}`} className="rounded-xl border bg-card p-3">
               <div className="text-xs font-medium text-muted-foreground mb-2">{label}</div>

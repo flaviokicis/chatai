@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path, Depends
+from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.flow_core.compiler import CompiledFlow as _CompiledFlow
 from app.flow_core.compiler import compile_flow
@@ -16,6 +18,8 @@ from app.flow_core.ir import (
     SubflowNode,
     TerminalNode,
 )
+from app.db.session import get_db_session
+from app.db.repository import get_flow_by_id
 
 router = APIRouter(prefix="/flows", tags=["flows"])
 
@@ -125,6 +129,7 @@ def _sanitize_compiled(compiled: _CompiledFlow) -> dict[str, Any]:
         "entry": compiled.entry,
         "nodes": nodes,
         "edges_from": edges_from,
+        "metadata": compiled.metadata if compiled.metadata else None,
         "subflows": subflows,
     }
 
@@ -148,4 +153,36 @@ async def get_example_flow_compiled() -> dict[str, Any]:
     except Exception as exc:  # pragma: no cover - compile failures surfaced as 500
         raise HTTPException(
             status_code=500, detail=f"Failed to compile example flow: {exc}"
+        ) from exc
+
+
+@router.get("/{flow_id}/compiled")
+async def get_flow_compiled(
+    flow_id: UUID = Path(...), 
+    session: Session = Depends(get_db_session)
+) -> dict[str, Any]:
+    """Return a specific flow compiled to CompiledFlow format."""
+    try:
+        # Get flow from database
+        flow_record = get_flow_by_id(session, flow_id)
+        if not flow_record:
+            raise HTTPException(status_code=404, detail="Flow not found")
+        
+        # Get flow definition
+        flow_data = flow_record.definition
+        if not flow_data:
+            raise HTTPException(status_code=404, detail="Flow definition not found")
+        
+        # Ensure schema version is v2
+        if isinstance(flow_data, dict) and flow_data.get("schema_version") != "v2":
+            flow_data["schema_version"] = "v2"
+        
+        # Validate and compile flow
+        flow = Flow.model_validate(flow_data)
+        compiled = compile_flow(flow)
+        return _sanitize_compiled(compiled)
+        
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to compile flow: {exc}"
         ) from exc

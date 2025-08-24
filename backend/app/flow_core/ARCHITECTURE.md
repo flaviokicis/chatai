@@ -69,11 +69,11 @@ All LLM interactions use tool calling, not separate prompts:
 ```python
 # Tools the LLM can use
 UpdateAnswersFlow     # Extract and store answers
-ClarifyQuestion       # Provide clarification
 SkipQuestion         # Skip if allowed
 RevisitQuestion      # Go back to change answer
 SelectFlowPath       # Choose conversation path
 RequestHumanHandoff  # Escalate when needed
+ProvideInformation   # Provide contextual information
 ```
 
 ### 5. Rich Context Management

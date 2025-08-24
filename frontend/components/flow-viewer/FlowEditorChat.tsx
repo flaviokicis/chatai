@@ -53,11 +53,20 @@ export function FlowEditorChat({ flowId }: Props) {
     <div className="rounded-xl border bg-card text-card-foreground shadow-sm flex flex-col h-[420px] sm:h-[480px]">
       <div className="p-3 border-b text-sm font-medium">Editor do fluxo (beta)</div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {messages.map((m, i) => (
-          <div key={i} className={`max-w-[85%] rounded-2xl px-3 py-2 ${m.role === "assistant" ? "bg-muted" : "bg-primary text-primary-foreground ml-auto"}`}>
-            <div className="text-sm leading-relaxed whitespace-pre-wrap">{m.text}</div>
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center space-y-3 px-4">
+            <div className="text-sm text-muted-foreground max-w-xs">
+              <div className="mb-2">Converse neste chat para fazer edições no fluxo</div>
+              <div className="text-xs opacity-75">Ou cole uma conversa inteira que serve de exemplo</div>
+            </div>
           </div>
-        ))}
+        ) : (
+          messages.map((m, i) => (
+            <div key={i} className={`max-w-[85%] rounded-2xl px-3 py-2 ${m.role === "assistant" ? "bg-muted" : "bg-primary text-primary-foreground ml-auto"}`}>
+              <div className="text-sm leading-relaxed whitespace-pre-wrap">{m.text}</div>
+            </div>
+          ))
+        )}
       </div>
       <form onSubmit={onSubmit} className="p-3 border-t flex items-center gap-2">
         <input

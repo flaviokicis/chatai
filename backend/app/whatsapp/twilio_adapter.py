@@ -24,7 +24,7 @@ class TwilioWhatsAppAdapter:
         from .twilio import TwilioWhatsAppHandler
 
         self._handler = TwilioWhatsAppHandler(settings)
-        self._logger = logging.getLogger("uvicorn.error")
+        self._logger = logging.getLogger(__name__)
 
     async def validate_and_parse(self, request: Request, x_signature: str | None) -> dict[str, Any]:
         # Monkeypatch-friendly: tests patch TwilioWhatsAppHandler.validate_and_parse
@@ -36,7 +36,8 @@ class TwilioWhatsAppAdapter:
         return Response(content=str(twiml), media_type="application/xml")
 
     def send_followups(
-        self, to_number: str, from_number: str, plan: list[dict[str, object]] | None
+        self, to_number: str, from_number: str, plan: list[dict[str, object]] | None,
+        reply_id: str | None = None, store: object = None
     ) -> None:
         if not plan or len(plan) <= 1:
             return
@@ -72,6 +73,30 @@ class TwilioWhatsAppAdapter:
                     except Exception:
                         pass
                     time.sleep(max(0, delay_ms) / 1000.0)
+                    
+                    # Check if this reply is still current (user hasn't sent a new message)
+                    if reply_id and store:
+                        try:
+                            current_reply_key = f"current_reply:{to_number}"
+                            current_data = store.load("system", current_reply_key)
+                            if current_data and isinstance(current_data, dict):
+                                current_reply_id = current_data.get("reply_id")
+                                if current_reply_id != reply_id:
+                                    try:
+                                        self._logger.info(
+                                            "Cancelling WhatsApp follow-up #%d to %s (user sent new message, reply_id changed %s -> %s)",
+                                            i, to_number, reply_id, current_reply_id
+                                        )
+                                    except Exception:
+                                        pass
+                                    return  # Stop sending remaining follow-ups
+                        except Exception as e:
+                            try:
+                                self._logger.warning("Failed to check reply interrupt status: %s", e)
+                            except Exception:
+                                pass
+                            # Continue sending on error - don't break the flow
+                    
                     client.messages.create(to=to_number, from_=from_number, body=text)
                 except Exception:
                     try:

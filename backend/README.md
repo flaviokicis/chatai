@@ -32,6 +32,14 @@ CONFIG_JSON_PATH=./config.local.json uvicorn app.main:app --reload --host 0.0.0.
 - Local health check: `http://localhost:8080/health`
 - Webhook endpoint: `POST http://localhost:8080/webhooks/twilio/whatsapp`
 
+## Logging
+
+The backend uses structured logging configured in `app.core.logging`. Output is
+formatted as key-value pairs and includes a `request_id` field for each HTTP
+request. The request ID comes from the `X-Request-ID` header when supplied or is
+generated automatically and echoed back in responses. Adjust verbosity with the
+`LOG_LEVEL` environment variable (default: `INFO`).
+
 ## Configure Twilio
 
 1. Create a public tunnel, e.g. with ngrok:

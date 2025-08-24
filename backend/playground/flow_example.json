@@ -2,6 +2,17 @@
   "schema_version": "v1",
   "id": "flow.vendas_exemplo",
   "entry": "q.intention",
+  "metadata": {
+    "name": "Instalação Esportiva",
+    "description": "Fluxo de atendimento para reserva de instalações esportivas",
+    "version": "1.0.0",
+    "ui_labels": {
+      "global_section_label": "Perguntas iniciais",
+      "branch_section_prefix": "Modalidade",
+      "terminal_completion_label": "Orçamento concluído",
+      "locale": "pt-BR"
+    }
+  },
   "policies": { "path_selection": { "lock_threshold": 2, "allow_switch_before_lock": true } },
   "nodes": [
     { "id": "q.intention", "kind": "Question", "key": "intention", "prompt": "Como posso te ajudar hoje?" },

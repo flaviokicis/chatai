@@ -57,9 +57,9 @@ def load_english_course_flow() -> dict:
     return flow_data
 
 
-def create_demo_tenant() -> tuple[UUID, UUID, UUID]:
+def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
     """
-    Create a demo tenant with dentist configuration.
+    Get existing tenant or create a demo tenant with dentist configuration.
     
     Returns:
         tuple: (tenant_id, channel_instance_id, flow_id)
@@ -67,65 +67,114 @@ def create_demo_tenant() -> tuple[UUID, UUID, UUID]:
     session = create_session()
     
     try:
-        # Create tenant with dentist-specific configuration
-        logger.info("Creating demo tenant...")
-        tenant = create_tenant_with_config(
-            session,
-            first_name="Dr. Ana",
-            last_name="Silva",
-            email="ana@clinicadentista.com.br",
-            project_description="Clínica odontológica moderna oferecendo tratamentos completos desde limpeza até ortodontia, com foco no atendimento humanizado",
-            target_audience="Pacientes de todas as idades que buscam cuidados dentários de qualidade, desde consultas de rotina até procedimentos especializados",
-            communication_style="Receptiva calorosa mas profissional de uma clínica dentária brasileira. Tom amigável e acolhedor, mas sempre transmitindo confiança e competência médica. Use linguagem clara e acessível, evitando jargões técnicos desnecessários. Demonstre empatia com possíveis medos ou ansiedades do paciente, seja paciente com dúvidas, e mantenha sempre um tom tranquilizador e positivo."
-        )
+        # Check if there are existing active tenants
+        logger.info("Checking for existing tenants...")
+        existing_tenants = get_active_tenants(session)
         
-        logger.info(f"Created tenant: {tenant.id}")
+        if existing_tenants:
+            # Use the first existing tenant
+            tenant = existing_tenants[0]
+            logger.info(f"Using existing tenant: {tenant.id} ({tenant.owner_first_name} {tenant.owner_last_name})")
+            
+            # Get existing channel
+            channels = get_channel_instances_by_tenant(session, tenant.id)
+            if not channels:
+                logger.error("❌ Existing tenant has no channels. Please create one manually or delete the tenant.")
+                sys.exit(1)
+            
+            channel = channels[0]
+            logger.info(f"Using existing channel: {channel.id}")
+            
+            # Check if dentist flow already exists
+            flows = get_flows_by_tenant(session, tenant.id)
+            dentist_flow = None
+            for flow in flows:
+                if flow.flow_id == "dentist_consultation_flow_v1":
+                    dentist_flow = flow
+                    break
+            
+            if not dentist_flow:
+                # Create the dentist flow
+                logger.info("Creating dentist flow for existing tenant...")
+                flow_definition = load_dentist_flow()
+                
+                dentist_flow = create_flow(
+                    session,
+                    tenant_id=tenant.id,
+                    channel_instance_id=channel.id,
+                    name="Atendimento Consultório Dentista",
+                    flow_id="dentist_consultation_flow_v1",
+                    definition=flow_definition
+                )
+                session.commit()
+                logger.info(f"Created dentist flow: {dentist_flow.id}")
+            else:
+                logger.info(f"Using existing dentist flow: {dentist_flow.id}")
+            
+            return tenant.id, channel.id, dentist_flow.id
         
-        # Create WhatsApp channel instance
-        logger.info("Creating WhatsApp channel...")
-        channel = create_channel_instance(
-            session,
-            tenant_id=tenant.id,
-            channel_type=ChannelType.whatsapp,
-            identifier="whatsapp:+14155238886",  # Demo WhatsApp number
-            phone_number="+14155238886",
-            extra={
-                "display_name": "Clínica Dra. Ana Silva",
-                "business_hours": "Segunda a Sexta: 8h-18h, Sábado: 8h-12h"
-            }
-        )
-        
-        logger.info(f"Created channel: {channel.id}")
-        
-        # Load and create the dentist flow
-        logger.info("Loading dentist flow...")
-        flow_definition = load_dentist_flow()
-        
-        flow = create_flow(
-            session,
-            tenant_id=tenant.id,
-            channel_instance_id=channel.id,
-            name="Atendimento Consultório Dentista",
-            flow_id="dentist_consultation_flow_v1",
-            definition=flow_definition
-        )
-        
-        logger.info(f"Created flow: {flow.id}")
-        
-        # Commit all changes
-        session.commit()
-        
-        logger.info("✅ Demo tenant created successfully!")
-        logger.info(f"📋 Tenant ID: {tenant.id}")
-        logger.info(f"📱 Channel ID: {channel.id}")
-        logger.info(f"🌊 Flow ID: {flow.id}")
-        logger.info(f"📞 WhatsApp Number: {channel.phone_number}")
-        
-        return tenant.id, channel.id, flow.id
+        else:
+            # Create new tenant with dentist-specific configuration
+            logger.info("No existing tenants found. Creating demo tenant...")
+            tenant = create_tenant_with_config(
+                session,
+                first_name="Dr. Ana",
+                last_name="Silva",
+                email="ana@clinicadentista.com.br",
+                project_description="Clínica odontológica moderna oferecendo tratamentos completos desde limpeza até ortodontia, com foco no atendimento humanizado",
+                target_audience="Pacientes de todas as idades que buscam cuidados dentários de qualidade, desde consultas de rotina até procedimentos especializados",
+                communication_style="Receptiva calorosa mas profissional de uma clínica dentária brasileira. Tom amigável e acolhedor, mas sempre transmitindo confiança e competência médica. Use linguagem clara e acessível, evitando jargões técnicos desnecessários. Demonstre empatia com possíveis medos ou ansiedades do paciente, seja paciente com dúvidas, e mantenha sempre um tom tranquilizador e positivo."
+            )
+            
+            logger.info(f"Created tenant: {tenant.id}")
+            
+            # Create WhatsApp channel instance
+            logger.info("Creating WhatsApp channel...")
+            # Note: Phone Number ID (674436192430525) is WhatsApp Cloud API specific identifier
+            # It's different from the actual phone number (+15550489424) and is what webhooks receive
+            channel = create_channel_instance(
+                session,
+                tenant_id=tenant.id,
+                channel_type=ChannelType.whatsapp,
+                identifier="whatsapp:674436192430525",  # WhatsApp Cloud API Phone Number ID
+                phone_number="+15550489424",  # Actual display phone number
+                extra={
+                    "display_name": "Clínica Dra. Ana Silva",
+                    "business_hours": "Segunda a Sexta: 8h-18h, Sábado: 8h-12h"
+                }
+            )
+            
+            logger.info(f"Created channel: {channel.id}")
+            
+            # Load and create the dentist flow
+            logger.info("Loading dentist flow...")
+            flow_definition = load_dentist_flow()
+            
+            flow = create_flow(
+                session,
+                tenant_id=tenant.id,
+                channel_instance_id=channel.id,
+                name="Atendimento Consultório Dentista",
+                flow_id="dentist_consultation_flow_v1",
+                definition=flow_definition
+            )
+            
+            logger.info(f"Created flow: {flow.id}")
+            
+            # Commit all changes
+            session.commit()
+            
+            logger.info("✅ Demo tenant created successfully!")
+            logger.info(f"📋 Tenant ID: {tenant.id}")
+            logger.info(f"📱 Channel ID: {channel.id}")
+            logger.info(f"🌊 Flow ID: {flow.id}")
+            logger.info(f"📞 WhatsApp Number: {channel.phone_number}")
+            
+            return tenant.id, channel.id, flow.id
         
     except Exception as e:
         session.rollback()
-        logger.error(f"❌ Failed to create demo tenant: {e}")
+        logger.error(f"❌ Failed to get or create demo tenant: {e}")
         sys.exit(1)
         
     finally:
@@ -135,139 +184,58 @@ def create_demo_tenant() -> tuple[UUID, UUID, UUID]:
 
 
 
-def create_english_course_tenant() -> tuple[UUID, UUID, UUID]:
-    """
-    Create a demo tenant for an English course with its sales flow.
 
-    Returns:
-        tuple: (tenant_id, channel_instance_id, flow_id)
-    """
-    session = create_session()
-
-    try:
-        logger.info("Creating english course tenant...")
-        tenant = create_tenant_with_config(
-            session,
-            first_name="Carla",
-            last_name="Ferreira",
-            email="carla@fluencyacademy.com",
-            project_description=(
-                "Escola de inglês focada em fluência prática com trilhas para conversação, carreira, viagem e provas."
-            ),
-            target_audience=(
-                "Adultos e jovens que desejam evoluir no inglês para trabalho, viagens e exames."
-            ),
-            communication_style=(
-                "Tom motivador, claro e direto, com foco em resultados práticos. Mensagens curtas, exemplos práticos quando útil, e convite à ação."
-            ),
-        )
-
-        logger.info(f"Created tenant: {tenant.id}")
-
-        logger.info("Creating WhatsApp channel for english course...")
-        channel = create_channel_instance(
-            session,
-            tenant_id=tenant.id,
-            channel_type=ChannelType.whatsapp,
-            identifier="whatsapp:+14155238887",
-            phone_number="+14155238887",
-            extra={
-                "display_name": "Fluency Academy",
-                "business_hours": "Seg-Sex: 9h-19h",
-            },
-        )
-
-        logger.info(f"Created channel: {channel.id}")
-
-        logger.info("Loading english course flow...")
-        flow_definition = load_english_course_flow()
-
-        flow = create_flow(
-            session,
-            tenant_id=tenant.id,
-            channel_instance_id=channel.id,
-            name="Vendas Curso de Inglês",
-            flow_id="english_course_sales_flow_v1",
-            definition=flow_definition,
-        )
-
-        logger.info(f"Created flow: {flow.id}")
-
-        session.commit()
-
-        logger.info("✅ English course tenant created successfully!")
-        logger.info(f"📋 Tenant ID: {tenant.id}")
-        logger.info(f"📱 Channel ID: {channel.id}")
-        logger.info(f"🌊 Flow ID: {flow.id}")
-        logger.info(f"📞 WhatsApp Number: {channel.phone_number}")
-
-        return tenant.id, channel.id, flow.id
-
-    except Exception as e:
-        session.rollback()
-        logger.error(f"❌ Failed to create english course tenant: {e}")
-        sys.exit(1)
-
-    finally:
-        session.close()
 
 
 def main() -> None:
     """Main seeding function."""
     logger.info("🌱 Starting database seeding...")
     
-    # Create or reuse the demo tenant
-    tenant_id, channel_id, flow_id = create_demo_tenant()
+    # Get or create the demo tenant
+    tenant_id, channel_id, dentist_flow_id = get_or_create_demo_tenant()
 
-    # Additionally, attach the english course flow to the same demo tenant/channel
-    # so you can switch flows within a single tenant.
+    # Ensure the English course flow also exists on the same tenant
+    session = create_session()
     try:
-        session = create_session()
-        # Reuse the first active tenant (same as --tenant default)
-        tenants = get_active_tenants(session)
-        demo_tenant = tenants[0]
-        channels = get_channel_instances_by_tenant(session, demo_tenant.id)
-        channel = channels[0]
-
-        # Only add if it doesn't exist yet
-        flows = get_flows_by_tenant(session, demo_tenant.id)
+        flows = get_flows_by_tenant(session, tenant_id)
         if not any(f.flow_id == "english_course_sales_flow_v1" for f in flows):
+            logger.info("Adding English course flow to tenant...")
             english_definition = load_english_course_flow()
-            flow2 = create_flow(
+            english_flow = create_flow(
                 session,
-                tenant_id=demo_tenant.id,
-                channel_instance_id=channel.id,
+                tenant_id=tenant_id,
+                channel_instance_id=channel_id,
                 name="Vendas Curso de Inglês",
                 flow_id="english_course_sales_flow_v1",
                 definition=english_definition,
             )
             session.commit()
-            logger.info("Added english course flow to demo tenant: %s", flow2.id)
+            logger.info(f"Added English course flow: {english_flow.id}")
         else:
-            logger.info("English course flow already present in demo tenant; skipping add.")
+            logger.info("English course flow already exists on tenant")
+    except Exception as e:
+        session.rollback()
+        logger.error(f"❌ Failed to add English course flow: {e}")
     finally:
-        try:
-            session.close()
-        except Exception:
-            pass
+        session.close()
     
     logger.info("🎉 Database seeding completed!")
     logger.info("")
-    logger.info("Dentist tenant configuration:")
+    logger.info("Tenant configuration:")
     logger.info(f"  📋 Tenant ID: {tenant_id}")
     logger.info(f"  📱 Channel ID: {channel_id}")
-    logger.info(f"  🌊 Flow ID: {flow_id}")
-    logger.info(f"  📞 WhatsApp: +14155238886")
+    logger.info(f"  🌊 Dentist Flow ID: {dentist_flow_id}")
     logger.info("")
-    logger.info("English course flow also available under the same demo tenant (use --flow-id english_course_sales_flow_v1)")
+    logger.info("Available flows:")
+    logger.info("  🏥 Dentist consultation: dentist_consultation_flow_v1")
+    logger.info("  🎓 English course sales: english_course_sales_flow_v1")
     logger.info("")
     logger.info("Next steps:")
     logger.info("1. Configure Twilio webhook to: http://your-domain.com/webhooks/twilio/whatsapp")
     logger.info("2. Test dentist flow with CLI: python -m app.flow_core.cli --tenant default --llm")
-    logger.info("3. Test english flow under same tenant with --flow-id:")
-    logger.info("   python -m app.flow_core.cli --tenant default --flow-id english_course_sales_flow_v1 --llm")
+    logger.info("3. Test English flow with CLI: python -m app.flow_core.cli --tenant default --flow-id english_course_sales_flow_v1 --llm")
     logger.info("")
-    logger.info("🏥 Dentist clinic and 🎓 English course flow under same tenant are ready!")
+    logger.info("✅ Both flows are ready on your existing tenant!")
 
 
 if __name__ == "__main__":

@@ -111,14 +111,15 @@ class MessageLoggingService:
                     )
                     session.commit()
 
-                    # Log success
-                    direction_str = (
-                        "inbound" if direction == MessageDirection.inbound else "outbound"
-                    )
-                    logger.info(
-                        f"Successfully saved {direction_str} message for tenant {tenant_id}, "
-                        f"thread {thread_id}, attempt {attempt + 1}"
-                    )
+                    # Log success (only on retry attempts or errors)
+                    if attempt > 0:  # Only log if this was a retry attempt
+                        direction_str = (
+                            "inbound" if direction == MessageDirection.inbound else "outbound"
+                        )
+                        logger.info(
+                            f"Successfully saved {direction_str} message for tenant {tenant_id}, "
+                            f"thread {thread_id}, attempt {attempt + 1}"
+                        )
                     return  # Success - exit retry loop
 
                 finally:

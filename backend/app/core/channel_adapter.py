@@ -53,6 +53,7 @@ class ConversationalRewriter:
         max_followups: int = 2,
         enable_rewrite: bool = True,
         project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+        is_completion: bool = False,
     ) -> list[dict[str, Any]]:
         """Rewrite a message into conversational multi-message format.
 
@@ -61,6 +62,7 @@ class ConversationalRewriter:
             chat_history: Recent conversation history
             max_followups: Maximum number of follow-up messages
             enable_rewrite: Whether to enable LLM rewriting
+            is_completion: Whether this is the final message/completion of the conversation
 
         Returns:
             List of message dicts with keys: text, delay_ms
@@ -75,6 +77,7 @@ class ConversationalRewriter:
                 chat_history,
                 max_followups=max_followups,
                 project_context=project_context,
+                is_completion=is_completion,
             )
         except Exception:
             # Fallback to single message

@@ -2,6 +2,17 @@
   "schema_version": "v1",
   "id": "flow.vendas_curso_ingles",
   "entry": "q.motivo_interesse",
+  "metadata": {
+    "name": "Vendas Curso de Inglês",
+    "description": "Fluxo de qualificação de leads para curso de inglês",
+    "version": "1.0.0",
+    "ui_labels": {
+      "global_section_label": "Perguntas gerais",
+      "branch_section_prefix": "Caminho",
+      "terminal_completion_label": "Qualificação concluída",
+      "locale": "pt-BR"
+    }
+  },
   "policies": {
     "path_selection": { "lock_threshold": 3, "allow_switch_before_lock": true },
     "conversation": { "allow_clarifications": true, "max_clarifications": 3, "allow_revisit": true }

@@ -73,6 +73,7 @@ def config_with_limits(tmp_path):
     return path
 
 
+@pytest.mark.integration
 def test_rate_limiting_blocks_after_threshold(monkeypatch, config_with_limits):
     monkeypatch.setenv("CONFIG_JSON_PATH", str(config_with_limits))
     _patch_signature_validation(monkeypatch)
@@ -122,6 +123,7 @@ def test_rate_limiting_blocks_after_threshold(monkeypatch, config_with_limits):
     assert "message limit" in r3.text.lower()
 
 
+@pytest.mark.integration  
 def test_input_truncation_to_500_chars(monkeypatch, config_with_limits):
     monkeypatch.setenv("CONFIG_JSON_PATH", str(config_with_limits))
     _patch_signature_validation(monkeypatch)

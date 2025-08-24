@@ -5,7 +5,7 @@ from typing import Any
 
 from app.core.tools import HumanHandoffTool
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger(__name__)
 
 
 class LoggingHandoff(HumanHandoffTool):

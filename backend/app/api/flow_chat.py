@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.agents.flow_chat_agent import FlowChatAgent, ToolSpec
+from app.agents.flow_modification_tools import FLOW_MODIFICATION_TOOLS
 from app.core.app_context import get_app_context
 from app.core.llm import LLMClient
 from app.db.models import FlowChatRole
@@ -30,8 +31,15 @@ class ChatMessageResponse(BaseModel):
 
 
 def _build_agent(llm: LLMClient) -> FlowChatAgent:
-    # No concrete tools yet; placeholder for future expansion
+    # Convert flow modification tools to ToolSpec format
     tools: List[ToolSpec] = []
+    for tool_config in FLOW_MODIFICATION_TOOLS:
+        tools.append(ToolSpec(
+            name=tool_config["name"],
+            description=tool_config["description"], 
+            args_schema=tool_config["args_schema"],
+            func=tool_config["func"]
+        ))
     return FlowChatAgent(llm=llm, tools=tools)
 
 

@@ -241,6 +241,23 @@ export const api = {
     
     getExampleCompiled: (): Promise<any> =>
       apiRequest('/flows/example/compiled'),
+    
+    getCompiled: (flowId: string): Promise<any> =>
+      apiRequest(`/flows/${flowId}/compiled`),
+  },
+
+  flowChat: {
+    send: (flowId: string, content: string): Promise<FlowChatMessage[]> =>
+      apiRequest(`/flows/${flowId}/chat/send`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      }),
+
+    list: (flowId: string): Promise<FlowChatMessage[]> =>
+      apiRequest(`/flows/${flowId}/chat/messages`),
+
+    receive: (flowId: string): Promise<FlowChatMessage | null> =>
+      apiRequest(`/flows/${flowId}/chat/receive`),
   },
 
   flowChat: {

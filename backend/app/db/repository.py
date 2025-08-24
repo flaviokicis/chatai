@@ -309,6 +309,29 @@ def get_channel_instances_by_tenant(session: Session, tenant_id: UUID) -> Sequen
     )
 
 
+def update_channel_instance_phone_number(
+    session: Session,
+    channel_id: UUID,
+    new_phone_number: str,
+    new_identifier: str | None = None,
+) -> ChannelInstance | None:
+    """Update the phone number and optionally identifier of a channel instance."""
+    channel = session.execute(
+        select(ChannelInstance).where(
+            ChannelInstance.id == channel_id,
+            ChannelInstance.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+    if channel:
+        channel.phone_number = new_phone_number
+        if new_identifier:
+            channel.identifier = new_identifier
+        session.flush()
+
+    return channel
+
+
 # --- Flow Repository Functions ---
 
 
@@ -346,6 +369,14 @@ def get_flows_by_tenant(session: Session, tenant_id: UUID) -> Sequence[Flow]:
         .scalars()
         .all()
     )
+
+
+def get_flow_by_id(session: Session, flow_id: UUID) -> Flow | None:
+    """Get a specific flow by its ID."""
+    return session.execute(
+        select(Flow)
+        .where(Flow.id == flow_id, Flow.deleted_at.is_(None))
+    ).scalar_one_or_none()
 
 
 # --- Chat Repository Functions ---
@@ -472,3 +503,38 @@ def update_contact_consent(
 
     session.flush()
     return contact
+
+
+def get_threads_needing_human_review(session: Session, tenant_id: UUID | None = None) -> list[ChatThread]:
+    """Get threads that have requested human handoff but haven't been reviewed yet."""
+    query = select(ChatThread).where(
+        ChatThread.human_handoff_requested_at.is_not(None),
+        ChatThread.human_reviewed_at.is_(None),
+    )
+    
+    if tenant_id:
+        query = query.where(ChatThread.tenant_id == tenant_id)
+    
+    return list(session.execute(query.order_by(ChatThread.human_handoff_requested_at.desc())).scalars())
+
+
+def get_completed_threads(session: Session, tenant_id: UUID | None = None) -> list[ChatThread]:
+    """Get threads that have completed flows."""
+    query = select(ChatThread).where(
+        ChatThread.completed_at.is_not(None),
+    )
+    
+    if tenant_id:
+        query = query.where(ChatThread.tenant_id == tenant_id)
+    
+    return list(session.execute(query.order_by(ChatThread.completed_at.desc())).scalars())
+
+
+def mark_thread_reviewed_by_human(session: Session, thread_id: UUID) -> bool:
+    """Mark a thread as reviewed by a human agent."""
+    thread = session.get(ChatThread, thread_id)
+    if thread:
+        thread.human_reviewed_at = datetime.now(UTC)
+        session.commit()
+        return True
+    return False

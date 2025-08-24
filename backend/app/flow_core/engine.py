@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 from .ir import DecisionNode, QuestionNode, TerminalNode
 from .state import FlowContext, NodeStatus
-from .tool_schemas import DetectClarificationRequest, SelectFlowEdge, SelectNextQuestion
+from .tool_schemas import SelectFlowEdge, SelectNextQuestion
 
 logger = logging.getLogger(__name__)
 
@@ -152,15 +152,7 @@ class LLMFlowEngine:
             if handled:
                 return handled
 
-        # Check if user is asking for clarification
-        if user_message and self._is_clarification_request(user_message, ctx):
-            ctx.clarification_count += 1
-            return EngineResponse(
-                kind="prompt",
-                message=self._generate_clarification(node, user_message, ctx),
-                node_id=node.id,
-                metadata={"is_clarification": True},
-            )
+
 
         # Generate the prompt (potentially contextual)
         prompt = self._generate_contextual_prompt(node, ctx, project_context)
@@ -191,6 +183,7 @@ class LLMFlowEngine:
         - NavigateFlow: jump to target node
         """
         tool_name = str(event.get("tool_name") or "")
+        print(f"[DEBUG ENGINE] _handle_tool_event called with tool_name='{tool_name}', event={event}")
         # The runner no longer forwards LLM-generated text; all user-facing phrasing is done by the rewrite model.
         # Keep ack_text empty to avoid mixing tool LLM text with final outbound.
         ack_text = ""
@@ -208,45 +201,90 @@ class LLMFlowEngine:
             return res
 
         if tool_name == "UnknownAnswer":
-            # Handle "I don't know" responses intelligently:
-            # 1. For optional questions (default): skip and advance to next
-            # 2. For required questions: escalate to human for assistance
-
-            # Check if question is required (default: False for conversational flexibility)
-            node_required = getattr(node, "required", False)
-            escalate_on_unknown = node_required or bool(
-                getattr(node, "meta", {}).get("escalate_on_unknown", False)
-            )
-
-            if escalate_on_unknown:
-                # Required question - escalate so user gets help
+            # Get the reason for unknown answer
+            unknown_reason = (event or {}).get("reason", "clarification_needed")
+            
+            if unknown_reason == "clarification_needed":
+                # User needs clarification - stay on same question and regenerate prompt
+                # The naturalization will use conversation context to provide clarification
                 return EngineResponse(
-                    kind="escalate",
-                    message="Vou te conectar com alguém que pode ajudar com isso.",
+                    kind="prompt",
+                    message=self._generate_contextual_prompt(node, ctx, project_context),
                     node_id=node.id,
-                    metadata={"reason": (event or {}).get("reason", "unknown")},
+                    metadata={"is_clarification_response": True, "reason": unknown_reason},
+                )
+            
+            elif unknown_reason == "incoherent_or_confused":
+                # User seems confused/disoriented - stay on same question but track confusion
+                ctx.get_node_state(node.id).metadata["confusion_count"] = (
+                    ctx.get_node_state(node.id).metadata.get("confusion_count", 0) + 1
+                )
+                
+                # If user is repeatedly confused (3+ times), escalate to human
+                if ctx.get_node_state(node.id).metadata.get("confusion_count", 0) >= 3:
+                    return EngineResponse(
+                        kind="escalate",
+                        message="Vou te conectar com alguém que pode te ajudar melhor.",
+                        node_id=node.id,
+                        metadata={"reason": "repeated_confusion"},
+                    )
+                
+                # Otherwise, stay on question and try to help with context
+                return EngineResponse(
+                    kind="prompt",
+                    message=self._generate_contextual_prompt(node, ctx, project_context),
+                    node_id=node.id,
+                    metadata={"is_confusion_response": True, "reason": unknown_reason},
+                )
+            
+            elif unknown_reason == "requested_by_user":
+                # User explicitly doesn't know and wants to skip
+                # Handle based on question requirements
+                
+                # Check if question is required (default: False for conversational flexibility)
+                node_required = getattr(node, "required", False)
+                escalate_on_unknown = node_required or bool(
+                    getattr(node, "meta", {}).get("escalate_on_unknown", False)
                 )
 
-            # Optional question - defer this question and prefer advancing to a decision node if one is next
-            # Do NOT mark as skipped; mark as deferred so we can revisit later if needed
-            node_state = ctx.get_node_state(node.id)
-            node_state.metadata["deferred"] = True
+                if escalate_on_unknown:
+                    # Required question - escalate so user gets help
+                    return EngineResponse(
+                        kind="escalate",
+                        message="Vou te conectar com alguém que pode ajudar com isso.",
+                        node_id=node.id,
+                        metadata={"reason": unknown_reason},
+                    )
 
-            # If there is a Decision node directly reachable from here, jump to it
-            try:
-                edges = self._flow.edges_from.get(node.id, [])
-                for e in edges:
-                    target = self._flow.nodes.get(getattr(e, "target", ""))
-                    # Defer type checks to name to avoid tight coupling
-                    if target and target.__class__.__name__ == "DecisionNode":
-                        ctx.current_node_id = getattr(target, "id", None) or e.target
-                        # Let the normal processing generate the decision prompt/options
-                        return self.process(ctx, None, None, project_context)
-            except Exception:
-                pass
+                # Optional question - defer this question and prefer advancing to a decision node if one is next
+                # Do NOT mark as skipped; mark as deferred so we can revisit later if needed
+                node_state = ctx.get_node_state(node.id)
+                node_state.metadata["deferred"] = True
 
-            # Otherwise, fall back to default advancement
-            return self._advance_from_node(ctx, node, event, project_context)
+                # If there is a Decision node directly reachable from here, jump to it
+                try:
+                    edges = self._flow.edges_from.get(node.id, [])
+                    for e in edges:
+                        target = self._flow.nodes.get(getattr(e, "target", ""))
+                        # Defer type checks to name to avoid tight coupling
+                        if target and target.__class__.__name__ == "DecisionNode":
+                            ctx.current_node_id = getattr(target, "id", None) or e.target
+                            # Let the normal processing generate the decision prompt/options
+                            return self.process(ctx, None, None, project_context)
+                except Exception:
+                    pass
+
+                # Otherwise, fall back to default advancement
+                return self._advance_from_node(ctx, node, event, project_context)
+            
+            else:
+                # Fallback for any unexpected reason - treat as clarification needed
+                return EngineResponse(
+                    kind="prompt",
+                    message=self._generate_contextual_prompt(node, ctx, project_context),
+                    node_id=node.id,
+                    metadata={"is_clarification_response": True, "reason": "fallback"},
+                )
 
         if tool_name == "SkipQuestion":
             ctx.get_node_state(node.id).status = NodeStatus.SKIPPED
@@ -338,19 +376,7 @@ class LLMFlowEngine:
                 node_id=node.id,
             )
 
-        if tool_name == "ClarifyQuestion":
-            # Generate a concise clarification using the last user message for context
-            last_user_msg = ""
-            for turn in reversed(ctx.history):
-                if getattr(turn, "role", "") == "user":
-                    last_user_msg = getattr(turn, "content", "")
-                    break
-            return EngineResponse(
-                kind="prompt",
-                message=self._generate_clarification(node, last_user_msg, ctx),
-                node_id=node.id,
-                metadata={"is_clarification": True},
-            )
+
 
         if tool_name == "ConfirmCompletion":
             ctx.is_complete = True
@@ -365,6 +391,28 @@ class LLMFlowEngine:
             if isinstance(target, str) and target:
                 ctx.current_node_id = target
                 return _with_ack(self.process(ctx, None, None, project_context))
+            return EngineResponse(
+                kind="prompt",
+                message=self._generate_contextual_prompt(node, ctx, project_context),
+                node_id=node.id,
+            )
+
+        if tool_name == "SelectFlowPath":
+            # Handle flow path selection - navigate back to decision node for re-evaluation
+            selected_path = event.get("selected_path") or event.get("path")
+            navigate_to_decision = event.get("navigate_to_decision", False)
+            
+            if selected_path and navigate_to_decision:
+                # Try to find the decision node that should handle this path
+                decision_node_id = self._find_decision_node_for_path(ctx)
+                
+                if decision_node_id:
+                    # Navigate to the decision node to re-evaluate path selection
+                    ctx.current_node_id = decision_node_id
+                    # Process the decision node with the selected path
+                    return self.process(ctx, None, {"selected_path": selected_path}, project_context)
+            
+            # If no navigation needed or decision node not found, stay on current node
             return EngineResponse(
                 kind="prompt",
                 message=self._generate_contextual_prompt(node, ctx, project_context),
@@ -708,58 +756,9 @@ class LLMFlowEngine:
             # Fall back to original prompt if naturalization fails
             return base_prompt
 
-    def _is_clarification_request(self, message: str, ctx: FlowContext) -> bool:
-        """Detect if user is asking for clarification using proper decision-making tools."""
-        try:
-            current_node = self._get_current_node(ctx)
-            current_prompt = current_node.prompt if current_node else "the current question"
-            
-            prompt = (
-                f"Current question: {current_prompt}\n"
-                f"User message: {message}\n\n"
-                f"Determine if the user is asking for clarification about the current question. "
-                f"Consider phrases like 'what do you mean', 'can you explain', 'I don't understand', etc."
-            )
-            
-            result = self._llm.extract(prompt, [DetectClarificationRequest])
-            if result.get("__tool_name__") == "DetectClarificationRequest":
-                return result.get("is_clarification", False)
-            return False
-        except Exception:
-            return False
-
-    def _generate_clarification(
-        self, node: QuestionNode, user_message: str, ctx: FlowContext
-    ) -> str:
-        """Generate a clarification for the current question."""
 
 
-        # Use LLM for contextual clarification
-        try:
-            # Build conversation context
-            recent_history = ctx.get_recent_history(3)
-            history_text = "\n".join(f"{h['role']}: {h['content']}" for h in recent_history)
 
-            # Get what we know so far
-            current_answers = ", ".join(f"{k}={v}" for k, v in ctx.answers.items()) or "nothing yet"
-
-            instruction = (
-                "Você é uma recepcionista brasileira profissional. O usuário não entendeu sua pergunta no WhatsApp.\n\n"
-                "RESPONDA DE FORMA CONCISA E CORDIAL:\n"
-                "- Reconheça gentilmente ('claro', 'certo', 'sem problemas')\n" 
-                "- Reformule a pergunta de forma mais clara\n"
-                "- Máximo 1-2 frases cordiais\n"
-                "- Sem listas numeradas ou explicações longas\n"
-                "- Tom: recepcionista simpática mas competente\n\n"
-                f"Pergunta original: '{node.prompt}'\n"
-                f"Usuário perguntou: '{user_message}'\n"
-                f"Contexto: {ctx.user_intent or 'ajudar a pessoa'}\n\n"
-                "Exemplo: 'Claro! Preciso saber as dimensões do espaço - comprimento e largura em metros.'\n"
-                "Seja cordial, clara e profissional."
-            )
-            return self._llm.rewrite(instruction, "")
-        except Exception:
-            return f"Deixe-me esclarecer melhor: {node.prompt}\n\nPreciso dessa informação para te ajudar da melhor forma possível."
 
     def _validate_answer(self, node: QuestionNode, answer: Any, ctx: FlowContext) -> bool:
         """Validate an answer using the node's validator."""
