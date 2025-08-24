@@ -14,8 +14,8 @@ export default function FlowDetailPage() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
 
   const { data: flow, isLoading, isError, refetch } = useQuery<CompiledFlow>({
-    queryKey: ["compiledFlow"],
-    queryFn: api.flows.getExampleCompiled,
+    queryKey: ["compiledFlow", id],
+    queryFn: () => api.flows.getCompiled(id),
     staleTime: 1000 * 60 * 30,
   });
 
@@ -44,7 +44,7 @@ export default function FlowDetailPage() {
                 <FlowExperience flow={flow} />
               </div>
               <div>
-                <FlowEditorChat />
+                <FlowEditorChat flowId={id} />
               </div>
             </div>
             <SubflowSection subflows={flow.subflows} />

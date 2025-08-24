@@ -1,31 +1,72 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { FlowChatMessage } from "@/lib/api-client";
+import { api } from "@/lib/api-client";
 
-export function FlowEditorChat() {
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([
-    { role: "assistant", text: "Oi! Me diga como você quer ajustar este fluxo e eu preparo as mudanças." },
-    { role: "assistant", text: "Cole uma conversa de WhatsApp inteira para criar ou modificar o fluxo de conversa." },
-  ]);
+interface Props {
+  flowId: string;
+}
+
+export function FlowEditorChat({ flowId }: Props) {
+  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string }>>([]);
   const [input, setInput] = useState("");
 
-  function onSubmit(e: React.FormEvent) {
+  useEffect(() => {
+    api.flowChat
+      .list(flowId)
+      .then((msgs) =>
+        setMessages(msgs.map((m: FlowChatMessage) => ({ role: m.role, text: m.content })))
+      )
+      .catch(() =>
+        setMessages([
+          {
+            role: "assistant",
+            text: "Oi! Me diga como você quer ajustar este fluxo e eu preparo as mudanças.",
+          },
+          {
+            role: "assistant",
+            text: "Cole uma conversa de WhatsApp inteira para criar ou modificar o fluxo de conversa.",
+          },
+        ])
+      );
+  }, [flowId]);
+
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
     setMessages((m) => [...m, { role: "user", text }]);
     setInput("");
+    try {
+      const responses = await api.flowChat.send(flowId, text);
+      setMessages((m) => [
+        ...m,
+        ...responses.map((r) => ({ role: r.role as "user" | "assistant", text: r.content })),
+      ]);
+    } catch {
+      // ignore errors for now
+    }
   }
 
   return (
     <div className="rounded-xl border bg-card text-card-foreground shadow-sm flex flex-col h-[420px] sm:h-[480px]">
       <div className="p-3 border-b text-sm font-medium">Editor do fluxo (beta)</div>
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
-        {messages.map((m, i) => (
-          <div key={i} className={`max-w-[85%] rounded-2xl px-3 py-2 ${m.role === "assistant" ? "bg-muted" : "bg-primary text-primary-foreground ml-auto"}`}>
-            <div className="text-sm leading-relaxed whitespace-pre-wrap">{m.text}</div>
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center space-y-3 px-4">
+            <div className="text-sm text-muted-foreground max-w-xs">
+              <div className="mb-2">Converse neste chat para fazer edições no fluxo</div>
+              <div className="text-xs opacity-75">Ou cole uma conversa inteira que serve de exemplo</div>
+            </div>
           </div>
-        ))}
+        ) : (
+          messages.map((m, i) => (
+            <div key={i} className={`max-w-[85%] rounded-2xl px-3 py-2 ${m.role === "assistant" ? "bg-muted" : "bg-primary text-primary-foreground ml-auto"}`}>
+              <div className="text-sm leading-relaxed whitespace-pre-wrap">{m.text}</div>
+            </div>
+          ))
+        )}
       </div>
       <form onSubmit={onSubmit} className="p-3 border-t flex items-center gap-2">
         <input

@@ -75,6 +75,8 @@ def dentist_flow():
 class TestComprehensiveDentistFlow:
     """Comprehensive real-life conversation test using dentist office flow."""
     
+    @pytest.mark.integration
+    @pytest.mark.llm
     def test_realistic_conversation_with_all_tools(self, real_llm, dentist_flow):
         """
         Test a realistic dentist office conversation that naturally uses multiple tools.

@@ -11,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 
 from app.core.app_context import get_app_context
 from app.core.channel_adapter import ConversationalRewriter
-from app.db.models import MessageDirection, MessageStatus
+from app.db.models import MessageDirection, MessageStatus, ThreadStatus
 from app.db.repository import (
     find_channel_instance_by_identifier,
     get_flows_by_tenant,
@@ -277,6 +277,52 @@ async def handle_twilio_whatsapp_webhook(
                 logger.warning("Failed to clear completed flow context: %s", e)
         else:
             reply_text = result.assistant_message or ""
+        
+        # Update ChatThread with flow completion or escalation data
+        if result.escalate or result.terminal:
+            session = create_session()
+            try:
+                channel_instance = find_channel_instance_by_identifier(session, receiver_number)
+                if channel_instance:
+                    contact = get_or_create_contact(
+                        session,
+                        tenant_id,
+                        external_id=sender_number,
+                        phone_number=sender_number.replace("whatsapp:", ""),
+                        display_name=None,
+                    )
+                    thread = get_or_create_thread(
+                        session,
+                        tenant_id=tenant_id,
+                        channel_instance_id=channel_instance.id,
+                        contact_id=contact.id,
+                        flow_id=None,
+                    )
+                    
+                    if result.escalate:
+                        # Track human handoff request
+                        thread.human_handoff_requested_at = datetime.now(UTC)
+                        logger.info("Marked thread %s for human handoff", thread.id)
+                    
+                    if result.terminal:
+                        # Store completion data and close thread
+                        thread.flow_completion_data = {
+                            "answers": ctx.answers,
+                            "flow_id": selected_flow.flow_id,
+                            "flow_name": selected_flow.name,
+                            "completion_message": result.assistant_message,
+                            "total_messages": len(getattr(ctx, "history", [])),
+                        }
+                        thread.completed_at = datetime.now(UTC)
+                        thread.status = ThreadStatus.closed
+                        logger.info("Closed thread %s with completion data", thread.id)
+                    
+                    session.commit()
+            except Exception as e:
+                logger.error("Failed to update thread with flow result: %s", e)
+                session.rollback()
+            finally:
+                session.close()
         
         # Store updated context back to session storage for next turn
         if not result.terminal:  # Only save if conversation is continuing

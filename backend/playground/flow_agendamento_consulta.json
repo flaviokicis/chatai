@@ -2,6 +2,17 @@
   "schema_version": "v2",
   "id": "flow.agendamento_consulta",
   "entry": "q.first_visit",
+  "metadata": {
+    "name": "Agendamento de Consulta",
+    "description": "Fluxo para agendamento de consultas médicas",
+    "version": "1.0.0",
+    "ui_labels": {
+      "global_section_label": "Perguntas gerais",
+      "branch_section_prefix": "Caminho",
+      "terminal_completion_label": "Agendamento concluído",
+      "locale": "pt-BR"
+    }
+  },
   "nodes": [
     { "id": "q.first_visit", "kind": "Question", "key": "first_visit", "prompt": "Seria pra primeira consulta?", "priority": 10 },
     { "id": "q.payer_type", "kind": "Question", "key": "payer_type", "prompt": "Seria particular ou por plano?", "priority": 20 },

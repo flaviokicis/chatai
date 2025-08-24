@@ -12,6 +12,8 @@ from app.db.models import (
     ChatThread,
     Contact,
     Flow,
+    FlowChatMessage,
+    FlowChatRole,
     Message,
     MessageDirection,
     MessageStatus,
@@ -124,6 +126,56 @@ def create_message(
     session.add(message)
     session.flush()
     return message
+
+
+def create_flow_chat_message(
+    session: Session,
+    *,
+    flow_id: UUID,
+    role: FlowChatRole,
+    content: str,
+) -> FlowChatMessage:
+    """Persist a flow editor chat message."""
+
+    message = FlowChatMessage(flow_id=flow_id, role=role, content=content)
+    session.add(message)
+    session.flush()
+    return message
+
+
+def list_flow_chat_messages(session: Session, flow_id: UUID) -> Sequence[FlowChatMessage]:
+    """Return all chat messages for a flow ordered by creation time."""
+
+    return (
+        session.execute(
+            select(FlowChatMessage)
+            .where(
+                FlowChatMessage.flow_id == flow_id,
+                FlowChatMessage.deleted_at.is_(None),
+            )
+            .order_by(FlowChatMessage.created_at)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_latest_assistant_message(
+    session: Session, flow_id: UUID
+) -> FlowChatMessage | None:
+    return (
+        session.execute(
+            select(FlowChatMessage)
+            .where(
+                FlowChatMessage.flow_id == flow_id,
+                FlowChatMessage.role == FlowChatRole.assistant,
+                FlowChatMessage.deleted_at.is_(None),
+            )
+            .order_by(desc(FlowChatMessage.created_at))
+        )
+        .scalars()
+        .first()
+    )
 
 
 # --- Tenant Repository Functions ---
@@ -319,6 +371,14 @@ def get_flows_by_tenant(session: Session, tenant_id: UUID) -> Sequence[Flow]:
     )
 
 
+def get_flow_by_id(session: Session, flow_id: UUID) -> Flow | None:
+    """Get a specific flow by its ID."""
+    return session.execute(
+        select(Flow)
+        .where(Flow.id == flow_id, Flow.deleted_at.is_(None))
+    ).scalar_one_or_none()
+
+
 # --- Chat Repository Functions ---
 
 
@@ -443,3 +503,38 @@ def update_contact_consent(
 
     session.flush()
     return contact
+
+
+def get_threads_needing_human_review(session: Session, tenant_id: UUID | None = None) -> list[ChatThread]:
+    """Get threads that have requested human handoff but haven't been reviewed yet."""
+    query = select(ChatThread).where(
+        ChatThread.human_handoff_requested_at.is_not(None),
+        ChatThread.human_reviewed_at.is_(None),
+    )
+    
+    if tenant_id:
+        query = query.where(ChatThread.tenant_id == tenant_id)
+    
+    return list(session.execute(query.order_by(ChatThread.human_handoff_requested_at.desc())).scalars())
+
+
+def get_completed_threads(session: Session, tenant_id: UUID | None = None) -> list[ChatThread]:
+    """Get threads that have completed flows."""
+    query = select(ChatThread).where(
+        ChatThread.completed_at.is_not(None),
+    )
+    
+    if tenant_id:
+        query = query.where(ChatThread.tenant_id == tenant_id)
+    
+    return list(session.execute(query.order_by(ChatThread.completed_at.desc())).scalars())
+
+
+def mark_thread_reviewed_by_human(session: Session, thread_id: UUID) -> bool:
+    """Mark a thread as reviewed by a human agent."""
+    thread = session.get(ChatThread, thread_id)
+    if thread:
+        thread.human_reviewed_at = datetime.now(UTC)
+        session.commit()
+        return True
+    return False

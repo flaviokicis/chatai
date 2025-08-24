@@ -66,6 +66,24 @@ export interface FlowEdgeSummary {
   condition_description?: string | null;
 }
 
+export interface FlowUILabels {
+  global_section_label?: string;
+  branch_section_prefix?: string;
+  terminal_completion_label?: string;
+  locale?: string;
+}
+
+export interface FlowMetadata {
+  name: string;
+  description?: string | null;
+  version?: string;
+  author?: string | null;
+  tags?: string[];
+  created_at?: string | null;
+  updated_at?: string | null;
+  ui_labels?: FlowUILabels;
+}
+
 // Minimal shape returned by backend /flows/example/compiled
 export interface CompiledFlow {
   id: string;
@@ -73,6 +91,7 @@ export interface CompiledFlow {
   nodes: Record<string, FlowNodeSummary>;
   edges_from: Record<string, FlowEdgeSummary[]>;
   subflows?: Record<string, CompiledFlow>;
+  metadata?: FlowMetadata | null;
 }
 
 export type PositionedNode = FlowNodeSummary & {

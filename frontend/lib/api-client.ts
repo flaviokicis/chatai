@@ -91,6 +91,13 @@ export interface Message {
   provider_message_id?: string;
 }
 
+export interface FlowChatMessage {
+  id: string; // UUIDv7
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  created_at: string;
+}
+
 export interface ChatThread {
   id: string; // UUIDv7
   status: 'open' | 'closed' | 'archived';
@@ -232,8 +239,25 @@ export const api = {
     getExample: (): Promise<any> => 
       apiRequest('/flows/example/raw'),
     
-    getExampleCompiled: (): Promise<any> => 
+    getExampleCompiled: (): Promise<any> =>
       apiRequest('/flows/example/compiled'),
+    
+    getCompiled: (flowId: string): Promise<any> =>
+      apiRequest(`/flows/${flowId}/compiled`),
+  },
+
+  flowChat: {
+    send: (flowId: string, content: string): Promise<FlowChatMessage[]> =>
+      apiRequest(`/flows/${flowId}/chat/send`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      }),
+
+    list: (flowId: string): Promise<FlowChatMessage[]> =>
+      apiRequest(`/flows/${flowId}/chat/messages`),
+
+    receive: (flowId: string): Promise<FlowChatMessage | null> =>
+      apiRequest(`/flows/${flowId}/chat/receive`),
   },
 
   // Chat endpoints

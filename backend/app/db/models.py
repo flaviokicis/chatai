@@ -51,6 +51,14 @@ class MessageStatus(str, Enum):
     failed = "failed"
 
 
+class FlowChatRole(str, Enum):
+    """Participant role in a flow editor chat."""
+
+    user = "user"
+    assistant = "assistant"
+    system = "system"
+
+
 # --- Base mixins
 
 
@@ -200,6 +208,12 @@ class ChatThread(Base, TimestampMixin):
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    
+    # Flow completion and human handoff tracking
+    flow_completion_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    human_handoff_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    human_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="threads")
     contact: Mapped[Contact] = relationship(back_populates="threads")
@@ -258,3 +272,14 @@ class MessageAttachment(Base, TimestampMixin):
     attachment_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     message: Mapped[Message] = relationship(back_populates="attachments")
+
+
+class FlowChatMessage(Base, TimestampMixin):
+    """Stores messages exchanged in the flow editor chat."""
+
+    __tablename__ = "flow_chat_messages"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    flow_id: Mapped[UUID] = mapped_column(ForeignKey("flows.id", ondelete="CASCADE"))
+    role: Mapped[FlowChatRole] = mapped_column(PgEnum(FlowChatRole, name="flow_chat_role"))
+    content: Mapped[str] = mapped_column(Text, nullable=False)
