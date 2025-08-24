@@ -260,6 +260,20 @@ export const api = {
       apiRequest(`/flows/${flowId}/chat/receive`),
   },
 
+  flowChat: {
+    send: (flowId: string, content: string): Promise<FlowChatMessage[]> =>
+      apiRequest(`/flows/${flowId}/chat/send`, {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      }),
+
+    list: (flowId: string): Promise<FlowChatMessage[]> =>
+      apiRequest(`/flows/${flowId}/chat/messages`),
+
+    receive: (flowId: string): Promise<FlowChatMessage | null> =>
+      apiRequest(`/flows/${flowId}/chat/receive`),
+  },
+
   // Chat endpoints
   chats: {
     listThreads: async (tenantId?: string, params?: {
