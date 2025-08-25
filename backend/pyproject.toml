@@ -31,6 +31,8 @@ dependencies = [
   "cryptography>=42.0.0",
   "uuid-v7>=1.0.0",
   "langchain-openai==0.3.30",
+  "alembic>=1.16.4",
+  "psycopg2-binary>=2.9.10",
 ]
 
 [tool.hatch.build.targets.wheel]

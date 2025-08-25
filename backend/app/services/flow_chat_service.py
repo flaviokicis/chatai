@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import NamedTuple, Sequence
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.agents.flow_chat_agent import FlowChatAgent
+from app.agents.flow_chat_agent import FlowChatAgent, FlowChatResponse
+
+
+class FlowChatServiceResponse(NamedTuple):
+    """Response from flow chat service containing messages and metadata."""
+    messages: list[FlowChatMessage]
+    flow_was_modified: bool
+    modification_summary: str | None = None
+
+
 from app.db.models import Flow, FlowChatMessage, FlowChatRole
 from app.db.repository import (
     create_flow_chat_message,
@@ -29,7 +38,7 @@ class FlowChatService:
     def get_latest_assistant(self, flow_id: UUID) -> FlowChatMessage | None:
         return get_latest_assistant_message(self.session, flow_id)
 
-    def send_user_message(self, flow_id: UUID, content: str) -> list[FlowChatMessage]:
+    def send_user_message(self, flow_id: UUID, content: str) -> FlowChatServiceResponse:
         logger = logging.getLogger(__name__)
         
         if not self.agent:
@@ -58,9 +67,11 @@ class FlowChatService:
             # Process with agent (pass flow_id and session for persistence)
             try:
                 logger.info(f"Calling agent.process for flow {flow_id} with {len(history_dicts)} messages")
-                responses = self.agent.process(flow_def, history_dicts, flow_id=flow_id, session=self.session)
-                logger.info(f"Agent returned {len(responses)} responses")
-                for i, resp in enumerate(responses):
+                agent_response = self.agent.process(flow_def, history_dicts, flow_id=flow_id, session=self.session)
+                logger.info(f"Agent returned {len(agent_response.messages)} messages, flow_modified={agent_response.flow_was_modified}")
+                if agent_response.flow_was_modified:
+                    logger.info(f"Flow modifications: {agent_response.modification_summary}")
+                for i, resp in enumerate(agent_response.messages):
                     resp_preview = resp[:100] + "..." if len(resp) > 100 else resp
                     logger.info(f"Agent response {i+1}: length={len(resp)}, preview='{resp_preview}'")
             except Exception as e:
@@ -73,11 +84,15 @@ class FlowChatService:
                     content=f"❌ Erro ao processar solicitação: {str(e)}",
                 )
                 self.session.commit()
-                return [error_msg]
+                return FlowChatServiceResponse(
+                    messages=[error_msg],
+                    flow_was_modified=False,
+                    modification_summary=None
+                )
             
             # Save assistant responses
             saved: list[FlowChatMessage] = []
-            for text in responses:
+            for text in agent_response.messages:
                 saved.append(
                     create_flow_chat_message(
                         self.session,
@@ -87,9 +102,25 @@ class FlowChatService:
                     )
                 )
             
+            # CRITICAL DEBUG: Force commit and verify persistence
+            logger.info(f"About to commit session for flow {flow_id}")
             self.session.commit()
+            logger.info(f"Session committed successfully")
+            
+            # Verify the changes actually persisted
+            verification_flow = self.session.get(Flow, flow_id)
+            if verification_flow:
+                for node in verification_flow.definition.get('nodes', []):
+                    if node.get('id') == 'q.intensidade_dor':
+                        logger.info(f"POST-COMMIT VERIFICATION: q.intensidade_dor allowed_values = {node.get('allowed_values')}")
+                        break
+            
             logger.info(f"Successfully processed message for flow {flow_id}, generated {len(saved)} responses")
-            return saved
+            return FlowChatServiceResponse(
+                messages=saved,
+                flow_was_modified=agent_response.flow_was_modified,
+                modification_summary=agent_response.modification_summary
+            )
             
         except Exception as e:
             logger.error(f"Failed to process message for flow {flow_id}: {str(e)}")

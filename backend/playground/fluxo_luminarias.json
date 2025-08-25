@@ -1,0 +1,85 @@
+{
+  "schema_version": "v1",
+  "id": "flow.atendimento_luminarias",
+  "entry": "q.interesse_inicial",
+  "metadata": {
+    "name": "Atendimento Luminárias",
+    "description": "Fluxo de atendimento para empresa de luminárias e iluminação",
+    "version": "1.0.0",
+    "ui_labels": {
+      "global_section_label": "Informações iniciais",
+      "branch_section_prefix": "Tipo de atendimento",
+      "terminal_completion_label": "Atendimento direcionado",
+      "locale": "pt-BR"
+    }
+  },
+  "policies": { 
+    "path_selection": { 
+      "lock_threshold": 2, 
+      "allow_switch_before_lock": true 
+    },
+    "conversation": {
+      "allow_clarifications": true,
+      "max_clarifications": 3,
+      "allow_revisit": true
+    }
+  },
+  "nodes": [
+    { "id": "q.interesse_inicial", "kind": "Question", "key": "interesse_inicial", "prompt": "Olá! Como posso te ajudar hoje? Qual é o seu interesse?" },
+
+    { "id": "d.roteamento_principal", "kind": "Decision", "label": "Roteamento por tipo de necessidade", "decision_type": "llm_assisted", "decision_prompt": "Com base no interesse do cliente, determinar o caminho: luminária de terceiro, luminária nossa, luminária fora do portfólio, posto de gasolina, ginásio/quadra/tênis/futebol society, campo de futebol, ou indústria/galpão/barracão" },
+
+    { "id": "q.especificacoes_terceiro", "kind": "Question", "key": "especificacoes_terceiro", "prompt": "Fabricamos nossas luminárias conforme projeto, mas se você me informar os lumens, potência, ângulo e grau IP, posso te oferecer algo similar" },
+
+    { "id": "q.dados_posto", "kind": "Question", "key": "dados_posto", "prompt": "Poderia informar nome - sobrenome e email" },
+
+    { "id": "q.dados_ginasio", "kind": "Question", "key": "dados_ginasio", "prompt": "Poderia informar nome - sobrenome e email" },
+    { "id": "q.tipo_quadra", "kind": "Question", "key": "tipo_quadra", "prompt": "Temos muita experiência em iluminação de quadras segue uma apresentação - Seria uma quadra coberta ou descoberta" },
+    { "id": "d.cobertura_quadra", "kind": "Decision", "label": "Tipo de cobertura da quadra", "decision_type": "llm_assisted", "decision_prompt": "Determinar se é quadra coberta ou descoberta" },
+
+    { "id": "q.dimensoes_coberta", "kind": "Question", "key": "dimensoes_coberta", "prompt": "Poderia me informar a largura e comprimento com os recuos - altura das luminárias - Quantas luminárias tem" },
+    { "id": "q.dimensoes_descoberta", "kind": "Question", "key": "dimensoes_descoberta", "prompt": "Poderia me informar a largura e comprimento do campo- quantidade de postes e altura deles - quantas luminárias tem" },
+
+    { "id": "q.apresentacao_campo", "kind": "Question", "key": "apresentacao_campo", "prompt": "Temos muita experiência em iluminação de campos de futebol, segue uma apresentação" },
+    { "id": "q.dimensoes_campo", "kind": "Question", "key": "dimensoes_campo", "prompt": "Poderia me informar a largura e comprimento do campo- quantidade de postes e altura deles - quantas luminárias tem" },
+
+    { "id": "q.estudo_industrial", "kind": "Question", "key": "estudo_industrial", "prompt": "Temos muita experiência em iluminação industrial - Foi feito algum estudo ou projeto luminotécnico já?" },
+    { "id": "q.tipo_galpao", "kind": "Question", "key": "tipo_galpao", "prompt": "Está precisando iluminar um galpão industrial de produção ou uma área com portapallets?" },
+
+    { "id": "t.especialista_terceiro", "kind": "Terminal", "reason": "Vou encaminhar com algum especialista" },
+    { "id": "t.vendedor_nossa", "kind": "Terminal", "reason": "Vou encaminhar com algum vendedor especialista" },
+    { "id": "t.portfolio_fora", "kind": "Terminal", "reason": "Somos fabricantes de luminárias industriais, para iluminação de galpões, áreas esportivas, postos de gasolina, supermercados e áreas externas. Os itens que está procurando não fazem parte da nossa linha de produtos. Precisando de luminárias do tipo informado, ficaremos muito felizes em poder apresentar uma proposta." },
+    { "id": "t.vendedor_posto", "kind": "Terminal", "reason": "Um vendedor entrará em contato em breve" },
+    { "id": "t.vendedor_quadra", "kind": "Terminal", "reason": "Vou encaminhar com algum vendedor especialista" },
+    { "id": "t.vendedor_campo", "kind": "Terminal", "reason": "Vou encaminhar com algum vendedor especialista" },
+    { "id": "t.especialista_industrial", "kind": "Terminal", "reason": "Vou encaminhar com um especialista" }
+  ],
+  "edges": [
+    { "source": "q.interesse_inicial", "target": "d.roteamento_principal", "guard": { "fn": "answers_has", "args": { "key": "interesse_inicial" } }, "priority": 0 },
+
+    { "source": "d.roteamento_principal", "target": "q.especificacoes_terceiro", "guard": { "fn": "always", "args": { "if": "luminária de terceiro" } }, "priority": 0, "condition_description": "Luminária de terceiro" },
+    { "source": "d.roteamento_principal", "target": "t.vendedor_nossa", "guard": { "fn": "always", "args": { "if": "luminária nossa" } }, "priority": 1, "condition_description": "Luminária nossa" },
+    { "source": "d.roteamento_principal", "target": "t.portfolio_fora", "guard": { "fn": "always", "args": { "if": "luminária que não faz parte do nosso portfólio" } }, "priority": 2, "condition_description": "Fora do portfólio" },
+    { "source": "d.roteamento_principal", "target": "q.dados_posto", "guard": { "fn": "always", "args": { "if": "posto de gasolina" } }, "priority": 3, "condition_description": "Posto de gasolina" },
+    { "source": "d.roteamento_principal", "target": "q.dados_ginasio", "guard": { "fn": "always", "args": { "if": "ginásio, quadra poliesportiva, tênis, futebol society" } }, "priority": 4, "condition_description": "Ginásio/Quadra" },
+    { "source": "d.roteamento_principal", "target": "q.apresentacao_campo", "guard": { "fn": "always", "args": { "if": "campo de futebol" } }, "priority": 5, "condition_description": "Campo de futebol" },
+    { "source": "d.roteamento_principal", "target": "q.estudo_industrial", "guard": { "fn": "always", "args": { "if": "indústria, galpão, barracão" } }, "priority": 6, "condition_description": "Industrial" },
+
+    { "source": "q.especificacoes_terceiro", "target": "t.especialista_terceiro", "priority": 0 },
+
+    { "source": "q.dados_posto", "target": "t.vendedor_posto", "priority": 0 },
+
+    { "source": "q.dados_ginasio", "target": "q.tipo_quadra", "priority": 0 },
+    { "source": "q.tipo_quadra", "target": "d.cobertura_quadra", "priority": 0 },
+    { "source": "d.cobertura_quadra", "target": "q.dimensoes_coberta", "guard": { "fn": "always", "args": { "if": "quadra coberta" } }, "priority": 0, "condition_description": "Quadra coberta" },
+    { "source": "d.cobertura_quadra", "target": "q.dimensoes_descoberta", "guard": { "fn": "always", "args": { "if": "quadra descoberta" } }, "priority": 1, "condition_description": "Quadra descoberta" },
+    { "source": "q.dimensoes_coberta", "target": "t.vendedor_quadra", "priority": 0 },
+    { "source": "q.dimensoes_descoberta", "target": "t.vendedor_quadra", "priority": 0 },
+
+    { "source": "q.apresentacao_campo", "target": "q.dimensoes_campo", "priority": 0 },
+    { "source": "q.dimensoes_campo", "target": "t.vendedor_campo", "priority": 0 },
+
+    { "source": "q.estudo_industrial", "target": "q.tipo_galpao", "priority": 0 },
+    { "source": "q.tipo_galpao", "target": "t.especialista_industrial", "priority": 0 }
+  ]
+}

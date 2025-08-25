@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
@@ -14,6 +15,7 @@ from app.db.models import (
     Flow,
     FlowChatMessage,
     FlowChatRole,
+    FlowChatSession,
     FlowVersion,
     Message,
     MessageDirection,
@@ -22,6 +24,8 @@ from app.db.models import (
     TenantProjectConfig,
     ThreadStatus,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def find_channel_instance_by_identifier(
@@ -145,17 +149,26 @@ def create_flow_chat_message(
 
 
 def list_flow_chat_messages(session: Session, flow_id: UUID) -> Sequence[FlowChatMessage]:
-    """Return all chat messages for a flow ordered by creation time."""
-
+    """Return all chat messages for a flow ordered by creation time, excluding cleared messages."""
+    
+    # Get the latest cleared_at timestamp for this flow
+    chat_session = session.execute(
+        select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
+    ).scalars().first()
+    
+    cleared_at = chat_session.cleared_at if chat_session else None
+    
+    query = select(FlowChatMessage).where(
+        FlowChatMessage.flow_id == flow_id,
+        FlowChatMessage.deleted_at.is_(None),
+    )
+    
+    # Only show messages created after the last clear
+    if cleared_at:
+        query = query.where(FlowChatMessage.created_at > cleared_at)
+    
     return (
-        session.execute(
-            select(FlowChatMessage)
-            .where(
-                FlowChatMessage.flow_id == flow_id,
-                FlowChatMessage.deleted_at.is_(None),
-            )
-            .order_by(FlowChatMessage.created_at)
-        )
+        session.execute(query.order_by(FlowChatMessage.created_at))
         .scalars()
         .all()
     )
@@ -164,19 +177,46 @@ def list_flow_chat_messages(session: Session, flow_id: UUID) -> Sequence[FlowCha
 def get_latest_assistant_message(
     session: Session, flow_id: UUID
 ) -> FlowChatMessage | None:
+    # Get the latest cleared_at timestamp for this flow
+    chat_session = session.execute(
+        select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
+    ).scalars().first()
+    
+    cleared_at = chat_session.cleared_at if chat_session else None
+    
+    query = select(FlowChatMessage).where(
+        FlowChatMessage.flow_id == flow_id,
+        FlowChatMessage.role == FlowChatRole.assistant,
+        FlowChatMessage.deleted_at.is_(None),
+    )
+    
+    # Only show messages created after the last clear
+    if cleared_at:
+        query = query.where(FlowChatMessage.created_at > cleared_at)
+    
     return (
-        session.execute(
-            select(FlowChatMessage)
-            .where(
-                FlowChatMessage.flow_id == flow_id,
-                FlowChatMessage.role == FlowChatRole.assistant,
-                FlowChatMessage.deleted_at.is_(None),
-            )
-            .order_by(desc(FlowChatMessage.created_at))
-        )
+        session.execute(query.order_by(desc(FlowChatMessage.created_at)))
         .scalars()
         .first()
     )
+
+
+def clear_flow_chat_messages(session: Session, flow_id: UUID) -> None:
+    """Mark the flow chat as cleared by setting cleared_at timestamp."""
+    from datetime import datetime, timezone
+    
+    # Get or create the chat session record
+    chat_session = session.execute(
+        select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
+    ).scalars().first()
+    
+    if not chat_session:
+        chat_session = FlowChatSession(flow_id=flow_id)
+        session.add(chat_session)
+    
+    # Set cleared_at to current timestamp
+    chat_session.cleared_at = datetime.now(timezone.utc)
+    session.flush()
 
 
 # --- Tenant Repository Functions ---
@@ -660,17 +700,33 @@ def update_flow_with_versioning(
         return None
     
     # Create version snapshot of current state before updating
-    create_flow_version(
-        session,
-        flow_id=flow_id,
-        definition_snapshot=flow.definition,
-        change_description=change_description,
-        created_by=created_by,
-    )
+    logger.info(f"Repository: About to create version snapshot for flow {flow_id}, current version: {flow.version}")
+    try:
+        created_version = create_flow_version(
+            session,
+            flow_id=flow_id,
+            definition_snapshot=flow.definition,
+            change_description=change_description,
+            created_by=created_by,
+        )
+        logger.info(f"Repository: Created version snapshot {created_version.version_number} for flow {flow_id}")
+    except Exception as e:
+        logger.error(f"Repository: CRITICAL ERROR - Failed to create version snapshot for flow {flow_id}: {e}")
+        raise
     
-    # Update the flow
+    # Update the flow with explicit change detection for JSON fields
     flow.definition = new_definition
     flow.version += 1
+    
+    # CRITICAL: Force SQLAlchemy to detect the JSON field change
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(flow, "definition")
+    
     session.flush()
+    
+    # CRITICAL: Do NOT commit here - let the calling service handle the commit
+    # to avoid nested transaction conflicts
+    logger.info(f"Repository: Updated flow {flow_id} in session (waiting for service commit)")
+    logger.info(f"Repository: JSON field explicitly marked as modified for flow {flow_id}")
     
     return flow

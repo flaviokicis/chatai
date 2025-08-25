@@ -104,6 +104,12 @@ export interface FlowChatMessage {
   created_at: string;
 }
 
+export interface FlowChatResponse {
+  messages: FlowChatMessage[];
+  flow_was_modified: boolean;
+  modification_summary?: string;
+}
+
 export interface FlowVersion {
   id: string; // UUIDv7
   version_number: number;
@@ -279,7 +285,7 @@ export const api = {
   },
 
   flowChat: {
-    send: (flowId: string, content: string): Promise<FlowChatMessage[]> =>
+    send: (flowId: string, content: string): Promise<FlowChatResponse> =>
       apiRequest(`/flows/${flowId}/chat/send`, {
         method: 'POST',
         body: JSON.stringify({ content }),
@@ -290,6 +296,11 @@ export const api = {
 
     receive: (flowId: string): Promise<FlowChatMessage | null> =>
       apiRequest(`/flows/${flowId}/chat/receive`),
+
+    clear: (flowId: string): Promise<{ message: string }> =>
+      apiRequest(`/flows/${flowId}/chat/clear`, {
+        method: 'POST',
+      }),
   },
 
   // Chat endpoints

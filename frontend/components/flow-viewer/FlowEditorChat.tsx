@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { FlowChatMessage } from "@/lib/api-client";
+import type { FlowChatMessage, FlowChatResponse } from "@/lib/api-client";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
-import { AlertCircle, Loader2, RefreshCw, Zap } from "lucide-react";
-import { FlowValidation } from "./FlowValidation";
+import { AlertCircle, Loader2, RefreshCw, Trash2 } from "lucide-react";
+
 import { FlowHistory } from "./FlowHistory";
 
 interface Props {
@@ -20,7 +20,7 @@ export function FlowEditorChat({ flowId, onFlowModified }: Props) {
   const [isSending, setIsSending] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastValidationResult, setLastValidationResult] = useState<string | null>(null);
+
 
   useEffect(() => {
     setLoadingMessages(true);
@@ -29,7 +29,10 @@ export function FlowEditorChat({ flowId, onFlowModified }: Props) {
     api.flowChat
       .list(flowId)
       .then((msgs) => {
-        setMessages(msgs.map((m: FlowChatMessage) => ({ role: m.role, text: m.content })));
+        setMessages(msgs.map((m: FlowChatMessage) => ({ 
+          role: m.role === 'system' ? 'assistant' : m.role as "user" | "assistant", 
+          text: m.content 
+        })));
         setError(null);
       })
       .catch((err) => {
@@ -52,67 +55,27 @@ export function FlowEditorChat({ flowId, onFlowModified }: Props) {
       });
   }, [flowId]);
 
-  // Helper function to detect if assistant response indicates a flow modification
-  function detectFlowModification(text: string): boolean {
-    const modificationIndicators = [
-      'Successfully set complete flow definition',
-      'Added node',
-      'Updated node',
-      'Deleted node', 
-      'Added edge',
-      'Updated edge',
-      'Deleted edge',
-      'Flow is valid and ready to use'
-    ];
-    return modificationIndicators.some(indicator => text.includes(indicator));
-  }
 
-  // Helper function to detect validation results
-  function extractValidationResult(text: string): string | null {
-    if (text.includes('Flow validation passed') || 
-        text.includes('Flow validation failed') || 
-        text.includes('Flow is valid with warnings')) {
-      return text;
-    }
-    return null;
-  }
 
-  // Quick validation function
-  const triggerValidation = async () => {
-    const validationText = "Valide este fluxo";
-    setIsSending(true);
-    setInput(validationText);
-    
-    setMessages((m) => [...m, { role: "user", text: validationText }]);
-    setInput("");
-    setIsSending(false);
-    setIsLoading(true);
-    
+
+
+  // Clear chat function
+  const clearChat = async () => {
     try {
-      const responses = await api.flowChat.send(flowId, validationText);
-      const newMessages = responses.map((r) => ({ 
-        role: r.role as "user" | "assistant", 
-        text: r.content 
-      }));
-      
-      setMessages((m) => [...m, ...newMessages]);
-      
-      // Extract validation result
-      const validationResult = newMessages.find(msg => 
-        msg.role === "assistant" && extractValidationResult(msg.text)
-      );
-      
-      if (validationResult) {
-        setLastValidationResult(validationResult.text);
-      }
-      
+      setIsLoading(true);
+      await api.flowChat.clear(flowId);
+      setMessages([]);
+          setError(null);
+      toast.success("Chat limpo com sucesso");
     } catch (err: unknown) {
-      console.error("Failed to validate flow:", err);
-      toast.error("Falha ao validar fluxo");
+      console.error("Failed to clear chat:", err);
+      toast.error("Falha ao limpar chat - tente novamente");
     } finally {
       setIsLoading(false);
     }
   };
+
+
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -127,29 +90,22 @@ export function FlowEditorChat({ flowId, onFlowModified }: Props) {
     setIsLoading(true); // Start processing
     
     try {
-      const responses = await api.flowChat.send(flowId, text);
-      const newMessages = responses.map((r) => ({ 
+      const response: FlowChatResponse = await api.flowChat.send(flowId, text);
+      const newMessages = response.messages.map((r) => ({ 
         role: r.role as "user" | "assistant", 
         text: r.content 
       }));
       
       setMessages((m) => [...m, ...newMessages]);
       
-      // Check if any response indicates a flow modification
-      const hasModification = newMessages.some(msg => 
-        msg.role === "assistant" && detectFlowModification(msg.text)
-      );
+
       
-      // Check for validation results
-      const validationResult = newMessages.find(msg => 
-        msg.role === "assistant" && extractValidationResult(msg.text)
-      );
-      
-      if (validationResult) {
-        setLastValidationResult(validationResult.text);
-      }
-      
-      if (hasModification) {
+      // Use structured response instead of pattern matching
+      if (response.flow_was_modified) {
+        console.log("✅ Flow modification confirmed by backend");
+        if (response.modification_summary) {
+          console.log("📝 Modifications:", response.modification_summary);
+        }
         toast.success("Fluxo modificado com sucesso");
         onFlowModified?.();
       }
@@ -159,11 +115,12 @@ export function FlowEditorChat({ flowId, onFlowModified }: Props) {
       console.error("Failed to send message:", err);
       
       let errorMessage = "Falha ao enviar mensagem";
-      if (err.status === 400) {
+      const errorObj = err as any;
+      if (errorObj?.status === 400) {
         errorMessage = "Mensagem inválida - verifique o formato";
-      } else if (err.status === 500) {
+      } else if (errorObj?.status === 500) {
         errorMessage = "Erro interno do servidor - tente novamente";
-      } else if (err.status >= 500) {
+      } else if (errorObj?.status >= 500) {
         errorMessage = "Servidor indisponível - tente novamente em alguns minutos";
       }
       
@@ -192,26 +149,25 @@ export function FlowEditorChat({ flowId, onFlowModified }: Props) {
   };
 
   return (
-    <div className="rounded-xl border bg-card text-card-foreground shadow-sm flex flex-col h-[420px] sm:h-[480px]">
-      <div className="p-3 border-b text-sm font-medium flex items-center justify-between">
+    <div className="flex flex-col h-full border-0 bg-transparent rounded-xl overflow-hidden">
+      <div className="p-3 border-b border-border text-sm font-medium flex items-center justify-between bg-muted/20">
         <span>Editor do fluxo (beta)</span>
         <div className="flex items-center gap-2">
           <button
-            onClick={triggerValidation}
+            onClick={clearChat}
             disabled={isSending || isLoading || loadingMessages}
-            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-secondary hover:bg-secondary/80 disabled:opacity-50"
-            title="Validar fluxo"
+            className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-destructive/10 hover:bg-destructive/20 text-destructive disabled:opacity-50 cursor-pointer hover:cursor-pointer disabled:cursor-not-allowed"
+            title="Limpar chat"
           >
-            <Zap className="h-3 w-3" />
-            Validar
+            <Trash2 className="h-3 w-3" />
+            Limpar
           </button>
+
           {(isSending || isLoading) && <Loader2 className="h-4 w-4 animate-spin" />}
         </div>
       </div>
       <div className="px-3 pt-2 space-y-2">
-        {lastValidationResult && (
-          <FlowValidation validationResult={lastValidationResult} />
-        )}
+
         <FlowHistory 
           flowId={flowId} 
           onFlowRestored={onFlowModified}

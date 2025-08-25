@@ -1,27 +1,40 @@
 "use client";
 
-import { Bot, Home, User, Globe, Settings } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Bot, Home, User, Globe, Settings, MessageCircle, BarChart3 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const sidebarItems = [
   { href: "/", icon: Home, label: "Início" },
+  { href: "/analytics", icon: BarChart3, label: "Analytics" },
+  { href: "/chats", icon: MessageCircle, label: "Conversas" },
+  { href: "/flows", icon: Bot, label: "Fluxos" },
   { href: "/account", icon: User, label: "Conta" },
   { href: "/project", icon: Globe, label: "Configurações Globais" },
-  { href: "/flows", icon: Bot, label: "Fluxos" },
   { href: "/settings", icon: Settings, label: "Configurações" },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <div className="fixed left-0 top-0 h-full w-16 bg-card border-r border-border flex flex-col items-center justify-center z-50">
       <div className="space-y-3">
         {sidebarItems.map((item) => {
           const Icon = item.icon;
-          const isActive = pathname === item.href;
+          const isActive = mounted && (
+            pathname === item.href || 
+            (item.href === "/chats" && pathname?.startsWith("/chats")) ||
+            (item.href === "/analytics" && pathname?.startsWith("/analytics")) ||
+            (item.href === "/flows" && pathname?.startsWith("/flows"))
+          );
           
           return (
             <Link

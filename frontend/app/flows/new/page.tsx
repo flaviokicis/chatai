@@ -11,7 +11,6 @@ import { Plus, Save, ArrowLeft, Loader2, Smartphone, Instagram, MessageSquareMor
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { useChannels, useCreateFlow, useExampleFlow } from "@/lib/hooks/use-api";
-import Link from "next/link";
 
 export default function NewFlowPage() {
   const router = useRouter();
@@ -141,17 +140,9 @@ export default function NewFlowPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="flow_id" className="text-sm font-medium">
-                  ID do Fluxo
-                </Label>
-                <Input
-                  id="flow_id"
-                  placeholder="qualificacao_de_vendas"
-                  value={formData.flow_id}
-                  onChange={(e) => setFormData(prev => ({ ...prev, flow_id: e.target.value }))}
-                  className="w-full"
-                  readOnly
-                />
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-medium">ID do Fluxo:</span> <code className="bg-muted px-1.5 py-0.5 rounded text-xs">{formData.flow_id}</code>
+                </p>
                 <p className="text-xs text-muted-foreground">
                   Identificador único gerado automaticamente
                 </p>
@@ -294,11 +285,15 @@ export default function NewFlowPage() {
               )}
               {createFlow.isPending ? "Criando..." : "Criar Fluxo"}
             </Button>
-            <Button asChild variant="outline" size="lg">
-              <Link href="/flows" className="gap-2">
-                <ArrowLeft className="h-4 w-4" />
-                Voltar
-              </Link>
+            <Button 
+              type="button"
+              variant="outline" 
+              size="lg"
+              onClick={() => router.push("/flows")}
+              className="gap-2"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Voltar
             </Button>
           </div>
         </form>

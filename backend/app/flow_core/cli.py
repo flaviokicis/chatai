@@ -177,9 +177,7 @@ def _load_flow_and_tenant(args) -> tuple[Flow, ProjectContext | None]:
     if not args.tenant:
         # Use file-based flow (original behavior)
         data = json.loads(args.json_path.read_text(encoding="utf-8"))
-        # Normalize legacy payloads to current schema version
-        if isinstance(data, dict) and data.get("schema_version") != "v2":
-            data["schema_version"] = "v2"
+        # Keep original schema version (no forced conversion)
         flow = Flow.model_validate(data)
         return flow, None
 
@@ -244,9 +242,7 @@ def _load_flow_and_tenant(args) -> tuple[Flow, ProjectContext | None]:
             selected_flow = active_flows[0]
 
         flow_data = selected_flow.definition
-        # Ensure schema version
-        if isinstance(flow_data, dict) and flow_data.get("schema_version") != "v2":
-            flow_data["schema_version"] = "v2"
+        # Keep original schema version (no forced conversion)
         
         flow = Flow.model_validate(flow_data)
         print(f"[database] Loaded flow '{selected_flow.name}' (flow_id='{selected_flow.flow_id}') from database")

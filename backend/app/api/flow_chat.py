@@ -13,7 +13,7 @@ from app.agents.flow_chat_agent import FlowChatAgent, ToolSpec
 from app.agents.flow_modification_tools import FLOW_MODIFICATION_TOOLS
 from app.core.app_context import get_app_context
 from app.db.models import FlowChatRole
-from app.db.repository import get_flow_versions, get_flow_version_by_number, update_flow_with_versioning
+from app.db.repository import get_flow_versions, get_flow_version_by_number, update_flow_with_versioning, clear_flow_chat_messages
 from app.db.session import get_db_session
 from app.services.flow_chat_service import FlowChatService
 
@@ -32,6 +32,13 @@ class ChatMessageResponse(BaseModel):
     role: FlowChatRole
     content: str
     created_at: datetime
+
+
+class FlowChatResponse(BaseModel):
+    """Response containing chat messages and flow modification metadata."""
+    messages: list[ChatMessageResponse]
+    flow_was_modified: bool
+    modification_summary: str | None = None
 
 
 class ErrorResponse(BaseModel):
@@ -65,13 +72,13 @@ def _build_agent(llm: LLMClient) -> FlowChatAgent:
     return FlowChatAgent(llm=llm, tools=tools)
 
 
-@router.post("/send", response_model=list[ChatMessageResponse])
+@router.post("/send", response_model=FlowChatResponse)
 def send_message(
     request: Request,
     flow_id: UUID = Path(...),
     req: SendMessageRequest | None = None,
     session: Session = Depends(get_db_session),
-) -> list[ChatMessageResponse]:
+) -> FlowChatResponse:
     logger = logging.getLogger(__name__)
     
     if req is None:
@@ -88,19 +95,27 @@ def send_message(
         logger.info(f"Processing chat message for flow {flow_id}: '{req.content}'")
         
         service = FlowChatService(session, agent=_build_agent(ctx.llm))
-        msgs = service.send_user_message(flow_id, req.content)
+        service_response = service.send_user_message(flow_id, req.content)
         
-        logger.info(f"Generated {len(msgs)} response messages for flow {flow_id}")
-        for i, msg in enumerate(msgs):
+        logger.info(f"Generated {len(service_response.messages)} response messages for flow {flow_id}")
+        logger.info(f"Flow was modified: {service_response.flow_was_modified}")
+        if service_response.flow_was_modified:
+            logger.info(f"Modification summary: {service_response.modification_summary}")
+            
+        for i, msg in enumerate(service_response.messages):
             content_preview = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
             logger.info(f"Response {i+1}: role={msg.role}, length={len(msg.content)}, preview='{content_preview}'")
         
-        return [
-            ChatMessageResponse(
-                id=m.id, role=m.role, content=m.content, created_at=m.created_at
-            )
-            for m in msgs
-        ]
+        return FlowChatResponse(
+            messages=[
+                ChatMessageResponse(
+                    id=m.id, role=m.role, content=m.content, created_at=m.created_at
+                )
+                for m in service_response.messages
+            ],
+            flow_was_modified=service_response.flow_was_modified,
+            modification_summary=service_response.modification_summary
+        )
     except ValueError as e:
         logger.error(f"Validation error in flow chat for {flow_id}: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Validation error: {str(e)}")
@@ -137,6 +152,27 @@ def receive_latest(
     return ChatMessageResponse(
         id=m.id, role=m.role, content=m.content, created_at=m.created_at
     )
+
+
+@router.post("/clear")
+def clear_chat_messages(
+    flow_id: UUID = Path(...), session: Session = Depends(get_db_session)
+) -> dict:
+    """Clear all chat messages for a flow by setting cleared_at timestamp."""
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"Clearing chat messages for flow {flow_id}")
+        clear_flow_chat_messages(session, flow_id)
+        session.commit()
+        logger.info(f"Successfully cleared chat messages for flow {flow_id}")
+        
+        return {"message": "Chat cleared successfully"}
+        
+    except Exception as e:
+        logger.error(f"Failed to clear chat messages for flow {flow_id}: {str(e)}")
+        session.rollback()
+        raise HTTPException(status_code=500, detail="Failed to clear chat messages")
 
 
 # Change history endpoints

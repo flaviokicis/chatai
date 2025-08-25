@@ -183,7 +183,7 @@ class FlowMetadata(BaseModel):
 class Flow(BaseModel):
     """Complete flow definition."""
 
-    schema_version: Literal["v2"] = "v2"  # Updated version
+    schema_version: Literal["v1", "v2"] = "v1"  # Support both v1 and v2
     id: str
     metadata: FlowMetadata | None = None
     entry: str

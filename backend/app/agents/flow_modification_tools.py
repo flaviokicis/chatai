@@ -50,8 +50,8 @@ class UpdateNodeRequest(BaseModel):
     
     node_id: str = Field(description="ID of the node to update")
     updates: Dict[str, Any] = Field(
-        description="Fields to update in the node (e.g., prompt, allowed_values)", 
-        default_factory=dict
+        description="Fields to update in the node (e.g., prompt, allowed_values). REQUIRED - cannot be empty.", 
+        # Remove default_factory to make this required
     )
     user_message: str | None = Field(
         default=None,
@@ -89,8 +89,8 @@ class UpdateEdgeRequest(BaseModel):
     source: str = Field(description="Source node ID of the edge to update")
     target: str = Field(description="Target node ID of the edge to update") 
     updates: Dict[str, Any] = Field(
-        description="Fields to update in the edge (e.g., priority, guard, condition_description)",
-        default_factory=dict
+        description="Fields to update in the edge (e.g., priority, guard, condition_description). REQUIRED - cannot be empty.",
+        # Remove default_factory to make this required
     )
     user_message: str | None = Field(
         default=None,
@@ -116,6 +116,8 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
     especially when users provide WhatsApp conversations or want complete rewrites.
     """
     try:
+        logger.info(f"set_entire_flow called: flow_id={flow_id}, session={'present' if session else 'None'}, nodes_count={len(flow_definition.get('nodes', []))}")
+        
         # Check if we have the required parameters for persistence
         if not flow_id or not session:
             logger.warning("set_entire_flow called without flow_id or session - validation only")
@@ -125,14 +127,17 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
             compiled = compiler.compile(flow_ir)
             
             if hasattr(compiled, 'validation_errors') and compiled.validation_errors:
+                logger.error(f"set_entire_flow: Validation failed: {compiled.validation_errors}")
                 return f"Flow validation failed: {'; '.join(compiled.validation_errors)}"
             elif hasattr(compiled, 'errors') and compiled.errors:
+                logger.error(f"set_entire_flow: Compilation failed: {compiled.errors}")
                 return f"Flow validation failed: {'; '.join(compiled.errors)}"
             
             node_count = len(flow_definition.get('nodes', []))
             edge_count = len(flow_definition.get('edges', []))
             entry_point = flow_definition.get('entry', 'unknown')
             
+            logger.info(f"set_entire_flow: Validation-only mode successful ({node_count} nodes, {edge_count} edges)")
             return (
                 f"Flow validation successful (not persisted):\n"
                 f"- Entry point: {entry_point}\n"
@@ -141,17 +146,31 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
                 f"- Flow ID: {flow_definition.get('id', 'unknown')}\n"
                 f"Note: Changes not saved - persistence requires database connection."
             )
+        
+        logger.info(f"set_entire_flow: Validating flow definition with {len(flow_definition.get('nodes', []))} nodes")
+        
         # Validate the flow definition
         flow_ir = FlowIR.model_validate(flow_definition)
         compiler = FlowCompiler()
         compiled = compiler.compile(flow_ir)
         
         if hasattr(compiled, 'validation_errors') and compiled.validation_errors:
+            logger.error(f"set_entire_flow: Flow validation failed: {compiled.validation_errors}")
             return f"Flow validation failed: {'; '.join(compiled.validation_errors)}"
         elif hasattr(compiled, 'errors') and compiled.errors:
+            logger.error(f"set_entire_flow: Flow compilation failed: {compiled.errors}")
             return f"Flow validation failed: {'; '.join(compiled.errors)}"
         
+        logger.info(f"set_entire_flow: Flow validation successful, persisting to database")
+        
         # Persist to database with versioning
+        # Log the specific node we're about to save to debug overwriting
+        for node in flow_definition.get('nodes', []):
+            if node.get('id') == 'q.intensidade_dor':
+                logger.info(f"set_entire_flow: About to save q.intensidade_dor with allowed_values: {node.get('allowed_values')}")
+                break
+        
+        logger.info(f"set_entire_flow: Calling repository.update_flow_with_versioning for flow {flow_id}")
         updated_flow = repository.update_flow_with_versioning(
             session,
             flow_id=flow_id,
@@ -161,7 +180,11 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
         )
         
         if not updated_flow:
+            logger.error(f"set_entire_flow: repository.update_flow_with_versioning returned None - flow {flow_id} not found")
             return f"Failed to persist flow definition: Flow {flow_id} not found"
+        
+        logger.info(f"set_entire_flow: Successfully updated flow {flow_id} in session, new version: {updated_flow.version}")
+        logger.info(f"set_entire_flow: Flow will be committed by the service layer")
         
         # Return success message with summary
         node_count = len(flow_definition.get('nodes', []))
@@ -171,12 +194,12 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
         logger.info("Successfully updated flow %s with %d nodes and %d edges", flow_id, node_count, edge_count)
         
         # Use custom user message if provided, otherwise use default
-        if user_message:
-            return user_message
-        return f"✅ Fluxo atualizado com sucesso! ({node_count} perguntas, {edge_count} conexões)"
+        success_msg = user_message if user_message else f"✅ Fluxo atualizado com sucesso! ({node_count} perguntas, {edge_count} conexões)"
+        logger.info(f"set_entire_flow: Returning success message: {success_msg}")
+        return success_msg
         
     except Exception as e:
-        logger.error("Failed to set flow definition for flow %s: %s", flow_id, str(e))
+        logger.error("Failed to set flow definition for flow %s: %s", flow_id, str(e), exc_info=True)
         return f"Failed to set flow definition: {str(e)}"
 
 
@@ -217,29 +240,54 @@ def add_node(flow_definition: Dict[str, Any], node_definition: Dict[str, Any], p
 def update_node(flow_definition: Dict[str, Any], node_id: str, updates: Dict[str, Any], user_message: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
     """Update an existing node in the flow."""
     try:
+        logger.info(f"update_node called: node_id={node_id}, updates={updates}, flow_id={flow_id}, session={'present' if session else 'None'}")
+        
         if not updates:
+            logger.warning(f"update_node: No updates provided for node '{node_id}'")
             return f"No updates provided for node '{node_id}'"
             
         nodes = flow_definition.get('nodes', [])
-        node_found = False
+        logger.info(f"update_node: Working with flow containing {len(nodes)} nodes")
         
+        # Find and log the original node state
+        original_node = None
         for node in nodes:
             if node.get('id') == node_id:
+                original_node = node.copy()
+                break
+        
+        if original_node:
+            logger.info(f"update_node: BEFORE - Node '{node_id}' current state: {original_node}")
+        
+        node_found = False
+        for node in nodes:
+            if node.get('id') == node_id:
+                logger.info(f"update_node: Applying updates {updates} to node '{node_id}'")
                 node.update(updates)
+                logger.info(f"update_node: AFTER - Node '{node_id}' new state: {node}")
                 node_found = True
                 break
         
         if not node_found:
+            logger.error(f"update_node: Node '{node_id}' not found in flow")
             return f"Node '{node_id}' not found in flow"
         
         # Persist the updated flow
         if flow_id and session:
+            logger.info(f"update_node: Persisting changes via set_entire_flow for flow {flow_id}")
             result = set_entire_flow(flow_definition, None, flow_id, session)
-            if "✅" in result:
-                return user_message or f"Updated node '{node_id}': {', '.join(updates.keys())}"
-            return result
+            logger.info(f"update_node: set_entire_flow returned: {result}")
             
-        return f"Updated node '{node_id}' (not persisted - missing flow_id/session)"
+            if "✅" in result:
+                success_msg = user_message or f"Updated node '{node_id}': {', '.join(updates.keys())}"
+                logger.info(f"update_node: SUCCESS - {success_msg}")
+                return success_msg
+            else:
+                logger.error(f"update_node: set_entire_flow failed: {result}")
+                return result
+        else:
+            logger.warning(f"update_node: Not persisting - missing flow_id={flow_id} or session={'present' if session else 'None'}")
+            return f"Updated node '{node_id}' (not persisted - missing flow_id/session)"
         
     except Exception as e:
         logger.error(f"Failed to update node '{node_id}': {str(e)}")

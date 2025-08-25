@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { SubflowSection } from "@/components/flow-viewer/SubflowSection";
 import type { CompiledFlow } from "@/components/flow-viewer/types";
 import { FlowExperience } from "@/components/flow-viewer/FlowExperience";
-import { FlowEditorChat } from "@/components/flow-viewer/FlowEditorChat";
+import { CollapsibleFlowChat } from "@/components/flow-viewer/CollapsibleFlowChat";
 
 type Params = Promise<{ id: string }>;
 
@@ -26,24 +26,26 @@ export default async function AgentDetailPage({ params }: { params: Params }) {
   const flow = await fetchCompiledFlow();
 
   return (
-    <div className="min-h-screen w-full bg-background">
-      <div className="mx-auto max-w-7xl px-4 py-6 md:py-8 space-y-6">
-        <div className="flex items-baseline justify-between">
+    <div className="min-h-screen w-full bg-background relative">
+      <div className="mx-auto max-w-none px-4 py-6 md:py-8 space-y-6">
+        <div className="flex items-baseline justify-between max-w-7xl mx-auto">
           <h1 className="text-2xl font-semibold tracking-tight">Agente (migrar): {id}</h1>
           <div className="text-xs text-muted-foreground">Use a página Fluxos para visualizar e editar</div>
         </div>
-        <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
-          <div className="2xl:col-span-3">
+        <div className="flex justify-center">
+          <div className="w-full max-w-6xl">
             <Suspense fallback={<GraphSkeleton />}>
               <FlowExperience flow={flow} />
             </Suspense>
           </div>
-          <div>
-            <FlowEditorChat flowId={id} />
-          </div>
         </div>
-        <SubflowSection subflows={flow.subflows} />
+        <div className="max-w-7xl mx-auto">
+          <SubflowSection subflows={flow.subflows} />
+        </div>
       </div>
+      
+      {/* Collapsible chat overlay */}
+      <CollapsibleFlowChat flowId={id} />
     </div>
   );
 }

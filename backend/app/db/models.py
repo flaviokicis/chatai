@@ -307,3 +307,13 @@ class FlowChatMessage(Base, TimestampMixin):
     flow_id: Mapped[UUID] = mapped_column(ForeignKey("flows.id", ondelete="CASCADE"))
     role: Mapped[FlowChatRole] = mapped_column(PgEnum(FlowChatRole, name="flow_chat_role"))
     content: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class FlowChatSession(Base, TimestampMixin):
+    """Tracks chat session metadata per flow, including clear history."""
+
+    __tablename__ = "flow_chat_sessions"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    flow_id: Mapped[UUID] = mapped_column(ForeignKey("flows.id", ondelete="CASCADE"), unique=True)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

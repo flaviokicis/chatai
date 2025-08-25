@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Sequence, NamedTuple
 from uuid import UUID
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.llm import LLMClient
+
+
+class FlowChatResponse(NamedTuple):
+    """Structured response from flow chat agent."""
+    messages: list[str]
+    flow_was_modified: bool
+    modification_summary: str | None = None
 
 
 class ToolSpec(BaseModel):
@@ -32,7 +39,7 @@ class FlowChatAgent:
         history: Sequence[dict[str, str]], 
         flow_id: UUID | None = None, 
         session: Session | None = None
-    ) -> list[str]:
+    ) -> FlowChatResponse:
         """Process conversation and return assistant responses."""
         
         import logging
@@ -41,6 +48,8 @@ class FlowChatAgent:
 
         messages = list(history)
         outputs: list[str] = []
+        flow_modified = False
+        modification_details: list[str] = []
         
         # Create custom tool mapping to handle LangChain's class name convention
         tool_schemas = []
@@ -88,8 +97,22 @@ class FlowChatAgent:
             elif content:
                 # No tool calls, so include the content
                 logger.info(f"Agent iteration {iteration+1}: Adding content (no tool calls)")
-                outputs.append(content)
-                messages.append({"role": "assistant", "content": content})
+                # Ensure final response is in Portuguese by prefixing a Portuguese instruction
+                if iteration > 0 and len(content) > 50 and "what would you like to do next" in content.lower():
+                    logger.info(f"Agent iteration {iteration+1}: Converting English response to Portuguese")
+                    portuguese_content = ("Ótimo! O fluxo foi atualizado com sucesso.\n\n"
+                                        "O que você gostaria de fazer agora? Posso:\n"
+                                        "- Editar prompts, valores permitidos ou adicionar esclarecimentos\n"
+                                        "- Adicionar novos caminhos com lógica de decisão\n"
+                                        "- Ajustar regras de validação e dependências\n"
+                                        "- Modificar políticas de conversação\n"
+                                        "- Localizar prompts ou reorganizar estrutura\n\n"
+                                        "Me diga que mudança você quer fazer!")
+                    outputs.append(portuguese_content)
+                    messages.append({"role": "assistant", "content": portuguese_content})
+                else:
+                    outputs.append(content)
+                    messages.append({"role": "assistant", "content": content})
                 
             if not tool_calls:
                 logger.info(f"Agent iteration {iteration+1}: No tool calls, breaking loop")
@@ -121,20 +144,66 @@ class FlowChatAgent:
                         # Update local flow if successful
                         if "✅" in tool_output or (user_msg and user_msg in tool_output):
                             flow = flow_def
+                            flow_modified = True
+                            modification_details.append(f"set_entire_flow: {user_msg or 'Updated complete flow definition'}")
                     elif actual_tool_name in modification_tools:
                         # Modification tools: inject flow as first parameter
                         logger.info(f"Agent iteration {iteration+1}: Calling '{actual_tool_name}' with args: {list(args.keys())}")
+                        logger.info(f"Agent iteration {iteration+1}: Current flow has {len(flow.get('nodes', []))} nodes")
+                        
+                        # Log the specific node we're trying to update (if it's update_node)
+                        if actual_tool_name == 'update_node' and 'node_id' in args:
+                            node_id = args['node_id']
+                            for node in flow.get('nodes', []):
+                                if node.get('id') == node_id:
+                                    logger.info(f"Agent iteration {iteration+1}: BEFORE TOOL - Node '{node_id}' current state: {node}")
+                                    break
+                        
                         # Extract user_message if present
                         user_msg = args.pop('user_message', None)
+                        logger.info(f"Agent iteration {iteration+1}: Extracted user_message: {user_msg}")
+                        
                         # Provide defaults for optional parameters
                         if 'updates' in args and args['updates'] is None:
                             args['updates'] = {}
+                            
+                        logger.info(f"Agent iteration {iteration+1}: Final args being passed: {args}")
+                        logger.info(f"Agent iteration {iteration+1}: flow_id={flow_id}, session={'present' if session else 'None'}")
+                        
                         # Call with flow_definition as first parameter
                         tool_output = tool.func(flow, **args, user_message=user_msg, flow_id=flow_id, session=session)
-                        # Update flow on success (flow is modified in-place by the function)
+                        
+                        logger.info(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' completed with output: {tool_output}")
+                        
+                        # ⚠️ CRITICAL BUG FIX: Each tool call must work with the latest flow state from database!
+                        # The tools persist changes to DB, but the next tool needs to work with those changes.
                         if "✅" in tool_output or (user_msg and user_msg in tool_output):
-                            # The flow was modified in-place, no need to update
-                            pass
+                            logger.info(f"Agent iteration {iteration+1}: Tool reported success, reloading flow from database for next tool")
+                            
+                            # Track successful flow modification
+                            flow_modified = True
+                            node_id = args.get('node_id', '')
+                            edge_info = f"{args.get('source', '')}->{args.get('target', '')}" if args.get('source') and args.get('target') else ''
+                            modification_details.append(f"{actual_tool_name}: {node_id}{edge_info} - {user_msg or 'Applied changes'}")
+                            
+                            # Reload the flow from database to get the cumulative changes for next tool call
+                            from app.db.repository import get_flow_by_id
+                            updated_flow_db = get_flow_by_id(session, flow_id)
+                            if updated_flow_db:
+                                flow = updated_flow_db.definition  # Update flow for next tool call
+                                logger.info(f"Agent iteration {iteration+1}: Reloaded flow from DB version {updated_flow_db.version}")
+                                
+                                # Verify the node was updated correctly
+                                if actual_tool_name == 'update_node' and 'node_id' in args:
+                                    node_id = args['node_id']
+                                    for node in flow.get('nodes', []):
+                                        if node.get('id') == node_id:
+                                            logger.info(f"Agent iteration {iteration+1}: VERIFIED - Node '{node_id}' after reload: {node}")
+                                            break
+                            else:
+                                logger.error(f"Agent iteration {iteration+1}: Failed to reload flow from database!")
+                        else:
+                            logger.warning(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' did not report success: {tool_output}")
                     elif actual_tool_name in read_only_tools:
                         # Read-only tools: inject flow as the flow_definition parameter
                         logger.info(f"Agent iteration {iteration+1}: Calling '{actual_tool_name}'")
@@ -145,9 +214,16 @@ class FlowChatAgent:
                         tool_output = tool.func(**args)
                 except TypeError as e:
                     logger.error(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' failed: {e}")
-                    # Provide helpful error message
+                    # Provide helpful error message with context
                     if "missing" in str(e) and "required" in str(e):
-                        tool_output = f"Error: {actual_tool_name} is missing required arguments. {str(e)}"
+                        # Extract the missing parameter name and provide context
+                        error_msg = str(e)
+                        if "updates" in error_msg:
+                            tool_output = f"Error: {actual_tool_name} requires an 'updates' parameter with the fields to modify. For example: updates={{'prompt': 'new text'}}, {error_msg}"
+                        elif "flow_definition" in error_msg:
+                            tool_output = f"Error: {actual_tool_name} requires a complete flow definition as JSON. {error_msg}"
+                        else:
+                            tool_output = f"Error: {actual_tool_name} is missing required arguments. {error_msg}. Check the tool schema and provide all required parameters."
                     else:
                         tool_output = f"Tool call failed: {actual_tool_name}. Error: {str(e)}"
                 except Exception as e:
@@ -158,8 +234,20 @@ class FlowChatAgent:
                 outputs.append(tool_output)
                 messages.append({"role": "assistant", "content": tool_output})
         
-        logger.info(f"FlowChatAgent.process complete: returning {len(outputs)} outputs")
-        return outputs
+        # Create modification summary
+        modification_summary = None
+        if modification_details:
+            modification_summary = "; ".join(modification_details)
+        
+        logger.info(f"FlowChatAgent.process complete: returning {len(outputs)} outputs, flow_modified={flow_modified}")
+        if flow_modified:
+            logger.info(f"Flow modifications: {modification_summary}")
+        
+        return FlowChatResponse(
+            messages=outputs,
+            flow_was_modified=flow_modified,
+            modification_summary=modification_summary
+        )
 
     def _build_prompt(self, flow: dict[str, Any], history: Sequence[dict[str, str]]) -> str:
         """Comprehensive prompt builder for flow editing with examples and guidance."""
@@ -257,9 +345,16 @@ class FlowChatAgent:
         lines.extend([
             "## Instructions:",
             "- **CRITICAL: ALWAYS use tools - NEVER output flow JSON directly to the user!**",
+            "- **SCHEMA VERSION: ALL flows must use schema_version 'v1'**",
             "- For flow modifications: Call `set_entire_flow` tool with the complete modified flow",
+            "- For node updates: Call `update_node` with node_id AND updates={field: value}",
+            "- For edge updates: Call `update_edge` with source, target, AND updates={field: value}",
             "- For validation: Call `validate_flow` tool", 
             "- For summaries: Call `get_flow_summary` tool",
+            "- **TOOL REQUIREMENTS: Always provide ALL required parameters**",
+            "  - update_node: requires node_id AND updates (dict)",
+            "  - update_edge: requires source, target AND updates (dict)",  
+            "  - set_entire_flow: requires complete flow_definition (dict)",
             "- **IMPORTANT: Always provide 'user_message' parameter** with a friendly message in the user's language",
             "  - Example (Portuguese): user_message: \"Escala de dor alterada de 1-10 para 1-5 com sucesso!\"",
             "  - Example (English): user_message: \"Pain scale successfully updated from 1-10 to 1-5!\"",
@@ -322,7 +417,7 @@ class FlowChatAgent:
     def _get_dentist_flow_example(self) -> dict[str, Any]:
         """Return the dentist flow example for prompt context."""
         return {
-            "schema_version": "v2",
+            "schema_version": "v1",
             "id": "flow.consultorio_dentista", 
             "entry": "q.motivo_consulta",
             "metadata": {
