@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.llm import LLMClient
+from app.agents.flow_modification_tools import ToolResult
 
 
 class FlowChatResponse(NamedTuple):
@@ -208,6 +209,15 @@ class FlowChatAgent:
                                     logger.info(f"Agent iteration {iteration+1}: BEFORE TOOL - Node '{node_id}' current state: {node}")
                                     break
                         
+                        # Validate required parameters before calling tool
+                        validation_error = self._validate_tool_parameters(actual_tool_name, args)
+                        if validation_error:
+                            logger.error(f"Agent iteration {iteration+1}: Parameter validation failed: {validation_error}")
+                            # Add validation error to conversation for LLM to see and correct
+                            error_message = f"Parameter Error: {validation_error}"
+                            messages.append({"role": "system", "content": error_message})
+                            continue  # Skip this tool call and let LLM retry
+                        
                         # Provide defaults for optional parameters
                         if 'updates' in args and args['updates'] is None:
                             args['updates'] = {}
@@ -221,8 +231,6 @@ class FlowChatAgent:
                         logger.info(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' completed with output: {tool_output}")
                         
                         # ⚠️ Use structured tool responses instead of hacky string parsing!
-                        # Import ToolResult for type checking
-                        from app.agents.flow_modification_tools import ToolResult
                         
                         # Check if we got a structured ToolResult
                         if isinstance(tool_output, ToolResult):
@@ -258,6 +266,12 @@ class FlowChatAgent:
                                 node_id = args.get('node_id', '')
                                 edge_info = f"{args.get('source', '')}->{args.get('target', '')}" if args.get('source') and args.get('target') else ''
                                 modification_details.append(f"{actual_tool_name}: {node_id}{edge_info} - Alterações aplicadas")
+                                
+                                # Add context message to help LLM remember what it just did
+                                if actual_tool_name == "add_node" and args.get('node_definition'):
+                                    node_def = args['node_definition']
+                                    context_msg = f"✅ I just successfully added new {node_def.get('kind', 'node')} '{node_def.get('id', 'unknown')}' with prompt: '{node_def.get('prompt', 'N/A')}' - this is a new node that I created."
+                                    messages.append({"role": "system", "content": context_msg})
                             
                             # Reload the flow from database to get the cumulative changes for next tool call
                             from app.db.repository import get_flow_by_id
@@ -291,43 +305,59 @@ class FlowChatAgent:
                         tool_output = tool.func(**args)
                 except TypeError as e:
                     logger.error(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' failed: {e}")
-                    # Provide helpful error message with context
+                    # Provide helpful error message with context for re-prompting
                     if "missing" in str(e) and "required" in str(e):
                         # Extract the missing parameter name and provide context
                         error_msg = str(e)
-                        if "updates" in error_msg:
-                            tool_output = f"Error: {actual_tool_name} requires an 'updates' parameter with the fields to modify. For example: updates={{'prompt': 'new text'}}, {error_msg}"
+                        if "node_definition" in error_msg:
+                            tool_output = f"Error: {actual_tool_name} requires a complete 'node_definition' parameter. Please provide the full node object with id, kind, and other required properties. {error_msg}"
+                        elif "updates" in error_msg:
+                            tool_output = f"Error: {actual_tool_name} requires an 'updates' parameter with the fields to modify. For example: updates={{'prompt': 'new text'}}. {error_msg}"
                         elif "flow_definition" in error_msg:
                             tool_output = f"Error: {actual_tool_name} requires a complete flow definition as JSON. {error_msg}"
                         else:
                             tool_output = f"Error: {actual_tool_name} is missing required arguments. {error_msg}. Check the tool schema and provide all required parameters."
                     else:
                         tool_output = f"Tool call failed: {actual_tool_name}. Error: {str(e)}"
+                    
+                    # Add error message to conversation for LLM to see and correct
+                    error_message = f"Tool Error: {tool_output}"
+                    messages.append({"role": "system", "content": error_message})
+                    logger.info(f"Agent iteration {iteration+1}: Added tool error to conversation for re-prompting: {error_message}")
+                    
                 except Exception as e:
                     logger.error(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' unexpected error: {e}")
                     tool_output = f"Unexpected error calling {actual_tool_name}: {str(e)}"
+                    
+                    # Add error message to conversation for LLM to see and correct
+                    error_message = f"Tool Error: {tool_output}"
+                    messages.append({"role": "system", "content": error_message})
+                    logger.info(f"Agent iteration {iteration+1}: Added unexpected error to conversation for re-prompting: {error_message}")
                 
                 logger.info(f"Agent iteration {iteration+1}: Tool '{actual_tool_name}' returned: '{tool_output}'")
-                # Add appropriate message based on success/failure using structured result
+                
+                # Only add success messages to conversation, errors are already added above
                 if isinstance(tool_output, ToolResult):
                     if tool_output.success and tool_output.is_modification:
                         messages.append({"role": "assistant", "content": f"{tool_output.action} completed successfully. Flow has been updated."})
-                    else:
-                        messages.append({"role": "assistant", "content": f"Tool {tool_output.action} executed"})
+                    elif tool_output.success:
+                        messages.append({"role": "assistant", "content": f"Tool {tool_output.action} executed successfully."})
+                    # Don't add error messages here - they're already added in the except blocks above
                 elif is_success and actual_tool_name in modification_tools:
                     # Legacy support for non-ToolResult responses
                     messages.append({"role": "assistant", "content": f"{actual_tool_name} completed successfully. Flow has been updated."})
-                else:
-                    # Generic message for read-only tools or errors  
-                    messages.append({"role": "assistant", "content": f"Tool {actual_tool_name} executed"})
+                elif is_success:
+                    # Read-only tools or other successful operations
+                    messages.append({"role": "assistant", "content": f"Tool {actual_tool_name} executed successfully."})
+                # Don't add generic messages for failures - let the error handling above provide context
         
             # Check if we should complete after this iteration
             if should_complete:
                 logger.info(f"Agent iteration {iteration+1}: Early completion triggered by validation after modifications")
                 break
             
-            # Prevent runaway iterations with reasonable limit
-            if iteration >= 3:  # Allow up to 3 iterations for complex operations
+            # Prevent runaway iterations with reasonable limit, but allow more iterations for error recovery
+            if iteration >= 5:  # Allow more iterations for error recovery and complex operations
                 logger.info(f"Agent iteration {iteration+1}: Reached iteration limit, stopping")
                 break
         
@@ -890,8 +920,47 @@ class FlowChatAgent:
         
         logger.info(f"_fallback_path_detection: Found {len(path_nodes)} nodes with keywords from '{active_path}'")
         return path_nodes
-
     
+    def _validate_tool_parameters(self, tool_name: str, args: dict[str, Any]) -> str | None:
+        """Validate that required parameters are present for tool calls.
+        
+        Returns None if valid, error message string if invalid.
+        """
+        # Define required parameters for each tool
+        required_params = {
+            "add_node": ["node_definition"],
+            "update_node": ["node_id", "updates"],
+            "delete_node": ["node_id"],
+            "add_edge": ["source", "target"],
+            "update_edge": ["source", "target", "updates"],
+            "delete_edge": ["source", "target"]
+        }
+        
+        # Check if tool has required parameters defined
+        if tool_name not in required_params:
+            return None  # No validation needed for this tool
+            
+        # Check each required parameter
+        missing_params = []
+        for param in required_params[tool_name]:
+            if param not in args or args[param] is None:
+                missing_params.append(param)
+        
+        if missing_params:
+            # Provide specific guidance based on the tool and missing parameters
+            if tool_name == "add_node" and "node_definition" in missing_params:
+                return (f"Tool '{tool_name}' requires a 'node_definition' parameter. "
+                       "Please provide a complete node object with 'id', 'kind', and other properties. "
+                       f"Example: node_definition={{'id': 'q.new_question', 'kind': 'Question', 'key': 'answer_key', 'prompt': 'Your question?'}}")
+            elif tool_name == "update_node" and "updates" in missing_params:
+                return (f"Tool '{tool_name}' requires an 'updates' parameter. "
+                       "Please provide the fields to update as a dictionary. "
+                       f"Example: updates={{'prompt': 'New question text', 'allowed_values': ['yes', 'no']}}")
+            else:
+                return f"Tool '{tool_name}' is missing required parameters: {', '.join(missing_params)}"
+                
+        return None  # All required parameters are present
+
     def _build_final_message_prompt(self, messages: list[dict[str, str]]) -> str:
         """Build prompt for generating final user-friendly message after tool execution."""
         recent_messages = messages[-3:] if len(messages) >= 3 else messages

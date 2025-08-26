@@ -215,9 +215,9 @@ export function FlowEditorChat({
             {messages.map((m, i) => (
               <div key={i} className={`max-w-[85%] rounded-2xl px-3 py-2 ${
                 m.hasError 
-                  ? "bg-destructive/10 border border-destructive/20" 
+                  ? "bg-destructive/10 border border-destructive/20 text-destructive" 
                   : m.role === "assistant" 
-                    ? "bg-muted" 
+                    ? "bg-muted text-foreground" 
                     : "bg-primary text-primary-foreground ml-auto"
               }`}>
                 <div className="text-sm leading-relaxed whitespace-pre-wrap flex items-start gap-2">
@@ -236,7 +236,7 @@ export function FlowEditorChat({
               </div>
             ))}
             {isLoading && (
-              <div className="max-w-[85%] rounded-2xl px-3 py-2 bg-muted">
+              <div className="max-w-[85%] rounded-2xl px-3 py-2 bg-muted text-foreground">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   Processando...

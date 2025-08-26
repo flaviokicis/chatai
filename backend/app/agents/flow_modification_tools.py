@@ -242,19 +242,43 @@ def set_entire_flow(flow_definition: Dict[str, Any], flow_id: UUID | None = None
 def add_node(flow_definition: Dict[str, Any], node_definition: Dict[str, Any], position_after: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
     """Add a new node to the flow."""
     try:
+        # Enhanced parameter validation with helpful error messages
+        if not isinstance(flow_definition, dict):
+            return "Error: flow_definition must be a dictionary"
+            
+        if not isinstance(node_definition, dict):
+            return "Error: node_definition must be a dictionary with node properties"
+            
+        if not node_definition:
+            return "Error: node_definition cannot be empty. Please provide a complete node object with 'id', 'kind', and other properties"
+        
         node_id = node_definition.get('id')
         node_kind = node_definition.get('kind')
         
-        # Validate required fields
-        if not node_id or not node_kind:
-            return f"Node missing required fields: id={node_id}, kind={node_kind}"
+        # Validate required fields with specific guidance
+        if not node_id:
+            return "Error: node_definition missing required 'id' field. Example: {'id': 'q.new_question', 'kind': 'Question', ...}"
+        if not node_kind:
+            return "Error: node_definition missing required 'kind' field. Must be one of: Question, Decision, Terminal"
+        
+        # Validate node kind
+        valid_kinds = ['Question', 'Decision', 'Terminal']
+        if node_kind not in valid_kinds:
+            return f"Error: node 'kind' must be one of {valid_kinds}, got '{node_kind}'"
+        
+        # Additional validation for Question nodes
+        if node_kind == 'Question':
+            if not node_definition.get('key'):
+                return "Error: Question nodes require a 'key' field for storing user answers"
+            if not node_definition.get('prompt'):
+                return "Error: Question nodes require a 'prompt' field with the question text"
         
         # Add node to flow
         nodes = flow_definition.get('nodes', [])
         
         # Check if node already exists
         if any(n.get('id') == node_id for n in nodes):
-            return f"Node '{node_id}' already exists in flow"
+            return f"Error: Node '{node_id}' already exists in flow. Please choose a different id"
         
         nodes.append(node_definition)
         flow_definition['nodes'] = nodes
@@ -262,11 +286,11 @@ def add_node(flow_definition: Dict[str, Any], node_definition: Dict[str, Any], p
         # Persist the updated flow
         if flow_id and session:
             result = set_entire_flow(flow_definition, flow_id, session)
-            if "✅" in result:
-                return f"Added {node_kind} node '{node_id}'"
+            if "✅" in str(result):
+                return f"✅ Added {node_kind} node '{node_id}' successfully"
             return result
         
-        return f"Added {node_kind} node '{node_id}' (not persisted - missing flow_id/session)"
+        return f"✅ Added {node_kind} node '{node_id}' (not persisted - missing flow_id/session)"
         
     except Exception as e:
         logger.error(f"Failed to add node: {str(e)}")
