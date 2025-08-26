@@ -142,7 +142,7 @@ class FlowChatAgent:
                         logger.info(f"Agent iteration {iteration+1}: Calling set_entire_flow with {len(flow_def.get('nodes', []))} nodes")
                         tool_output = tool.func(flow_def, user_message=user_msg, flow_id=flow_id, session=session)
                         # Update local flow if successful
-                        if "✅" in tool_output or (user_msg and user_msg in tool_output):
+                        if "✅" in str(tool_output) or (user_msg and str(user_msg) in str(tool_output)):
                             flow = flow_def
                             flow_modified = True
                             modification_details.append(f"set_entire_flow: {user_msg or 'Updated complete flow definition'}")
@@ -177,7 +177,7 @@ class FlowChatAgent:
                         
                         # ⚠️ CRITICAL BUG FIX: Each tool call must work with the latest flow state from database!
                         # The tools persist changes to DB, but the next tool needs to work with those changes.
-                        if "✅" in tool_output or (user_msg and user_msg in tool_output):
+                        if "✅" in str(tool_output) or (user_msg and str(user_msg) in str(tool_output)):
                             logger.info(f"Agent iteration {iteration+1}: Tool reported success, reloading flow from database for next tool")
                             
                             # Track successful flow modification

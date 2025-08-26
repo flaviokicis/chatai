@@ -287,3 +287,4 @@ test('auto-refresh triggers on flow modification', async () => {
 ```
 
 This testing strategy ensures the flow chat feature works reliably and prevents regressions to the previous brittle system.
+

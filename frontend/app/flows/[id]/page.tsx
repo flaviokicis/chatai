@@ -48,9 +48,9 @@ export default function FlowDetailPage() {
     <div className="min-h-screen w-full bg-background relative">
       <div className="mx-auto max-w-none px-4 py-6 md:py-8 space-y-6">
         <div className="flex items-baseline justify-between max-w-7xl mx-auto">
-          <h1 className="text-2xl font-semibold tracking-tight">Fluxo: {id}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Visualização do Fluxo</h1>
           {flow ? (
-            <div className="text-xs text-muted-foreground">Identificador do fluxo: {flow.id}</div>
+            <div className="text-xs text-muted-foreground">ID: {flow.id}</div>
           ) : null}
         </div>
 

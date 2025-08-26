@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, Home, User, Globe, Settings, MessageCircle, BarChart3 } from "lucide-react";
+import { Bot, Home, User, Globe, Settings, MessageCircle, BarChart3, Smartphone } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ const sidebarItems = [
   { href: "/analytics", icon: BarChart3, label: "Analytics" },
   { href: "/chats", icon: MessageCircle, label: "Conversas" },
   { href: "/flows", icon: Bot, label: "Fluxos" },
+  { href: "/channels", icon: Smartphone, label: "Canais" },
   { href: "/account", icon: User, label: "Conta" },
   { href: "/project", icon: Globe, label: "Configurações Globais" },
   { href: "/settings", icon: Settings, label: "Configurações" },
@@ -33,7 +34,8 @@ export function Sidebar() {
             pathname === item.href || 
             (item.href === "/chats" && pathname?.startsWith("/chats")) ||
             (item.href === "/analytics" && pathname?.startsWith("/analytics")) ||
-            (item.href === "/flows" && pathname?.startsWith("/flows"))
+            (item.href === "/flows" && pathname?.startsWith("/flows")) ||
+            (item.href === "/channels" && pathname?.startsWith("/channels"))
           );
           
           return (

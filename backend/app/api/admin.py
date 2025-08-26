@@ -144,6 +144,7 @@ class FlowResponse(BaseModel):
     name: str
     flow_id: str
     channel_instance_id: UUID
+    is_active: bool = Field(default=True)
 
 
 @router.post("/tenants/{tenant_id}/flows", response_model=FlowResponse)
@@ -166,6 +167,7 @@ def create_flow(
             name=f.name,
             flow_id=f.flow_id,
             channel_instance_id=f.channel_instance_id,
+            is_active=f.is_active,
         )
     except TenantServiceError as exc:  # pragma: no cover
         raise HTTPException(status_code=500, detail=f"Failed to create flow: {exc}")
@@ -322,8 +324,89 @@ def list_flows(
                 name=f.name,
                 flow_id=f.flow_id,
                 channel_instance_id=f.channel_instance_id,
+                is_active=f.is_active,
             )
             for f in flows
         ]
     except TenantNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+class ChannelWithFlowsResponse(BaseModel):
+    id: UUID
+    channel_type: ChannelType
+    identifier: str
+    phone_number: str | None
+    flows: list[FlowResponse]
+
+
+class UpdateChannelFlowRequest(BaseModel):
+    flow_id: UUID
+
+
+@router.get("/tenants/{tenant_id}/channels/{channel_id}", response_model=ChannelWithFlowsResponse)
+def get_channel_with_flows(
+    tenant_id: UUID = Path(...),
+    channel_id: UUID = Path(...),
+    session: Session = Depends(get_db_session),
+) -> ChannelWithFlowsResponse:
+    """Get a channel instance with its flows."""
+    service = TenantService(session)
+    try:
+        channel = service.get_channel_instance(channel_id)
+        if not channel or channel.tenant_id != tenant_id:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        
+        flows = service.get_flows_by_channel(channel_id)
+        
+        return ChannelWithFlowsResponse(
+            id=channel.id,
+            channel_type=channel.channel_type,
+            identifier=channel.identifier,
+            phone_number=channel.phone_number,
+            flows=[
+                FlowResponse(
+                    id=f.id,
+                    name=f.name,
+                    flow_id=f.flow_id,
+                    channel_instance_id=f.channel_instance_id,
+                    is_active=f.is_active,
+                )
+                for f in flows
+            ],
+        )
+    except TenantNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/tenants/{tenant_id}/channels/{channel_id}/active-flow")
+def set_channel_active_flow(
+    payload: UpdateChannelFlowRequest,
+    tenant_id: UUID = Path(...),
+    channel_id: UUID = Path(...),
+    session: Session = Depends(get_db_session),
+) -> dict[str, str]:
+    """Set the active flow for a channel (deactivates other flows for this channel)."""
+    service = TenantService(session)
+    try:
+        # Verify channel belongs to tenant
+        channel = service.get_channel_instance(channel_id)
+        if not channel or channel.tenant_id != tenant_id:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        
+        # Verify flow belongs to this channel
+        flow = service.get_flow_by_id(payload.flow_id)
+        if not flow or flow.channel_instance_id != channel_id:
+            raise HTTPException(status_code=404, detail="Flow not found for this channel")
+        
+        # Deactivate all flows for this channel, then activate the selected one
+        service.set_channel_active_flow(channel_id, payload.flow_id)
+        
+        session.commit()
+        return {"message": "Active flow updated successfully"}
+        
+    except TenantNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except TenantServiceError as exc:
+        logger.error("Failed to update active flow: %s", exc)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

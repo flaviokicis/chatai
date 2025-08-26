@@ -350,6 +350,14 @@ def get_channel_instances_by_tenant(session: Session, tenant_id: UUID) -> Sequen
     )
 
 
+def get_channel_instance_by_id(session: Session, channel_id: UUID) -> ChannelInstance | None:
+    """Get a channel instance by its ID."""
+    return session.execute(
+        select(ChannelInstance)
+        .where(ChannelInstance.id == channel_id, ChannelInstance.deleted_at.is_(None))
+    ).scalar_one_or_none()
+
+
 def update_channel_instance_phone_number(
     session: Session,
     channel_id: UUID,
@@ -386,13 +394,18 @@ def create_flow(
     definition: dict,
 ) -> Flow:
     """Create a new flow."""
+    # Check if this channel already has any flows
+    existing_flows = get_flows_by_channel_instance(session, channel_instance_id)
+    # Only make this flow active if it's the first one for this channel
+    is_first_flow = len(existing_flows) == 0
+    
     flow = Flow(
         tenant_id=tenant_id,
         channel_instance_id=channel_instance_id,
         name=name,
         flow_id=flow_id,
         definition=definition,
-        is_active=True,
+        is_active=is_first_flow,  # Only active if it's the first flow for this channel
     )
     session.add(flow)
     session.flush()
@@ -405,6 +418,19 @@ def get_flows_by_tenant(session: Session, tenant_id: UUID) -> Sequence[Flow]:
         session.execute(
             select(Flow)
             .where(Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None))
+            .order_by(Flow.id)
+        )
+        .scalars()
+        .all()
+    )
+
+
+def get_flows_by_channel_instance(session: Session, channel_instance_id: UUID) -> Sequence[Flow]:
+    """Get all flows for a specific channel instance."""
+    return (
+        session.execute(
+            select(Flow)
+            .where(Flow.channel_instance_id == channel_instance_id, Flow.deleted_at.is_(None))
             .order_by(Flow.id)
         )
         .scalars()

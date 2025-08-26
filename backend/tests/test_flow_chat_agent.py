@@ -35,7 +35,7 @@ def test_agent_executes_multiple_tool_calls() -> None:
     )
     agent = FlowChatAgent(llm=llm, tools=tools)
     history = [{"role": "user", "content": "add two nodes"}]
-    responses = agent.process({}, history)
+    response = agent.process({}, history)
 
     assert added == ["a", "b"]
-    assert responses[-1] == "done"
+    assert response.messages[-1] == "done"

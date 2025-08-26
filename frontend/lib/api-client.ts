@@ -60,6 +60,7 @@ export interface Flow {
   flow_id: string;
   channel_instance_id: string; // UUIDv7
   definition?: Record<string, unknown>;
+  is_active: boolean;
 }
 
 export interface CreateFlowRequest {
@@ -73,6 +74,18 @@ export interface UpdateFlowRequest {
   name?: string;
   definition?: Record<string, unknown>;
   is_active?: boolean;
+}
+
+export interface ChannelWithFlows {
+  id: string; // UUIDv7
+  channel_type: string;
+  identifier: string;
+  phone_number?: string;
+  flows: Flow[];
+}
+
+export interface UpdateChannelFlowRequest {
+  flow_id: string; // UUIDv7
 }
 
 export interface Contact {
@@ -342,6 +355,32 @@ export const api = {
   // System endpoints
   health: (): Promise<string> => 
     apiRequest('/health'),
+
+  // Admin endpoints (for managing channels and flows)
+  admin: {
+    listChannels: async (tenantId?: string): Promise<ChannelInstance[]> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/channels`);
+    },
+    
+    getChannelWithFlows: async (channelId: string, tenantId?: string): Promise<ChannelWithFlows> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/channels/${channelId}`);
+    },
+    
+    setChannelActiveFlow: async (channelId: string, request: UpdateChannelFlowRequest, tenantId?: string): Promise<{ message: string }> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/channels/${channelId}/active-flow`, {
+        method: 'PATCH',
+        body: JSON.stringify(request),
+      });
+    },
+    
+    listFlows: async (tenantId?: string): Promise<Flow[]> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/flows`);
+    },
+  },
 };
 
 export { DEFAULT_TENANT_ID };

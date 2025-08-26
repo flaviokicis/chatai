@@ -172,7 +172,12 @@ class TestEndToEndFlowAPI:
             # Mock the _build_agent function to return a mock agent
             with patch('app.api.flow_chat._build_agent') as mock_build_agent:
                 mock_agent = Mock()
-                mock_agent.process.return_value = ["I can see you're interested in testing. Let me guide you through our test flow."]
+                from app.agents.flow_chat_agent import FlowChatResponse
+                mock_agent.process.return_value = FlowChatResponse(
+                    messages=["I can see you're interested in testing. Let me guide you through our test flow."],
+                    flow_was_modified=False,
+                    modification_summary=None
+                )
                 mock_build_agent.return_value = mock_agent
                 
                 # Test 1: Send initial message to start flow
@@ -182,7 +187,8 @@ class TestEndToEndFlowAPI:
                 )
                 
                 assert response.status_code == 200
-                messages = response.json()
+                response_data = response.json()
+                messages = response_data["messages"]
                 assert len(messages) >= 1
                 
                 # Should get assistant response
@@ -191,7 +197,11 @@ class TestEndToEndFlowAPI:
                 assert len(assistant_message["content"]) > 0
                 
                 # Test 2: Continue conversation 
-                mock_agent.process.return_value = ["Great! For basic testing, what type of responses do you prefer?"]
+                mock_agent.process.return_value = FlowChatResponse(
+                    messages=["Great! For basic testing, what type of responses do you prefer?"],
+                    flow_was_modified=False,
+                    modification_summary=None
+                )
                 
                 response2 = client.post(
                     f"/flows/{flow_id}/chat/send",
@@ -199,7 +209,8 @@ class TestEndToEndFlowAPI:
                 )
                 
                 assert response2.status_code == 200
-                messages2 = response2.json()
+                response_data2 = response2.json()
+                messages2 = response_data2["messages"]
                 assert len(messages2) >= 1
                 
                 # Should progress through the flow
@@ -217,7 +228,12 @@ class TestEndToEndFlowAPI:
         # Mock the agent and context for sending a message first
         with patch('app.agents.flow_chat_agent.FlowChatAgent') as mock_agent_class:
             mock_agent = Mock()
-            mock_agent.process.return_value = ["Test response from agent"]
+            from app.agents.flow_chat_agent import FlowChatResponse
+            mock_agent.process.return_value = FlowChatResponse(
+                messages=["Test response from agent"],
+                flow_was_modified=False,
+                modification_summary=None
+            )
             mock_agent_class.return_value = mock_agent
             
             with patch('app.core.app_context.get_app_context') as mock_get_ctx:
@@ -258,7 +274,12 @@ class TestEndToEndFlowAPI:
             # Mock the _build_agent function to return a mock agent
             with patch('app.api.flow_chat._build_agent') as mock_build_agent:
                 mock_agent = Mock()
-                mock_agent.process.return_value = ["Mock assistant response for persistence test"]
+                from app.agents.flow_chat_agent import FlowChatResponse
+                mock_agent.process.return_value = FlowChatResponse(
+                    messages=["Mock assistant response for persistence test"],
+                    flow_was_modified=False,
+                    modification_summary=None
+                )
                 mock_build_agent.return_value = mock_agent
                 
                 # Send a unique message we can verify later
@@ -328,6 +349,7 @@ class TestEndToEndFlowAPI:
                 def mock_process(flow_def, history, flow_id=None, session=None):
                     """Mock agent that processes 'Mude a escala de 1 a 10 pra 1 a 5' request."""
                     from app.agents.flow_modification_tools import update_node
+                    from app.agents.flow_chat_agent import FlowChatResponse
                     
                     if session and flow_id and flow_def:
                         try:
@@ -341,11 +363,23 @@ class TestEndToEndFlowAPI:
                                 session=session,
                                 user_message="Escala de dor alterada de 1-10 para 1-5 com sucesso!"
                             )
-                            return [f"✅ Perfeito! Alterei a escala de dor de 1-10 para 1-5. {result}"]
+                            return FlowChatResponse(
+                                messages=[f"✅ Perfeito! Alterei a escala de dor de 1-10 para 1-5. {result}"],
+                                flow_was_modified=True,
+                                modification_summary="update_node: q.intensidade_dor - Changed pain scale from 1-10 to 1-5"
+                            )
                         except Exception as e:
-                            return [f"❌ Erro ao alterar a escala: {str(e)}"]
+                            return FlowChatResponse(
+                                messages=[f"❌ Erro ao alterar a escala: {str(e)}"],
+                                flow_was_modified=False,
+                                modification_summary=None
+                            )
                     
-                    return ["Desculpe, não consegui processar sua solicitação de alteração."]
+                    return FlowChatResponse(
+                        messages=["Desculpe, não consegui processar sua solicitação de alteração."],
+                        flow_was_modified=False,
+                        modification_summary=None
+                    )
                 
                 mock_agent.process.side_effect = mock_process
                 mock_build_agent.return_value = mock_agent
@@ -357,7 +391,8 @@ class TestEndToEndFlowAPI:
                 )
                 
                 assert response.status_code == 200
-                messages = response.json()
+                response_data = response.json()
+                messages = response_data["messages"]
                 
                 # Should get a Portuguese response indicating success
                 assistant_message = next((m for m in messages if m["role"] == "assistant"), None)
@@ -536,9 +571,12 @@ class TestEndToEndFlowAPI:
         assert response3.status_code == 200
         
         # Verify we got meaningful responses at each step
-        messages1 = response1.json()
-        messages2 = response2.json()
-        messages3 = response3.json()
+        response_data1 = response1.json()
+        response_data2 = response2.json()
+        response_data3 = response3.json()
+        messages1 = response_data1["messages"]
+        messages2 = response_data2["messages"]
+        messages3 = response_data3["messages"]
         
         # Each response should have assistant messages
         assert any(m["role"] == "assistant" for m in messages1)

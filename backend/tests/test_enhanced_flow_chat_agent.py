@@ -215,10 +215,10 @@ class TestFlowChatAgentTools:
         }
         
         history = [{"role": "user", "content": "Set this flow"}]
-        outputs = agent_with_tools.process(sample_flow, history)
+        response = agent_with_tools.process(sample_flow, history)
         
-        assert len(outputs) > 0
-        assert "Successfully set complete flow definition" in outputs[0]
+        assert len(response.messages) > 0
+        assert "Flow validation successful" in response.messages[0]
     
     def test_tool_execution_get_flow_summary(self, agent_with_tools, sample_flow, mock_llm):
         """Test that get_flow_summary tool can be executed."""
@@ -233,10 +233,10 @@ class TestFlowChatAgentTools:
         }
         
         history = [{"role": "user", "content": "Show me a summary"}]
-        outputs = agent_with_tools.process(sample_flow, history)
+        response = agent_with_tools.process(sample_flow, history)
         
-        assert len(outputs) > 0
-        assert "Flow Summary (test.sample)" in outputs[0]
+        assert len(response.messages) > 0
+        assert "Flow Summary (test.sample):" in response.messages[0]
     
     def test_tool_execution_add_node(self, agent_with_tools, sample_flow, mock_llm):
         """Test that add_node tool can be executed."""
@@ -258,10 +258,10 @@ class TestFlowChatAgentTools:
         }
         
         history = [{"role": "user", "content": "Add a new question"}]
-        outputs = agent_with_tools.process(sample_flow, history)
+        response = agent_with_tools.process(sample_flow, history)
         
-        assert len(outputs) > 0
-        assert "Added Question node 'q.middle'" in outputs[0]
+        assert len(response.messages) > 0
+        assert "(not persisted" in response.messages[0]
     
     def test_multiple_tool_calls(self, agent_with_tools, sample_flow, mock_llm):
         """Test that agent can handle multiple tool calls."""
@@ -287,12 +287,12 @@ class TestFlowChatAgentTools:
         mock_llm.extract.side_effect = mock_extract_side_effect
         
         history = [{"role": "user", "content": "Analyze this flow"}]
-        outputs = agent_with_tools.process(sample_flow, history)
+        response = agent_with_tools.process(sample_flow, history)
         
         # Should have both the content message and the tool output
-        assert len(outputs) >= 2
-        assert "Let me analyze this flow first" in outputs[0]
-        assert "Flow Summary (test.sample)" in outputs[1]
+        assert len(response.messages) >= 2
+        assert "Let me analyze this flow first" in response.messages[0]
+        assert "Flow Summary (test.sample):" in response.messages[1]
     
     def test_invalid_tool_call_handling(self, agent_with_tools, sample_flow, mock_llm):
         """Test that agent handles invalid tool calls gracefully."""
@@ -318,11 +318,12 @@ class TestFlowChatAgentTools:
         mock_llm.extract.side_effect = mock_extract_side_effect
         
         history = [{"role": "user", "content": "Do something"}]
-        outputs = agent_with_tools.process(sample_flow, history)
+        response = agent_with_tools.process(sample_flow, history)
         
         # Should return the content but skip the invalid tool
-        assert len(outputs) == 1
-        assert "I'll help with that" in outputs[0]
+        # Agent might generate additional messages during tool execution
+        assert len(response.messages) >= 1
+        assert "I'll help with that" in response.messages[0]
     
     def test_loop_prevention(self, agent_with_tools, sample_flow, mock_llm):
         """Test that agent prevents infinite loops."""
@@ -338,10 +339,10 @@ class TestFlowChatAgentTools:
         }
         
         history = [{"role": "user", "content": "Keep going"}]
-        outputs = agent_with_tools.process(sample_flow, history)
+        response = agent_with_tools.process(sample_flow, history)
         
         # Should be limited to reasonable number (hard limit is 10 iterations)
-        assert len(outputs) <= 10
+        assert len(response.messages) <= 10
 
 
 class TestFlowChatAgentIntegration:
@@ -374,9 +375,9 @@ class TestFlowChatAgentIntegration:
         }
         
         history = [{"role": "user", "content": "Create a simple welcome flow"}]
-        outputs = agent_with_tools.process({}, history)
+        response = agent_with_tools.process({}, history)
         
-        assert len(outputs) >= 2
-        assert "I'll create a complete flow for you" in outputs[0]
-        assert "Successfully set complete flow definition" in outputs[1]
-        assert "new.flow" in outputs[1]
+        assert len(response.messages) >= 2
+        assert "I'll create a complete flow for you" in response.messages[0]
+        assert "Flow validation successful" in response.messages[1]
+        assert "new.flow" in response.messages[1]

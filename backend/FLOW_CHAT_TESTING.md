@@ -218,3 +218,4 @@ console.log("Auto-refresh triggered:", response.flow_was_modified);
 ```
 
 This testing strategy ensures the flow chat feature works reliably and prevents regressions to the previous brittle pattern matching system.
+
