@@ -11,9 +11,16 @@ import { FlowHistory } from "./FlowHistory";
 interface Props {
   flowId: string;
   onFlowModified?: () => void;
+  simplifiedViewEnabled?: boolean;
+  activePath?: string | null;
 }
 
-export function FlowEditorChat({ flowId, onFlowModified }: Props) {
+export function FlowEditorChat({ 
+  flowId, 
+  onFlowModified, 
+  simplifiedViewEnabled = false, 
+  activePath = null 
+}: Props) {
   const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; text: string; hasError?: boolean }>>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -90,7 +97,10 @@ export function FlowEditorChat({ flowId, onFlowModified }: Props) {
     setIsLoading(true); // Start processing
     
     try {
-      const response: FlowChatResponse = await api.flowChat.send(flowId, text);
+      const response: FlowChatResponse = await api.flowChat.send(flowId, text, {
+        simplified_view_enabled: simplifiedViewEnabled,
+        active_path: activePath
+      });
       const newMessages = response.messages.map((r) => ({ 
         role: r.role as "user" | "assistant", 
         text: r.content 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from typing import Any, Callable, Sequence, NamedTuple
 from uuid import UUID
 
@@ -151,6 +152,10 @@ class FlowChatAgent:
             if not tool_calls:
                 logger.info(f"Agent iteration {iteration+1}: No tool calls, breaking loop")
                 break
+            
+            # CRITICAL: Stop after successful modifications to prevent excessive iterations
+            # The LLM should batch all operations in one response
+            successful_mods = False
                 
             # Filter out redundant validation calls - only allow one validation per session
             if validation_called:
@@ -245,9 +250,11 @@ class FlowChatAgent:
                             # Track successful modifications using structured result
                             if isinstance(tool_output, ToolResult) and tool_output.is_modification:
                                 flow_modified = True
+                                successful_mods = True  # Mark successful modification
                                 modification_details.append(f"{tool_output.action}: - Alterações aplicadas")
                             elif actual_tool_name in modification_tools:  # Legacy for non-ToolResult responses
                                 flow_modified = True
+                                successful_mods = True  # Mark successful modification
                                 node_id = args.get('node_id', '')
                                 edge_info = f"{args.get('source', '')}->{args.get('target', '')}" if args.get('source') and args.get('target') else ''
                                 modification_details.append(f"{actual_tool_name}: {node_id}{edge_info} - Alterações aplicadas")
@@ -317,6 +324,12 @@ class FlowChatAgent:
             # Check if we should complete after this iteration
             if should_complete:
                 logger.info(f"Agent iteration {iteration+1}: Early completion triggered by validation after modifications")
+                break
+            
+            # CRITICAL: Stop after successful modifications to prevent excessive iterations
+            if successful_mods and flow_modified:
+                logger.info(f"Agent iteration {iteration+1}: Successful modifications completed, stopping iterations to prevent excessive tool calls")
+                # Don't add more messages, just stop iterating
                 break
         
         # Create modification summary
@@ -429,7 +442,7 @@ class FlowChatAgent:
             "This example shows how to structure a complex multi-path flow with subgraphs:",
             "",
             "```json",
-            str(self._get_dentist_flow_example()),
+            json.dumps(self._get_dentist_flow_example(), indent=2),
             "```",
             "",
             "### Key Patterns in This Example:",
@@ -580,23 +593,61 @@ class FlowChatAgent:
         ])
         
         # Add frontend context if simplified view is enabled
+        logger = logging.getLogger(__name__)
+        logger.info(f"_build_prompt: simplified_view_enabled={simplified_view_enabled}, active_path='{active_path}'")
+        
         if simplified_view_enabled and active_path:
-            lines.extend([
-                f"## 🎯 IMPORTANT: Frontend View Context",
-                f"- **Simplified view is ENABLED** - User can only see one conversation path",
-                f"- **Active path selected**: '{active_path}'",
-                f"- **Focus ONLY on nodes related to '{active_path}' path**",
-                f"- **Do NOT modify other paths** - user can't see them and didn't ask about them",
-                f"- **When user asks to 'remove/add/modify', they mean within the '{active_path}' context**",
-                "",
-            ])
+            # Find nodes that belong to this specific path
+            try:
+                path_nodes = self._get_path_specific_nodes(flow, active_path)
+                path_node_list = ", ".join(path_nodes) if path_nodes else "none found"
+                logger.info(f"_build_prompt: Adding focused view context for '{active_path}' with nodes: {path_node_list}")
+                
+                lines.extend([
+                    f"## 🎯 CRITICAL: User's Current View Context",
+                    f"- **SIMPLIFIED VIEW ACTIVE** - User can ONLY see the '{active_path}' conversation path",
+                    f"- **Path-specific nodes visible to user**: {path_node_list}",
+                    f"- **GOLDEN RULE: ONLY modify nodes that belong to '{active_path}' path**",
+                    f"- **FORBIDDEN: Do NOT touch nodes from other paths** - user can't see them!",
+                    f"- **When user says 'remove a question', they mean from the '{active_path}' path ONLY**",
+                    f"- **If no relevant nodes found in '{active_path}' path, ask for clarification**",
+                    "",
+                    f"## How to Identify '{active_path}' Path Nodes:",
+                    f"1. Look for nodes whose prompts/content relate to '{active_path.lower()}'",
+                    f"2. Trace edges from decision nodes that route to '{active_path}' scenarios",
+                    f"3. Check node IDs that contain keywords like '{active_path.lower().replace(' ', '_')}'",
+                    f"4. **NEVER modify nodes clearly belonging to other conversation paths**",
+                    "",
+                ])
+            except Exception as e:
+                import traceback
+                logger.error(f"_build_prompt: Failed to get path-specific nodes for '{active_path}': {e}")
+                logger.error(f"_build_prompt: Full traceback: {traceback.format_exc()}")
+                logger.error(f"_build_prompt: Flow structure - nodes type: {type(flow.get('nodes', {}))}, edges_from type: {type(flow.get('edges_from', {}))}")
+                if 'edges_from' in flow and flow['edges_from']:
+                    first_key = next(iter(flow['edges_from']))
+                    first_edges = flow['edges_from'][first_key]
+                    logger.error(f"_build_prompt: Sample edge structure: {type(first_edges)} = {first_edges[:1] if first_edges else []}")
+                
+                # Fallback to no path filtering
+                logger.info(f"_build_prompt: Falling back to full flow view due to error")
+                lines.extend([
+                    f"## ⚠️ IMPORTANT: Frontend View Context (Error in path detection)",
+                    f"- **User is viewing simplified view for '{active_path}' but path detection failed**",
+                    f"- **Please be extra careful to only modify nodes related to '{active_path}'**",
+                    f"- **When user asks to remove/modify, focus on '{active_path}' related content only**",
+                    "",
+                ])
         elif simplified_view_enabled:
+            logger.info(f"_build_prompt: Simplified view enabled but no active_path provided")
             lines.extend([
                 f"## 🎯 IMPORTANT: Frontend View Context", 
                 f"- **Simplified view is ENABLED** but no specific path selected",
                 f"- **Ask user to specify which path they're referring to** if their request is ambiguous",
                 "",
             ])
+        else:
+            logger.info(f"_build_prompt: No simplified view context added - using full flow view")
         
         # Conversation history
         if history:
@@ -608,6 +659,228 @@ class FlowChatAgent:
         lines.append("How can I help you modify or create your flow?")
         
         return "\n".join(lines)
+    
+    def _get_path_specific_nodes(self, flow: dict[str, Any], active_path: str) -> list[str]:
+        """Use the same algorithm as frontend to find nodes for a specific path."""
+        logger = logging.getLogger(__name__)
+        
+        if not flow or not active_path:
+            return []
+        
+        # Replicate frontend's computePath algorithm exactly
+        nodes_dict = flow.get('nodes', {})
+        edges_from = flow.get('edges_from', {})
+        entry = flow.get('entry')
+        
+        if not entry:
+            logger.info(f"_get_path_specific_nodes: No entry node found in flow")
+            return []
+        
+        # Step 1: Find first decision node (same as frontend's findFirstBranchDecision)
+        first_decision = self._find_first_branch_decision(flow)
+        if not first_decision:
+            logger.info(f"_get_path_specific_nodes: No branching decision found, using keyword fallback")
+            # FALLBACK: Just find nodes that match the path keywords
+            return self._fallback_path_detection(flow, active_path)
+        
+        # Step 2: Find which outgoing edge matches the active_path
+        outgoing = self._sorted_outgoing(flow, first_decision)
+        target_edge = None
+        
+        logger.info(f"_get_path_specific_nodes: Checking {len(outgoing)} outgoing edges from decision {first_decision}")
+        logger.info(f"_get_path_specific_nodes: First edge structure: {outgoing[0] if outgoing else 'None'}")
+        
+        for i, edge in enumerate(outgoing):
+            # Handle both dict and list edge formats
+            if isinstance(edge, dict):
+                condition_desc = edge.get('condition_description', '')
+                label = edge.get('label', '')
+                target = edge.get('target')
+            elif isinstance(edge, list) and len(edge) >= 2:
+                # Assume [source, target, label, condition_desc] or similar format
+                target = edge[1] if len(edge) > 1 else ''
+                label = edge[2] if len(edge) > 2 else ''
+                condition_desc = edge[3] if len(edge) > 3 else ''
+            else:
+                logger.warning(f"_get_path_specific_nodes: Unknown edge format: {edge}")
+                continue
+                
+            logger.info(f"_get_path_specific_nodes: Edge {i}: target={target}, label='{label}', condition='{condition_desc}'")
+            
+            # Check if this edge matches the active path
+            if (active_path.lower() in condition_desc.lower() or 
+                active_path.lower() in label.lower() or
+                condition_desc.lower() in active_path.lower() or
+                label.lower() in active_path.lower()):
+                target_edge = {'target': target, 'label': label, 'condition_description': condition_desc}
+                logger.info(f"_get_path_specific_nodes: Found matching edge for path '{active_path}': {target_edge}")
+                break
+        
+        if not target_edge:
+            logger.info(f"_get_path_specific_nodes: No edge found matching path '{active_path}'")
+            return []
+        
+        # Step 3: Create branch selection (same as frontend)
+        target_node_id = target_edge['target']  # We created this as a dict above
+        branch_selection = {first_decision: target_node_id}
+        
+        logger.info(f"_get_path_specific_nodes: Created branch selection: {branch_selection}")
+        
+        # Step 4: Run computePath algorithm (exact copy of frontend logic)
+        path_nodes = self._compute_path(flow, branch_selection)
+        
+        logger.info(f"_get_path_specific_nodes: Found {len(path_nodes)} nodes for path '{active_path}': {path_nodes}")
+        return path_nodes
+    
+    def _find_first_branch_decision(self, flow: dict[str, Any]) -> str | None:
+        """Find first decision node with multiple outgoing edges (copy of frontend logic)."""
+        logger = logging.getLogger(__name__)
+        
+        entry = flow.get('entry')
+        if not entry:
+            return None
+        
+        queue = [entry]
+        visited = set()
+        
+        # Handle both list and dict formats for nodes
+        nodes_data = flow.get('nodes', [])
+        if isinstance(nodes_data, list):
+            # Convert list to dict for easier lookup
+            nodes_dict = {node.get('id'): node for node in nodes_data if node.get('id')}
+            logger.info(f"_find_first_branch_decision: Converted {len(nodes_data)} nodes from list to dict format")
+        else:
+            nodes_dict = nodes_data
+        
+        while queue:
+            current = queue.pop(0)
+            if current in visited:
+                continue
+            visited.add(current)
+            
+            node = nodes_dict.get(current)
+            if not node:
+                continue
+                
+            outgoing = flow.get('edges_from', {}).get(current, [])
+            if node.get('kind') == 'Decision' and len(outgoing) > 1:
+                return current
+                
+            # Add targets to queue
+            for edge in outgoing:
+                if isinstance(edge, dict):
+                    target = edge.get('target')
+                elif isinstance(edge, list) and len(edge) > 1:
+                    target = edge[1]
+                else:
+                    target = None
+                    
+                if target:
+                    queue.append(target)
+        
+        return None
+    
+    def _sorted_outgoing(self, flow: dict[str, Any], node_id: str) -> list[dict]:
+        """Get outgoing edges sorted by order (copy of frontend logic)."""
+        edges = flow.get('edges_from', {}).get(node_id, [])
+        # Handle both dict and list edge formats for sorting
+        def get_order(e):
+            if isinstance(e, dict):
+                return e.get('order', 0)
+            elif isinstance(e, list) and len(e) > 4:
+                # Assume order might be at index 4 or later, default to 0
+                return e[4] if len(e) > 4 and isinstance(e[4], (int, float)) else 0
+            else:
+                return 0
+        
+        return sorted(edges, key=get_order)
+    
+    def _compute_path(self, flow: dict[str, Any], branch_selection: dict[str, str], max_steps: int = 200) -> list[str]:
+        """Exact copy of frontend's computePath algorithm."""
+        nodes = []
+        current = flow.get('entry')
+        steps = 0
+        visited = set()
+        
+        # Handle both list and dict formats for nodes
+        nodes_data = flow.get('nodes', [])
+        if isinstance(nodes_data, list):
+            # Convert list to dict for easier lookup
+            nodes_dict = {node.get('id'): node for node in nodes_data if node.get('id')}
+        else:
+            nodes_dict = nodes_data
+        
+        while current and steps < max_steps:
+            nodes.append(current)
+            visited.add(current)
+            
+            outgoing = self._sorted_outgoing(flow, current)
+            if not outgoing:
+                break
+                
+            chosen = None
+            node = nodes_dict.get(current, {})
+            
+            if node.get('kind') == 'Decision' and len(outgoing) > 1:
+                # Decision node - use branch selection
+                preferred_target = branch_selection.get(current)
+                chosen = None
+                for e in outgoing:
+                    e_target = e.get('target') if isinstance(e, dict) else (e[1] if isinstance(e, list) and len(e) > 1 else '')
+                    if e_target == preferred_target:
+                        chosen = e
+                        break
+                if not chosen:
+                    chosen = outgoing[0]
+            else:
+                # Linear path - take first edge
+                chosen = outgoing[0]
+            
+            if not chosen:
+                break
+                
+            # Extract target from chosen edge (handle both dict and list formats)
+            if isinstance(chosen, dict):
+                current = chosen.get('target')
+            elif isinstance(chosen, list) and len(chosen) > 1:
+                current = chosen[1]
+            else:
+                break
+            steps += 1
+            
+            # Guard against cycles
+            if current in visited and steps > 2:
+                break
+        
+        return nodes
+    
+    def _fallback_path_detection(self, flow: dict[str, Any], active_path: str) -> list[str]:
+        """Fallback method to find path nodes when there's no clear branching decision."""
+        logger = logging.getLogger(__name__)
+        
+        # Extract keywords from the active path
+        keywords = active_path.lower().replace('/', ' ').split()
+        path_nodes = []
+        
+        # Handle both list and dict formats for nodes
+        nodes_data = flow.get('nodes', [])
+        if isinstance(nodes_data, list):
+            for node in nodes_data:
+                node_id = node.get('id', '').lower()
+                node_prompt = node.get('prompt', '').lower()
+                node_label = node.get('label', '').lower()
+                
+                # Check if any keyword matches
+                for keyword in keywords:
+                    if (keyword in node_id or 
+                        keyword in node_prompt or 
+                        keyword in node_label):
+                        path_nodes.append(node.get('id'))
+                        break
+        
+        logger.info(f"_fallback_path_detection: Found {len(path_nodes)} nodes with keywords from '{active_path}'")
+        return path_nodes
+
     
     def _build_final_message_prompt(self, messages: list[dict[str, str]]) -> str:
         """Build prompt for generating final user-friendly message after tool execution."""

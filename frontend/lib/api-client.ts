@@ -298,10 +298,21 @@ export const api = {
   },
 
   flowChat: {
-    send: (flowId: string, content: string): Promise<FlowChatResponse> =>
+    send: (
+      flowId: string, 
+      content: string,
+      options?: {
+        simplified_view_enabled?: boolean;
+        active_path?: string | null;
+      }
+    ): Promise<FlowChatResponse> =>
       apiRequest(`/flows/${flowId}/chat/send`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ 
+          content,
+          simplified_view_enabled: options?.simplified_view_enabled || false,
+          active_path: options?.active_path || null
+        }),
       }),
 
     list: (flowId: string): Promise<FlowChatMessage[]> =>

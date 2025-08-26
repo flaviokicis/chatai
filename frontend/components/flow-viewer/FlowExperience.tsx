@@ -6,7 +6,7 @@ import { JourneyPreview, type JourneyStep } from "./JourneyPreview";
 import { ReactFlowViewer } from "./ReactFlowViewer";
 import { pickLabel, sortedOutgoing } from "./helpers";
 
-type BranchOption = { targetId: string; label: string };
+export type BranchOption = { targetId: string; label: string };
 
 function findFirstBranchDecision(flow: CompiledFlow): string | null {
   const queue: string[] = [flow.entry];
@@ -63,28 +63,25 @@ function stepsFromNodes(flow: CompiledFlow, nodeIds: string[]): JourneyStep[] {
     }));
 }
 
-export function FlowExperience({ flow }: { flow: CompiledFlow }) {
+interface FlowExperienceProps {
+  flow: CompiledFlow;
+  showOnlyCurrentPath: boolean;
+  setShowOnlyCurrentPath: (value: boolean) => void;
+  selection: Record<string, string>;
+  setSelection: (value: Record<string, string>) => void;
+  branchOptions: BranchOption[];
+}
+
+export function FlowExperience({ 
+  flow, 
+  showOnlyCurrentPath, 
+  setShowOnlyCurrentPath, 
+  selection, 
+  setSelection,
+  branchOptions 
+}: FlowExperienceProps) {
   const firstDecision = useMemo(() => findFirstBranchDecision(flow), [flow]);
-  const branchOptions: BranchOption[] = useMemo(() => {
-    if (!firstDecision) return [];
-    const outs = sortedOutgoing(flow, firstDecision);
-    return outs.map((e) => ({ targetId: e.target, label: pickLabel(e, flow.nodes) }));
-  }, [firstDecision, flow]);
-
-  const [selection, setSelection] = useState<Record<string, string>>(() => {
-    if (!firstDecision || branchOptions.length === 0) return {};
-    return { [firstDecision]: branchOptions[0].targetId };
-  });
-  
-  const [showOnlyCurrentPath, setShowOnlyCurrentPath] = useState(true);
   const [showSidebar, setShowSidebar] = useState(true);
-
-  useEffect(() => {
-    if (!firstDecision) return;
-    if (!selection[firstDecision] && branchOptions[0]) {
-      setSelection({ [firstDecision]: branchOptions[0].targetId });
-    }
-  }, [firstDecision, branchOptions, selection]);
 
   const pathNodes = useMemo(() => computePath(flow, selection), [flow, selection]);
 

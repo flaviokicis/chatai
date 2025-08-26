@@ -97,6 +97,7 @@ async def send_message(
     
     try:
         logger.info(f"Processing chat message for flow {flow_id}: '{req.content}'")
+        logger.info(f"Frontend context - simplified_view_enabled: {req.simplified_view_enabled}, active_path: {req.active_path}")
         
         service = FlowChatService(session, agent=_build_agent(ctx.llm))
         

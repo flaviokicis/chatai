@@ -7,9 +7,16 @@ import { FlowEditorChat } from "./FlowEditorChat";
 interface Props {
   flowId: string;
   onFlowModified?: () => void;
+  simplifiedViewEnabled?: boolean;
+  activePath?: string | null;
 }
 
-export function CollapsibleFlowChat({ flowId, onFlowModified }: Props) {
+export function CollapsibleFlowChat({ 
+  flowId, 
+  onFlowModified, 
+  simplifiedViewEnabled = false, 
+  activePath = null 
+}: Props) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const toggleChat = () => {
@@ -31,6 +38,8 @@ export function CollapsibleFlowChat({ flowId, onFlowModified }: Props) {
             <FlowEditorChat 
               flowId={flowId} 
               onFlowModified={onFlowModified} 
+              simplifiedViewEnabled={simplifiedViewEnabled}
+              activePath={activePath}
             />
           </div>
         )}

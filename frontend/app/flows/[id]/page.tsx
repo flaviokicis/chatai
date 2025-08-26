@@ -2,29 +2,82 @@
 
 import { SubflowSection } from "@/components/flow-viewer/SubflowSection";
 import type { CompiledFlow } from "@/components/flow-viewer/types";
-import { FlowExperience } from "@/components/flow-viewer/FlowExperience";
+import { FlowExperience, type BranchOption } from "@/components/flow-viewer/FlowExperience";
 import { CollapsibleFlowChat } from "@/components/flow-viewer/CollapsibleFlowChat";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
+
+// Helper functions from FlowExperience
+function findFirstBranchDecision(flow: CompiledFlow): string | null {
+  const queue = [flow.entry];
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current) continue;
+    const node = flow.nodes[current];
+    const outs = flow.edges_from[current] || [];
+    if (node?.kind === "Decision" && outs.length > 1) return current;
+    outs.forEach((e) => queue.push(e.target));
+  }
+  return null;
+}
+
+function sortedOutgoing(flow: CompiledFlow, nodeId: string) {
+  const edges = flow.edges_from[nodeId] || [];
+  return [...edges].sort((a, b) => ((a as any).order || 0) - ((b as any).order || 0));
+}
+
+function pickLabel(edge: any, nodes: any) {
+  return edge.condition_description || edge.label || `Para ${nodes[edge.target]?.label || edge.target}`;
+}
 
 export default function FlowDetailPage() {
   const params = useParams<{ id: string }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id;
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const { data: flow, isLoading, isError, refetch } = useQuery<CompiledFlow>({
+  // Simplified view state (moved from FlowExperience)
+  const [showOnlyCurrentPath, setShowOnlyCurrentPath] = useState(true);
+  const [selection, setSelection] = useState<Record<string, string>>({});
+
+    const { data: flow, isLoading, isError, refetch } = useQuery({
     queryKey: ["compiledFlow", id],
-    queryFn: () => api.flows.getCompiled(id),
+    queryFn: async () => {
+      const result = await api.flows.getCompiled(id);
+      return result as unknown as CompiledFlow;
+    },
     staleTime: 1000 * 60 * 5, // Shorter stale time for more frequent updates
     refetchOnWindowFocus: false, // Prevent unnecessary refetches
     refetchOnMount: true, // Always refetch when component mounts
   });
 
-  const handleFlowModified = async () => {
+  // Compute simplified view values (moved from FlowExperience)
+  const firstDecision = useMemo(() => flow ? findFirstBranchDecision(flow as unknown as CompiledFlow) : null, [flow]);
+  const branchOptions: BranchOption[] = useMemo(() => {
+    if (!firstDecision || !flow) return [];
+    const outs = sortedOutgoing(flow as unknown as CompiledFlow, firstDecision);
+    return outs.map((e) => ({ targetId: e.target, label: pickLabel(e, (flow as unknown as CompiledFlow).nodes) }));
+  }, [firstDecision, flow]);
+
+  // Initialize selection when flow loads
+  useEffect(() => {
+    if (!firstDecision || !flow) return;
+    if (!selection[firstDecision] && branchOptions[0]) {
+      setSelection({ [firstDecision]: branchOptions[0].targetId });
+    }
+  }, [firstDecision, branchOptions, selection, flow]);
+
+  // Get current active path info for chat context
+  const currentPathLabel = useMemo(() => {
+    if (!firstDecision || !selection[firstDecision] || !branchOptions.length) return null;
+    const selectedOption = branchOptions.find(opt => opt.targetId === selection[firstDecision]);
+    return selectedOption?.label || null;
+  }, [firstDecision, selection, branchOptions]);
+
+const handleFlowModified = async () => {
     console.log("🔄 Flow modification detected, refreshing...");
     setIsRefreshing(true);
     try {
@@ -50,7 +103,7 @@ export default function FlowDetailPage() {
         <div className="flex items-baseline justify-between max-w-7xl mx-auto">
           <h1 className="text-2xl font-semibold tracking-tight">Visualização do Fluxo</h1>
           {flow ? (
-            <div className="text-xs text-muted-foreground">ID: {flow.id}</div>
+            <div className="text-xs text-muted-foreground">ID: {(flow as unknown as CompiledFlow).id}</div>
           ) : null}
         </div>
 
@@ -75,12 +128,19 @@ export default function FlowDetailPage() {
               )}
               <div className="flex justify-center">
                 <div className="w-full max-w-6xl">
-                  <FlowExperience flow={flow} />
+                  <FlowExperience 
+                    flow={flow as unknown as CompiledFlow} 
+                    showOnlyCurrentPath={showOnlyCurrentPath}
+                    setShowOnlyCurrentPath={setShowOnlyCurrentPath}
+                    selection={selection}
+                    setSelection={setSelection}
+                    branchOptions={branchOptions}
+                  />
                 </div>
               </div>
             </div>
             <div className="max-w-7xl mx-auto">
-              <SubflowSection subflows={flow.subflows} />
+              <SubflowSection subflows={(flow as unknown as CompiledFlow).subflows} />
             </div>
           </>
         )}
@@ -91,6 +151,8 @@ export default function FlowDetailPage() {
         <CollapsibleFlowChat 
           flowId={id} 
           onFlowModified={handleFlowModified}
+          simplifiedViewEnabled={showOnlyCurrentPath}
+          activePath={currentPathLabel}
         />
       )}
     </div>
