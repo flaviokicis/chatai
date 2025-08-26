@@ -38,7 +38,13 @@ class FlowChatService:
     def get_latest_assistant(self, flow_id: UUID) -> FlowChatMessage | None:
         return get_latest_assistant_message(self.session, flow_id)
 
-    def send_user_message(self, flow_id: UUID, content: str) -> FlowChatServiceResponse:
+    async def send_user_message(
+        self, 
+        flow_id: UUID, 
+        content: str, 
+        simplified_view_enabled: bool = False,
+        active_path: str | None = None
+    ) -> FlowChatServiceResponse:
         logger = logging.getLogger(__name__)
         
         if not self.agent:
@@ -67,7 +73,14 @@ class FlowChatService:
             # Process with agent (pass flow_id and session for persistence)
             try:
                 logger.info(f"Calling agent.process for flow {flow_id} with {len(history_dicts)} messages")
-                agent_response = self.agent.process(flow_def, history_dicts, flow_id=flow_id, session=self.session)
+                agent_response = await self.agent.process(
+                    flow_def, 
+                    history_dicts, 
+                    flow_id=flow_id, 
+                    session=self.session,
+                    simplified_view_enabled=simplified_view_enabled,
+                    active_path=active_path
+                )
                 logger.info(f"Agent returned {len(agent_response.messages)} messages, flow_modified={agent_response.flow_was_modified}")
                 if agent_response.flow_was_modified:
                     logger.info(f"Flow modifications: {agent_response.modification_summary}")

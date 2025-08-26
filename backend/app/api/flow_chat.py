@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -25,6 +26,9 @@ router = APIRouter(prefix="/flows/{flow_id}/chat", tags=["flow_chat"])
 
 class SendMessageRequest(BaseModel):
     content: str
+    # Frontend context for simplified view
+    simplified_view_enabled: bool = False
+    active_path: str | None = None  # e.g., "Campo de futebol", "Ginásio/Quadra"
 
 
 class ChatMessageResponse(BaseModel):
@@ -73,7 +77,7 @@ def _build_agent(llm: LLMClient) -> FlowChatAgent:
 
 
 @router.post("/send", response_model=FlowChatResponse)
-def send_message(
+async def send_message(
     request: Request,
     flow_id: UUID = Path(...),
     req: SendMessageRequest | None = None,
@@ -95,7 +99,21 @@ def send_message(
         logger.info(f"Processing chat message for flow {flow_id}: '{req.content}'")
         
         service = FlowChatService(session, agent=_build_agent(ctx.llm))
-        service_response = service.send_user_message(flow_id, req.content)
+        
+        # Add timeout to prevent hanging (5 minutes max for chat requests)
+        try:
+            service_response = await asyncio.wait_for(
+                service.send_user_message(
+                    flow_id, 
+                    req.content,
+                    simplified_view_enabled=req.simplified_view_enabled,
+                    active_path=req.active_path
+                ),
+                timeout=300.0  # 5 minutes
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Chat request timed out for flow {flow_id}")
+            raise HTTPException(status_code=408, detail="Request timed out - please try again")
         
         logger.info(f"Generated {len(service_response.messages)} response messages for flow {flow_id}")
         logger.info(f"Flow was modified: {service_response.flow_was_modified}")
@@ -128,7 +146,7 @@ def send_message(
 
 
 @router.get("/messages", response_model=list[ChatMessageResponse])
-def list_messages(
+async def list_messages(
     flow_id: UUID = Path(...), session: Session = Depends(get_db_session)
 ) -> list[ChatMessageResponse]:
     service = FlowChatService(session)
@@ -142,7 +160,7 @@ def list_messages(
 
 
 @router.get("/receive", response_model=ChatMessageResponse | None)
-def receive_latest(
+async def receive_latest(
     flow_id: UUID = Path(...), session: Session = Depends(get_db_session)
 ) -> ChatMessageResponse | None:
     service = FlowChatService(session)
@@ -155,7 +173,7 @@ def receive_latest(
 
 
 @router.post("/clear")
-def clear_chat_messages(
+async def clear_chat_messages(
     flow_id: UUID = Path(...), session: Session = Depends(get_db_session)
 ) -> dict:
     """Clear all chat messages for a flow by setting cleared_at timestamp."""

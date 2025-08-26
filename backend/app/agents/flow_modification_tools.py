@@ -17,16 +17,37 @@ from app.flow_core.ir import Flow as FlowIR
 logger = logging.getLogger(__name__)
 
 
+class ToolResult(BaseModel):
+    """Structured result from tool execution."""
+    
+    success: bool = Field(description="Whether the tool executed successfully")
+    action: str = Field(description="The action performed (add_node, validate_flow, etc.)")
+    message: str = Field(description="Human-readable message about the result")
+    is_modification: bool = Field(default=False, description="Whether this was a flow modification")
+    is_validation: bool = Field(default=False, description="Whether this was a validation/summary operation")
+    should_continue: bool = Field(default=True, description="Whether the agent should continue with more iterations")
+    
+    def __str__(self) -> str:
+        """Return the message for backward compatibility."""
+        return self.message
+
+
 class SetEntireFlowRequest(BaseModel):
     """Request to replace the entire flow definition."""
     
     flow_definition: Dict[str, Any] = Field(
         description="Complete flow definition JSON that will replace the current flow"
     )
-    user_message: str | None = Field(
-        default=None,
-        description="Optional message to show the user on success (in their language)"
-    )
+
+
+class ValidateFlowRequest(BaseModel):
+    """Request to validate the current flow definition."""
+    pass
+
+
+class GetFlowSummaryRequest(BaseModel):
+    """Request to get a summary of the current flow."""
+    pass
 
 
 class AddNodeRequest(BaseModel):
@@ -39,10 +60,6 @@ class AddNodeRequest(BaseModel):
         default=None, 
         description="ID of the node after which to insert this node (optional)"
     )
-    user_message: str | None = Field(
-        default=None,
-        description="Optional message to show the user on success (in their language)"
-    )
 
 
 class UpdateNodeRequest(BaseModel):
@@ -50,12 +67,7 @@ class UpdateNodeRequest(BaseModel):
     
     node_id: str = Field(description="ID of the node to update")
     updates: Dict[str, Any] = Field(
-        description="Fields to update in the node (e.g., prompt, allowed_values). REQUIRED - cannot be empty.", 
-        # Remove default_factory to make this required
-    )
-    user_message: str | None = Field(
-        default=None,
-        description="Optional message to show the user on success (in their language)"
+        description="Fields to update in the node (e.g., prompt, allowed_values). REQUIRED - cannot be empty."
     )
 
 
@@ -63,10 +75,6 @@ class DeleteNodeRequest(BaseModel):
     """Request to delete a node from the flow."""
     
     node_id: str = Field(description="ID of the node to delete")
-    user_message: str | None = Field(
-        default=None,
-        description="Optional message to show the user on success (in their language)"
-    )
 
 
 class AddEdgeRequest(BaseModel):
@@ -77,10 +85,6 @@ class AddEdgeRequest(BaseModel):
     priority: int = Field(default=0, description="Edge priority (lower = higher precedence)")
     guard: Dict[str, Any] | None = Field(default=None, description="Optional guard condition")
     condition_description: str | None = Field(default=None, description="Human-readable condition explanation")
-    user_message: str | None = Field(
-        default=None,
-        description="Optional message to show the user on success (in their language)"
-    )
 
 
 class UpdateEdgeRequest(BaseModel):
@@ -89,12 +93,7 @@ class UpdateEdgeRequest(BaseModel):
     source: str = Field(description="Source node ID of the edge to update")
     target: str = Field(description="Target node ID of the edge to update") 
     updates: Dict[str, Any] = Field(
-        description="Fields to update in the edge (e.g., priority, guard, condition_description). REQUIRED - cannot be empty.",
-        # Remove default_factory to make this required
-    )
-    user_message: str | None = Field(
-        default=None,
-        description="Optional message to show the user on success (in their language)"
+        description="Fields to update in the edge (e.g., priority, guard, condition_description). REQUIRED - cannot be empty."
     )
 
 
@@ -103,13 +102,9 @@ class DeleteEdgeRequest(BaseModel):
     
     source: str = Field(description="Source node ID of the edge to delete")
     target: str = Field(description="Target node ID of the edge to delete")
-    user_message: str | None = Field(
-        default=None,
-        description="Optional message to show the user on success (in their language)"
-    )
 
 
-def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
+def set_entire_flow(flow_definition: Dict[str, Any], flow_id: UUID | None = None, session: Session | None = None) -> ToolResult:
     """Replace the entire flow definition with a new one.
     
     This is the primary tool for setting complete flows from scratch,
@@ -128,23 +123,38 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
             
             if hasattr(compiled, 'validation_errors') and compiled.validation_errors:
                 logger.error(f"set_entire_flow: Validation failed: {compiled.validation_errors}")
-                return f"Flow validation failed: {'; '.join(compiled.validation_errors)}"
+                return ToolResult(
+                    success=False,
+                    action="set_entire_flow",
+                    message=f"Flow validation failed: {'; '.join(compiled.validation_errors)}",
+                    is_modification=False
+                )
             elif hasattr(compiled, 'errors') and compiled.errors:
                 logger.error(f"set_entire_flow: Compilation failed: {compiled.errors}")
-                return f"Flow validation failed: {'; '.join(compiled.errors)}"
+                return ToolResult(
+                    success=False,
+                    action="set_entire_flow", 
+                    message=f"Flow validation failed: {'; '.join(compiled.errors)}",
+                    is_modification=False
+                )
             
             node_count = len(flow_definition.get('nodes', []))
             edge_count = len(flow_definition.get('edges', []))
             entry_point = flow_definition.get('entry', 'unknown')
             
             logger.info(f"set_entire_flow: Validation-only mode successful ({node_count} nodes, {edge_count} edges)")
-            return (
-                f"Flow validation successful (not persisted):\n"
-                f"- Entry point: {entry_point}\n"
-                f"- Nodes: {node_count}\n" 
-                f"- Edges: {edge_count}\n"
-                f"- Flow ID: {flow_definition.get('id', 'unknown')}\n"
-                f"Note: Changes not saved - persistence requires database connection."
+            return ToolResult(
+                success=True,
+                action="set_entire_flow",
+                message=(
+                    f"Flow validation successful (not persisted):\n"
+                    f"- Entry point: {entry_point}\n"
+                    f"- Nodes: {node_count}\n" 
+                    f"- Edges: {edge_count}\n"
+                    f"- Flow ID: {flow_definition.get('id', 'unknown')}\n"
+                    f"Note: Changes not saved - persistence requires database connection."
+                ),
+                is_modification=False
             )
         
         logger.info(f"set_entire_flow: Validating flow definition with {len(flow_definition.get('nodes', []))} nodes")
@@ -156,10 +166,20 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
         
         if hasattr(compiled, 'validation_errors') and compiled.validation_errors:
             logger.error(f"set_entire_flow: Flow validation failed: {compiled.validation_errors}")
-            return f"Flow validation failed: {'; '.join(compiled.validation_errors)}"
+            return ToolResult(
+                success=False,
+                action="set_entire_flow",
+                message=f"Flow validation failed: {'; '.join(compiled.validation_errors)}",
+                is_modification=False
+            )
         elif hasattr(compiled, 'errors') and compiled.errors:
             logger.error(f"set_entire_flow: Flow compilation failed: {compiled.errors}")
-            return f"Flow validation failed: {'; '.join(compiled.errors)}"
+            return ToolResult(
+                success=False,
+                action="set_entire_flow",
+                message=f"Flow validation failed: {'; '.join(compiled.errors)}",
+                is_modification=False
+            )
         
         logger.info(f"set_entire_flow: Flow validation successful, persisting to database")
         
@@ -181,7 +201,12 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
         
         if not updated_flow:
             logger.error(f"set_entire_flow: repository.update_flow_with_versioning returned None - flow {flow_id} not found")
-            return f"Failed to persist flow definition: Flow {flow_id} not found"
+            return ToolResult(
+                success=False,
+                action="set_entire_flow",
+                message=f"Failed to persist flow definition: Flow {flow_id} not found",
+                is_modification=True
+            )
         
         logger.info(f"set_entire_flow: Successfully updated flow {flow_id} in session, new version: {updated_flow.version}")
         logger.info(f"set_entire_flow: Flow will be committed by the service layer")
@@ -193,17 +218,28 @@ def set_entire_flow(flow_definition: Dict[str, Any], user_message: str | None = 
         
         logger.info("Successfully updated flow %s with %d nodes and %d edges", flow_id, node_count, edge_count)
         
-        # Use custom user message if provided, otherwise use default
-        success_msg = user_message if user_message else f"✅ Fluxo atualizado com sucesso! ({node_count} perguntas, {edge_count} conexões)"
+        # Return structured success result
+        success_msg = f"✅ Fluxo atualizado com sucesso! ({node_count} perguntas, {edge_count} conexões)"
         logger.info(f"set_entire_flow: Returning success message: {success_msg}")
-        return success_msg
+        return ToolResult(
+            success=True,
+            action="set_entire_flow",
+            message=success_msg,
+            is_modification=True,
+            should_continue=False  # Complete flow replacement usually means we're done
+        )
         
     except Exception as e:
         logger.error("Failed to set flow definition for flow %s: %s", flow_id, str(e), exc_info=True)
-        return f"Failed to set flow definition: {str(e)}"
+        return ToolResult(
+            success=False,
+            action="set_entire_flow",
+            message=f"Failed to set flow definition: {str(e)}",
+            is_modification=False
+        )
 
 
-def add_node(flow_definition: Dict[str, Any], node_definition: Dict[str, Any], position_after: str | None = None, user_message: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
+def add_node(flow_definition: Dict[str, Any], node_definition: Dict[str, Any], position_after: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
     """Add a new node to the flow."""
     try:
         node_id = node_definition.get('id')
@@ -225,9 +261,9 @@ def add_node(flow_definition: Dict[str, Any], node_definition: Dict[str, Any], p
         
         # Persist the updated flow
         if flow_id and session:
-            result = set_entire_flow(flow_definition, None, flow_id, session)
+            result = set_entire_flow(flow_definition, flow_id, session)
             if "✅" in result:
-                return user_message or f"Added {node_kind} node '{node_id}'"
+                return f"Added {node_kind} node '{node_id}'"
             return result
         
         return f"Added {node_kind} node '{node_id}' (not persisted - missing flow_id/session)"
@@ -237,7 +273,7 @@ def add_node(flow_definition: Dict[str, Any], node_definition: Dict[str, Any], p
         return f"Failed to add node: {str(e)}"
 
 
-def update_node(flow_definition: Dict[str, Any], node_id: str, updates: Dict[str, Any], user_message: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
+def update_node(flow_definition: Dict[str, Any], node_id: str, updates: Dict[str, Any], flow_id: UUID | None = None, session: Session | None = None) -> str:
     """Update an existing node in the flow."""
     try:
         logger.info(f"update_node called: node_id={node_id}, updates={updates}, flow_id={flow_id}, session={'present' if session else 'None'}")
@@ -275,11 +311,11 @@ def update_node(flow_definition: Dict[str, Any], node_id: str, updates: Dict[str
         # Persist the updated flow
         if flow_id and session:
             logger.info(f"update_node: Persisting changes via set_entire_flow for flow {flow_id}")
-            result = set_entire_flow(flow_definition, None, flow_id, session)
+            result = set_entire_flow(flow_definition, flow_id, session)
             logger.info(f"update_node: set_entire_flow returned: {result}")
             
             if "✅" in result:
-                success_msg = user_message or f"Updated node '{node_id}': {', '.join(updates.keys())}"
+                success_msg = f"Updated node '{node_id}': {', '.join(updates.keys())}"
                 logger.info(f"update_node: SUCCESS - {success_msg}")
                 return success_msg
             else:
@@ -294,7 +330,7 @@ def update_node(flow_definition: Dict[str, Any], node_id: str, updates: Dict[str
         return f"Failed to update node '{node_id}': {str(e)}"
 
 
-def delete_node(flow_definition: Dict[str, Any], node_id: str, user_message: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
+def delete_node(flow_definition: Dict[str, Any], node_id: str, flow_id: UUID | None = None, session: Session | None = None) -> str:
     """Delete a node from the flow."""
     try:
         nodes = flow_definition.get('nodes', [])
@@ -315,9 +351,9 @@ def delete_node(flow_definition: Dict[str, Any], node_id: str, user_message: str
         
         # Persist the updated flow
         if flow_id and session:
-            result = set_entire_flow(flow_definition, None, flow_id, session)
+            result = set_entire_flow(flow_definition, flow_id, session)
             if "✅" in result:
-                return user_message or f"Deleted node '{node_id}' and all connected edges"
+                return f"Deleted node '{node_id}' and all connected edges"
             return result
             
         return f"Deleted node '{node_id}' (not persisted - missing flow_id/session)"
@@ -327,7 +363,7 @@ def delete_node(flow_definition: Dict[str, Any], node_id: str, user_message: str
         return f"Failed to delete node '{node_id}': {str(e)}"
 
 
-def add_edge(flow_definition: Dict[str, Any], source: str, target: str, priority: int = 0, guard: Dict[str, Any] | None = None, condition_description: str | None = None, user_message: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
+def add_edge(flow_definition: Dict[str, Any], source: str, target: str, priority: int = 0, guard: Dict[str, Any] | None = None, condition_description: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
     """Add a new edge to the flow."""
     try:
         edges = flow_definition.get('edges', [])
@@ -347,9 +383,9 @@ def add_edge(flow_definition: Dict[str, Any], source: str, target: str, priority
         
         # Persist the updated flow
         if flow_id and session:
-            result = set_entire_flow(flow_definition, None, flow_id, session)
+            result = set_entire_flow(flow_definition, flow_id, session)
             if "✅" in result:
-                return user_message or f"Added edge from '{source}' to '{target}'"
+                return f"Added edge from '{source}' to '{target}'"
             return result
             
         return f"Added edge from '{source}' to '{target}' (not persisted - missing flow_id/session)"
@@ -359,7 +395,7 @@ def add_edge(flow_definition: Dict[str, Any], source: str, target: str, priority
         return f"Failed to add edge from '{source}' to '{target}': {str(e)}"
 
 
-def update_edge(flow_definition: Dict[str, Any], source: str, target: str, updates: Dict[str, Any], user_message: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
+def update_edge(flow_definition: Dict[str, Any], source: str, target: str, updates: Dict[str, Any], flow_id: UUID | None = None, session: Session | None = None) -> str:
     """Update an existing edge in the flow."""
     try:
         if not updates:
@@ -379,9 +415,9 @@ def update_edge(flow_definition: Dict[str, Any], source: str, target: str, updat
         
         # Persist the updated flow
         if flow_id and session:
-            result = set_entire_flow(flow_definition, None, flow_id, session)
+            result = set_entire_flow(flow_definition, flow_id, session)
             if "✅" in result:
-                return user_message or f"Updated edge from '{source}' to '{target}': {', '.join(updates.keys())}"
+                return f"Updated edge from '{source}' to '{target}': {', '.join(updates.keys())}"
             return result
             
         return f"Updated edge from '{source}' to '{target}' (not persisted - missing flow_id/session)"
@@ -391,7 +427,7 @@ def update_edge(flow_definition: Dict[str, Any], source: str, target: str, updat
         return f"Failed to update edge from '{source}' to '{target}': {str(e)}"
 
 
-def delete_edge(flow_definition: Dict[str, Any], source: str, target: str, user_message: str | None = None, flow_id: UUID | None = None, session: Session | None = None) -> str:
+def delete_edge(flow_definition: Dict[str, Any], source: str, target: str, flow_id: UUID | None = None, session: Session | None = None) -> str:
     """Delete an edge from the flow."""
     try:
         edges = flow_definition.get('edges', [])
@@ -406,9 +442,9 @@ def delete_edge(flow_definition: Dict[str, Any], source: str, target: str, user_
         
         # Persist the updated flow
         if flow_id and session:
-            result = set_entire_flow(flow_definition, None, flow_id, session)
+            result = set_entire_flow(flow_definition, flow_id, session)
             if "✅" in result:
-                return user_message or f"Deleted edge from '{source}' to '{target}'"
+                return f"Deleted edge from '{source}' to '{target}'"
             return result
             
         return f"Deleted edge from '{source}' to '{target}' (not persisted - missing flow_id/session)"
@@ -418,7 +454,7 @@ def delete_edge(flow_definition: Dict[str, Any], source: str, target: str, user_
         return f"Failed to delete edge from '{source}' to '{target}': {str(e)}"
 
 
-def validate_flow(flow_definition: Dict[str, Any]) -> str:
+def validate_flow(flow_definition: Dict[str, Any]) -> ToolResult:
     """Validate a flow definition without modifying it."""
     try:
         flow_ir = FlowIR.model_validate(flow_definition)
@@ -426,28 +462,66 @@ def validate_flow(flow_definition: Dict[str, Any]) -> str:
         compiled = compiler.compile(flow_ir)
         
         if hasattr(compiled, 'validation_errors') and compiled.validation_errors:
-            return f"Flow validation failed:\n" + "\n".join(f"- {error}" for error in compiled.validation_errors)
+            return ToolResult(
+                success=False,
+                action="validate_flow",
+                message="Flow validation failed:\n" + "\n".join(f"- {error}" for error in compiled.validation_errors),
+                is_validation=True
+            )
         elif hasattr(compiled, 'errors') and compiled.errors:
-            return f"Flow validation failed:\n" + "\n".join(f"- {error}" for error in compiled.errors)
+            return ToolResult(
+                success=False,
+                action="validate_flow",
+                message="Flow validation failed:\n" + "\n".join(f"- {error}" for error in compiled.errors),
+                is_validation=True
+            )
         
         if hasattr(compiled, 'validation_warnings') and compiled.validation_warnings:
             warnings = "\n".join(f"- {warning}" for warning in compiled.validation_warnings)
-            return f"Flow is valid with warnings:\n{warnings}"
+            return ToolResult(
+                success=True,
+                action="validate_flow",
+                message=f"Flow is valid with warnings:\n{warnings}",
+                is_validation=True,
+                should_continue=False  # Validation after modifications suggests completion
+            )
         elif hasattr(compiled, 'warnings') and compiled.warnings:
             warnings = "\n".join(f"- {warning}" for warning in compiled.warnings)
-            return f"Flow is valid with warnings:\n{warnings}"
+            return ToolResult(
+                success=True,
+                action="validate_flow",
+                message=f"Flow is valid with warnings:\n{warnings}",
+                is_validation=True,
+                should_continue=False  # Validation after modifications suggests completion
+            )
         
-        return "Flow validation passed - no errors or warnings!"
+        return ToolResult(
+            success=True,
+            action="validate_flow",
+            message="Flow validation passed - no errors or warnings!",
+            is_validation=True,
+            should_continue=False  # Validation after modifications suggests completion
+        )
         
     except Exception as e:
-        return f"Failed to validate flow: {str(e)}"
+        return ToolResult(
+            success=False,
+            action="validate_flow",
+            message=f"Failed to validate flow: {str(e)}",
+            is_validation=True
+        )
 
 
-def get_flow_summary(flow_definition: Dict[str, Any]) -> str:
+def get_flow_summary(flow_definition: Dict[str, Any]) -> ToolResult:
     """Get a summary of the current flow structure."""
     try:
         if not flow_definition:
-            return "No flow definition loaded"
+            return ToolResult(
+                success=False,
+                action="get_flow_summary",
+                message="No flow definition loaded",
+                is_validation=True
+            )
         
         nodes = flow_definition.get('nodes', [])
         edges = flow_definition.get('edges', [])
@@ -477,10 +551,21 @@ def get_flow_summary(flow_definition: Dict[str, Any]) -> str:
             f"- Terminals: {', '.join(terminals) if terminals else 'none'}"
         ])
         
-        return "\n".join(summary_lines)
+        return ToolResult(
+            success=True,
+            action="get_flow_summary",
+            message="\n".join(summary_lines),
+            is_validation=True,
+            should_continue=False  # Summary after modifications suggests completion
+        )
         
     except Exception as e:
-        return f"Failed to get flow summary: {str(e)}"
+        return ToolResult(
+            success=False,
+            action="get_flow_summary",
+            message=f"Failed to get flow summary: {str(e)}",
+            is_validation=True
+        )
 
 
 # Tool specifications for the FlowChatAgent
@@ -531,13 +616,13 @@ FLOW_MODIFICATION_TOOLS = [
     {
         "name": "validate_flow",
         "description": "Validate the current flow definition for errors.",
-        "args_schema": SetEntireFlowRequest,
+        "args_schema": ValidateFlowRequest,
         "func": validate_flow
     },
     {
         "name": "get_flow_summary",
         "description": "Get a structural summary of the current flow.",
-        "args_schema": SetEntireFlowRequest,
+        "args_schema": GetFlowSummaryRequest,
         "func": get_flow_summary
     }
 ]
