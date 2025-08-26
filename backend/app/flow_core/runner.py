@@ -113,21 +113,9 @@ class FlowTurnRunner:
                 ctx=ctx,
             )
 
-        # Do not extract on the very first interaction to mirror webhook/CLI UX
-        assistant_messages = [h for h in ctx.history if getattr(h, "role", "") == "assistant"]
-        is_first_interaction = len(assistant_messages) == 0
-        if engine_response.kind == "prompt" and ctx.pending_field and is_first_interaction:
-            # Record the assistant prompt so subsequent turns are not treated as first
-            if engine_response.message:
-                ctx.add_turn("assistant", engine_response.message, engine_response.node_id)
-            return TurnResult(
-                assistant_message=engine_response.message,
-                answers_diff={},
-                tool_name=None,
-                escalate=False,
-                terminal=False,
-                ctx=ctx,
-            )
+        # ALWAYS process user messages through the responder, including first interaction
+        # This allows the LLM to extract intent from the very first user message
+        # (In WhatsApp/chat, users always initiate - there's no "show greeting first" scenario)
 
         # Get allowed values from current node
         allowed_values = self._get_allowed_values(ctx)

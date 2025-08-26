@@ -326,10 +326,9 @@ class FlowChatAgent:
                 logger.info(f"Agent iteration {iteration+1}: Early completion triggered by validation after modifications")
                 break
             
-            # CRITICAL: Stop after successful modifications to prevent excessive iterations
-            if successful_mods and flow_modified:
-                logger.info(f"Agent iteration {iteration+1}: Successful modifications completed, stopping iterations to prevent excessive tool calls")
-                # Don't add more messages, just stop iterating
+            # Prevent runaway iterations with reasonable limit
+            if iteration >= 3:  # Allow up to 3 iterations for complex operations
+                logger.info(f"Agent iteration {iteration+1}: Reached iteration limit, stopping")
                 break
         
         # Create modification summary
@@ -337,13 +336,23 @@ class FlowChatAgent:
         if modification_details:
             modification_summary = "; ".join(modification_details)
         
-        # Create a single human-friendly final message
+        # Create meaningful final message
         if flow_modified:
-            final_message = "✅ Fluxo atualizado com sucesso! As seguintes alterações foram feitas:\n\n"
-            for detail in modification_details:
-                final_message += f"• {detail}\n"
-            final_message += "\nO que você gostaria de ajustar agora?"
-            outputs = [final_message]
+            # Look for meaningful LLM content that explains what was done
+            meaningful_outputs = [out for out in outputs if out and len(out) > 30 and 
+                                not out.startswith("Tool ") and 
+                                not "completed successfully" in out and
+                                not out.startswith("✅ Fluxo atualizado")]
+            
+            if meaningful_outputs:
+                # Use the LLM's own description of what it did
+                last_meaningful = meaningful_outputs[-1]
+                if "Como posso" not in last_meaningful and "What would you like" not in last_meaningful:
+                    outputs = [last_meaningful]
+                else:
+                    outputs = ["✅ Alterações aplicadas no fluxo com sucesso!"]
+            else:
+                outputs = ["✅ Alterações aplicadas no fluxo com sucesso!"]
         elif outputs:
             # If no modifications but there are outputs, use the last meaningful content
             meaningful_outputs = [out for out in outputs if out and len(out) > 10 and not out.startswith("Tool ")]
@@ -469,11 +478,13 @@ class FlowChatAgent:
             "- **SCHEMA VERSION: ALL flows must use schema_version 'v1'**",
             "- **BIAS TO ACTION**: When user requests a change, just do it directly - don't ask for confirmation",
             "- **SIMPLE CHANGES**: For simple requests like adding nodes or questions, use add_node/update_node tools instead of set_entire_flow",
-            "- **CRITICAL: BATCH ALL TOOL CALLS** - If you identify multiple operations, do them ALL in ONE response!",
-            "  - If you find 5 nodes to delete, call delete_node 5 times in the SAME response",
-            "  - If you need to add 3 questions, call add_node 3 times in the SAME response", 
-            "  - If you need to delete 2 nodes and add 1 edge, do ALL 3 calls in the SAME response",
-            "  - **NEVER** do operations one at a time across multiple LLM calls unless truly complex reasoning is needed",
+            "- **SIMPLE OPERATIONS = BATCH IN ONE RESPONSE**:",
+            "  - Deleting nodes/edges, updating prompts, reconnecting flows → Do ALL at once",
+            "  - Example: Remove question = delete_node + reconnect edges in ONE response",
+            "  - **Don't** delete one node, wait, then delete another - batch them!",
+            "- **COMPLEX OPERATIONS = Multiple iterations OK**:",
+            "  - Creating entire new subpaths, major restructuring, complex logic changes",
+            "  - You can think step-by-step and iterate for truly complex reasoning",
             "- **CRITICAL: TOOL CALL ORDER MATTERS** - When making multiple tool calls, order them correctly!",
             "  - BEFORE deleting nodes: delete all edges connected to them first",
             "  - BEFORE adding edges: ensure both source and target nodes exist",
@@ -502,17 +513,16 @@ class FlowChatAgent:
             "- **NEVER modify nodes the user didn't ask about**",
             "",
             "## Completion Instructions:",
-            "- **FUNDAMENTAL RULE: ONE RESPONSE = ALL OPERATIONS** - If you identify 5 things to delete, make 5 delete_node calls in ONE response!",
-            "- **COMPLETE ALL WORK IN ONE RESPONSE**: Make all necessary tool calls together, don't iterate one by one",
             "- **CRITICAL: DO THE WORK, DON'T JUST EXPLAIN IT**: If user asks for changes, USE TOOLS immediately!",
             "  - **WRONG**: \"I can remove that question for you...\" (just explaining)",
             "  - **RIGHT**: Call delete_node tool to actually remove it, THEN explain what you did",
-            "- **WHEN TO STOP**: After making modifications, either:",
-            "  1. Call `validate_flow` ONCE to check your work, OR", 
-            "  2. Provide a final response with no tool calls if the work is clearly complete",
-            "- **DO NOT** call validate_flow multiple times - one validation is enough",
+            "- **For SIMPLE requests** (delete node, update prompt, reconnect):",
+            "  - Batch all operations in ONE response to be efficient",
+            "  - Example: 'remove question' = delete_node + reconnect edges in one response",
+            "- **For COMPLEX requests** (create subpaths, major restructuring):",
+            "  - You can use multiple iterations and think step-by-step if needed",
+            "- **DO NOT** call validate_flow unless there's a specific validation concern",
             "- **DO NOT** call get_flow_summary unless user specifically asks for a summary",
-            "- **STOP ITERATING**: Once you've completed the user's request, provide a final message and make no more tool calls",
             "",
             "### Tool Usage Examples:",
             "**EFFICIENT: Multiple operations in one response (ORDERED):**",
