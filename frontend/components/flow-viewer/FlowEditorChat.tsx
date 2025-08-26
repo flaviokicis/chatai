@@ -162,8 +162,6 @@ export function FlowEditorChat({ flowId, onFlowModified }: Props) {
             <Trash2 className="h-3 w-3" />
             Limpar
           </button>
-
-          {(isSending || isLoading) && <Loader2 className="h-4 w-4 animate-spin" />}
         </div>
       </div>
       <div className="px-3 pt-2 space-y-2">

@@ -94,28 +94,9 @@ export function FlowExperience({ flow }: { flow: CompiledFlow }) {
   const visibleNodes = useMemo(() => {
     if (!showOnlyCurrentPath) return undefined;
     
-    // Include current path PLUS one step away from each node to show branches
-    const expanded = new Set(pathNodes);
-    
-    pathNodes.forEach(nodeId => {
-      // Add nodes that point TO this node
-      Object.entries(flow.edges_from).forEach(([sourceId, edges]) => {
-        edges.forEach(edge => {
-          if (edge.target === nodeId) {
-            expanded.add(sourceId);
-          }
-        });
-      });
-      
-      // Add nodes that this node points TO
-      const edges = flow.edges_from[nodeId] || [];
-      edges.forEach(edge => {
-        expanded.add(edge.target);
-      });
-    });
-    
-    return expanded;
-  }, [pathNodes, showOnlyCurrentPath, flow.edges_from]);
+    // Show ONLY the nodes in the current selected path - much cleaner view
+    return new Set(pathNodes);
+  }, [pathNodes, showOnlyCurrentPath]);
   const highlightedNodes = useMemo(() => new Set(pathNodes), [pathNodes]);
   
   const highlightedEdges = useMemo(() => {
@@ -235,7 +216,7 @@ export function FlowExperience({ flow }: { flow: CompiledFlow }) {
               />
               <div className="text-xs">
                 <div className="font-medium text-gray-900">Simplificar visualização</div>
-                <div className="text-gray-500">Mostra apenas elementos relevantes para o caminho atual</div>
+                <div className="text-gray-500">Mostra apenas os nós do caminho selecionado</div>
               </div>
             </label>
           </div>

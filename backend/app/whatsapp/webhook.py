@@ -161,6 +161,12 @@ async def handle_twilio_whatsapp_webhook(
     # Load and compile flow from database (following CLI pattern)
     session = create_session()
     try:
+        # Get channel instance first
+        channel_instance = find_channel_instance_by_identifier(session, receiver_number)
+        if not channel_instance:
+            logger.error("No channel instance found for number %s (tenant %s)", receiver_number, tenant_id)
+            return adapter.build_sync_response("Desculpe, este número do WhatsApp não está configurado.")
+        
         # Get flows specifically for this channel instance
         flows = get_flows_by_channel_instance(session, channel_instance.id)
         if not flows:

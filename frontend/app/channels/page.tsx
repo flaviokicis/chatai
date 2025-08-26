@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Smartphone, Bot, Settings, Check, AlertCircle, Phone, Globe } from "lucide-react";
+import { Smartphone, Bot, Settings, Check, AlertCircle, Phone, Globe, ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api } from "@/lib/api-client";
 import { toast } from "sonner";
+import Link from "next/link";
 
 interface Channel {
   id: string;
@@ -91,9 +92,6 @@ function ChannelCard({ channel, onFlowChange }: { channel: Channel; onFlowChange
                       <div className="flex items-center gap-2">
                         <Bot className="w-4 h-4" />
                         <span>{flow.name}</span>
-                        {activeFlow?.id === flow.id && (
-                          <Check className="w-3 h-3 ml-2 text-emerald-500" />
-                        )}
                       </div>
                     </SelectItem>
                   ))}
@@ -103,13 +101,27 @@ function ChannelCard({ channel, onFlowChange }: { channel: Channel; onFlowChange
             
             {activeFlow && (
               <div className="p-3 bg-emerald-50 dark:bg-emerald-950 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 text-sm font-medium">
-                  <Check className="w-4 h-4" />
-                  Fluxo ativo: {activeFlow.name}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 text-sm font-medium">
+                      <Check className="w-4 h-4" />
+                      Fluxo ativo: {activeFlow.name}
+                    </div>
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
+                      ID: {activeFlow.flow_id}
+                    </p>
+                  </div>
+                  <Link href={`/flows/${activeFlow.id}`}>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="h-8 px-2 bg-white dark:bg-emerald-900 border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-800"
+                      title="Ver fluxo"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                    </Button>
+                  </Link>
                 </div>
-                <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
-                  ID: {activeFlow.flow_id}
-                </p>
               </div>
             )}
           </div>

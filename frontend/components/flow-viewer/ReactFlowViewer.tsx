@@ -268,22 +268,34 @@ function ReactFlowContent({ flow, highlightedNodes, highlightedEdges, onSubflowC
     setEdges(initialEdges);
   }, [initialNodes, initialEdges, setNodes, setEdges]);
 
-  // Initialize view when nodes are ready
-  const onNodesInitialized = useCallback(() => {
-    const hasUserInteracted = sessionStorage.getItem('react-flow-user-interacted');
-    if (!hasUserInteracted) {
-      // Force fit view with very zoomed out settings
-      setTimeout(() => {
-        fitView({
-          padding: 0.6, // Even more padding for better overview
-          includeHiddenNodes: false,
-          maxZoom: 0.15, // Start even more zoomed out
-          minZoom: 0.05,
-          duration: 1000,
-        });
-      }, 100);
+  // Center on the topmost/entry node when ready
+  useEffect(() => {
+    if (initialNodes.length > 0) {
+      const timer = setTimeout(() => {
+        const hasUserInteracted = sessionStorage.getItem('react-flow-user-interacted');
+        if (!hasUserInteracted) {
+          // Find the entry node or topmost node
+          const entryNode = initialNodes.find(node => node.data.isEntry) || 
+                           initialNodes.reduce((topmost, node) => 
+                             node.position.y < topmost.position.y ? node : topmost
+                           );
+          
+          if (entryNode) {
+            // Center on the entry/topmost node with good zoom
+            const centerX = entryNode.position.x + 150; // Add half node width
+            const centerY = entryNode.position.y + 80;  // Add half node height
+            
+            setCenter(centerX, centerY, { 
+              zoom: 0.15, 
+              duration: 1000 
+            });
+          }
+        }
+      }, 300);
+      
+      return () => clearTimeout(timer);
     }
-  }, [fitView]);
+  }, [initialNodes, setCenter]);
   
   const onConnect = useCallback(
     (params: any) => setEdges((eds) => addEdge(params, eds)),
@@ -321,7 +333,6 @@ function ReactFlowContent({ flow, highlightedNodes, highlightedEdges, onSubflowC
       onConnect={onConnect}
       nodeTypes={nodeTypes}
       connectionMode={ConnectionMode.Strict}
-      onNodesInitialized={onNodesInitialized}
       defaultViewport={{ x: 0, y: 0, zoom: 0.15 }}
       fitView={false}
       fitViewOptions={{
@@ -342,15 +353,24 @@ function ReactFlowContent({ flow, highlightedNodes, highlightedEdges, onSubflowC
         <Panel position="bottom-right" className="mb-16 mr-2">
           <button
             onClick={() => {
-              // Reset to the initial zoomed-out view
+              // Reset to the initial centered view on topmost node
               sessionStorage.removeItem('react-flow-user-interacted');
-              fitView({
-                padding: 0.6,
-                includeHiddenNodes: false,
-                maxZoom: 0.15,
-                minZoom: 0.05,
-                duration: 1000,
-              });
+              
+              // Find the entry node or topmost node
+              const entryNode = initialNodes.find(node => node.data.isEntry) || 
+                               initialNodes.reduce((topmost, node) => 
+                                 node.position.y < topmost.position.y ? node : topmost
+                               );
+              
+              if (entryNode) {
+                const centerX = entryNode.position.x + 150; // Add half node width
+                const centerY = entryNode.position.y + 80;  // Add half node height
+                
+                setCenter(centerX, centerY, { 
+                  zoom: 0.15, 
+                  duration: 1000 
+                });
+              }
             }}
             className="text-xs px-3 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors shadow-lg font-medium"
             title="Resetar a visualização para mostrar todo o fluxo"
