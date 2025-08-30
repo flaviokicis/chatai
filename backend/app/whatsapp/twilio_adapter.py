@@ -108,3 +108,9 @@ class TwilioWhatsAppAdapter:
                     continue
 
         threading.Thread(target=_run, daemon=True).start()
+
+    def send_typing_indicator(self, to_phone: str, phone_number_id: str, message_id: str) -> None:
+        """Twilio WhatsApp doesn't support typing indicators, so this is a no-op."""
+        # Twilio WhatsApp API doesn't support typing indicators like the Cloud API
+        # This method exists to satisfy the protocol but does nothing
+        pass

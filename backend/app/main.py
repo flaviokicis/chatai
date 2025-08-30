@@ -6,6 +6,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from starlette.middleware.sessions import SessionMiddleware
 from langchain.chat_models import init_chat_model
 
 from app.config.loader import load_json_config
@@ -35,12 +36,20 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:8080",  # Allow backend to call itself
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(RequestIdMiddleware)
+
+# Add session middleware for admin authentication
+app.add_middleware(
+    SessionMiddleware, 
+    secret_key=os.getenv("SESSION_SECRET_KEY", "your-secret-key-change-in-production"),
+    max_age=86400,  # 24 hours
+)
 logger = logging.getLogger(__name__)
 set_app_context(
     app,

@@ -33,6 +33,7 @@ dependencies = [
   "langchain-openai==0.3.30",
   "alembic>=1.16.4",
   "psycopg2-binary>=2.9.10",
+  "itsdangerous>=2.2.0",
 ]
 
 [tool.hatch.build.targets.wheel]

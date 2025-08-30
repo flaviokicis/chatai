@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
     ChannelInstance,
+    ChannelType,
     ChatThread,
     Contact,
     Flow,
@@ -755,4 +756,100 @@ def update_flow_with_versioning(
     logger.info(f"Repository: Updated flow {flow_id} in session (waiting for service commit)")
     logger.info(f"Repository: JSON field explicitly marked as modified for flow {flow_id}")
     
+    return flow
+
+
+# Admin-specific repository functions
+def get_active_tenants(session: Session) -> list[Tenant]:
+    """Get all active tenants with their project configs."""
+    return list(session.execute(
+        select(Tenant).options(selectinload(Tenant.project_config))
+    ).scalars().all())
+
+
+def get_tenant_by_id(session: Session, tenant_id: UUID) -> Tenant | None:
+    """Get a tenant by ID with project config."""
+    return session.execute(
+        select(Tenant)
+        .options(selectinload(Tenant.project_config))
+        .where(Tenant.id == tenant_id)
+    ).scalar_one_or_none()
+
+
+def update_tenant(
+    session: Session,
+    tenant_id: UUID,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    email: str | None = None,
+    project_description: str | None = None,
+    target_audience: str | None = None,
+    communication_style: str | None = None,
+) -> Tenant | None:
+    """Update a tenant and its project config."""
+    tenant = get_tenant_by_id(session, tenant_id)
+    if not tenant:
+        return None
+    
+    # Update tenant fields
+    if first_name is not None:
+        tenant.owner_first_name = first_name
+    if last_name is not None:
+        tenant.owner_last_name = last_name
+    if email is not None:
+        tenant.owner_email = email
+    
+    # Update project config
+    if tenant.project_config:
+        if project_description is not None:
+            tenant.project_config.project_description = project_description
+        if target_audience is not None:
+            tenant.project_config.target_audience = target_audience
+        if communication_style is not None:
+            tenant.project_config.communication_style = communication_style
+    
+    session.flush()
+    return tenant
+
+
+def delete_tenant_cascade(session: Session, tenant_id: UUID) -> None:
+    """Delete a tenant and all associated data with proper cascading."""
+    tenant = get_tenant_by_id(session, tenant_id)
+    if not tenant:
+        raise ValueError(f"Tenant {tenant_id} not found")
+    
+    # SQLAlchemy will handle cascading deletes due to the ondelete="CASCADE" 
+    # foreign key constraints defined in the models
+    session.delete(tenant)
+    session.flush()
+
+
+def get_channel_instances_by_tenant(session: Session, tenant_id: UUID) -> list[ChannelInstance]:
+    """Get all channel instances for a tenant."""
+    return list(session.execute(
+        select(ChannelInstance).where(ChannelInstance.tenant_id == tenant_id)
+    ).scalars().all())
+
+
+def get_flows_by_tenant(session: Session, tenant_id: UUID) -> list[Flow]:
+    """Get all flows for a tenant."""
+    return list(session.execute(
+        select(Flow).where(Flow.tenant_id == tenant_id)
+    ).scalars().all())
+
+
+def update_flow_definition(session: Session, flow_id: UUID, definition: dict) -> Flow | None:
+    """Update a flow's definition (for admin JSON editor)."""
+    flow = get_flow_by_id(session, flow_id)
+    if not flow:
+        return None
+    
+    flow.definition = definition
+    flow.version += 1
+    
+    # Force SQLAlchemy to detect JSON field change
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(flow, "definition")
+    
+    session.flush()
     return flow

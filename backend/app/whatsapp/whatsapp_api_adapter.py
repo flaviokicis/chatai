@@ -232,6 +232,43 @@ class WhatsAppApiAdapter:
 
         threading.Thread(target=_run, daemon=True).start()
 
+    def send_typing_indicator(self, to_phone: str, phone_number_id: str, message_id: str) -> None:
+        """Send typing indicator using WhatsApp Cloud API."""
+        
+        try:
+            # WhatsApp Cloud API endpoint for typing indicators
+            url = f"https://graph.facebook.com/v17.0/{phone_number_id}/messages"
+
+            headers = {
+                "Authorization": f"Bearer {self._settings.whatsapp_access_token}",
+                "Content-Type": "application/json",
+            }
+
+            payload = {
+                "messaging_product": "whatsapp",
+                "status": "read",
+                "message_id": message_id,
+                "typing_indicator": {
+                    "type": "text"
+                }
+            }
+
+            logger.debug("Sending WhatsApp typing indicator to %s for message %s", to_phone, message_id)
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+
+            if response.status_code == 200:
+                logger.debug("Successfully sent WhatsApp typing indicator to %s", to_phone)
+            else:
+                logger.warning(
+                    "Failed to send WhatsApp typing indicator: %d %s - Response: %s",
+                    response.status_code,
+                    response.text,
+                    response.headers,
+                )
+
+        except Exception as e:
+            logger.warning("Error sending WhatsApp typing indicator: %s", str(e))
+
     def _send_message_via_api(self, to_phone: str, text: str, phone_number_id: str) -> None:
         """Send message using WhatsApp Cloud API."""
 

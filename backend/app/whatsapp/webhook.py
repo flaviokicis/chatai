@@ -134,6 +134,20 @@ async def handle_twilio_whatsapp_webhook(
         "Incoming WhatsApp message from %s to %s: %s", sender_number, receiver_number, message_text
     )
 
+    # Send typing indicator immediately for WhatsApp Cloud API (only if we have a message_id)
+    # This gives users immediate feedback that their message was received and is being processed
+    settings = get_settings()
+    if settings.whatsapp_provider == "cloud_api" and message_id and isinstance(adapter, WhatsAppApiAdapter):
+        try:
+            # Extract clean phone numbers for typing indicator
+            clean_to = sender_number.replace("whatsapp:", "")
+            clean_from = receiver_number.replace("whatsapp:", "")
+            adapter.send_typing_indicator(clean_to, clean_from, message_id)
+            logger.debug("Sent typing indicator for message %s from %s", message_id, sender_number)
+        except Exception as e:
+            logger.warning("Failed to send typing indicator: %s", e)
+            # Continue processing even if typing indicator fails
+
     # Get tenant configuration from database using channel identifier
     project_context = None
     tenant_id: UUID | None = None

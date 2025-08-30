@@ -1,3 +1,73 @@
+"""
+DATABASE MODELS - GDPR/LGPD ENCRYPTION GUIDELINES
+================================================
+
+⚠️  CRITICAL: This file contains sensitive personal data that MUST be encrypted for GDPR/LGPD compliance.
+
+ENCRYPTION RULES FOR PERSONAL DATA:
+==================================
+
+🔐 MUST BE ENCRYPTED (use EncryptedString):
+-------------------------------------------
+✅ Names: first_name, last_name, display_name, full_name
+✅ Contact Info: email, phone_number, address, postal_code
+✅ Identifiers: external_id (if contains PII), user_id (if contains PII)
+✅ Communication: message text, chat content, conversation data
+✅ Profile Data: bio, description, profile_info, preferences
+✅ Location: specific addresses, GPS coordinates
+✅ Financial: account numbers, payment info, billing details
+✅ Health: medical info, health status, treatment details
+✅ Biometric: photos, fingerprints, voice data
+✅ Behavioral: tracking data, usage patterns, preferences
+
+📝 EXAMPLES OF ENCRYPTED FIELDS:
+- owner_first_name, owner_last_name (tenant owner names)
+- phone_number (contact phone numbers) 
+- display_name (user display names)
+- message.text (conversation content)
+- external_id (if format like "whatsapp:+5511999999999")
+
+🔓 CAN REMAIN UNENCRYPTED:
+--------------------------
+✅ System Metadata: created_at, updated_at, id, tenant_id
+✅ Non-PII Enums: status, type, category (if not revealing personal info)
+✅ Technical Data: API keys (if not linked to individuals), configuration
+✅ Aggregated Data: counts, statistics (if anonymized)
+✅ Public Data: company names, public URLs, published content
+✅ System State: flow_state, processing_status, system_flags
+
+📝 EXAMPLES OF UNENCRYPTED FIELDS:
+- id, tenant_id, created_at, updated_at
+- channel_type (enum: whatsapp, sms, etc.)
+- message_status (enum: sent, delivered, read)
+- flow_id, node_id (system identifiers)
+
+⚠️  WHEN IN DOUBT: ENCRYPT IT!
+==============================
+If a field might contain personal information or could be used to identify
+an individual, encrypt it. It's better to over-encrypt than risk GDPR/LGPD violations.
+
+IMPLEMENTATION:
+===============
+- Use: mapped_column(EncryptedString, nullable=False)
+- Not: mapped_column(String(255), nullable=False)
+- Requires: PII_ENCRYPTION_KEY environment variable
+- Migration: Required when changing String -> EncryptedString
+
+CURRENT ENCRYPTION STATUS:
+=========================
+✅ Tenant.owner_email - ENCRYPTED
+✅ Tenant.owner_first_name - ENCRYPTED (FIXED)
+✅ Tenant.owner_last_name - ENCRYPTED (FIXED)
+✅ ChannelInstance.phone_number - ENCRYPTED
+✅ Contact.phone_number - ENCRYPTED (FIXED)
+✅ Contact.display_name - ENCRYPTED (FIXED)
+✅ Contact.external_id - ENCRYPTED (FIXED)
+✅ Message.text - ENCRYPTED
+
+🎉 ALL PERSONAL DATA IS NOW GDPR/LGPD COMPLIANT! 🎉
+"""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -79,9 +149,9 @@ class Tenant(Base, TimestampMixin):
     __tablename__ = "tenants"
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
-    # Owner/admin contact for the tenant
-    owner_first_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    owner_last_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    # Owner/admin contact for the tenant (GDPR/LGPD: Names are PII and must be encrypted)
+    owner_first_name: Mapped[str] = mapped_column(EncryptedString, nullable=False)
+    owner_last_name: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     owner_email: Mapped[str] = mapped_column(EncryptedString, nullable=False)
 
     # One-to-one project config
@@ -191,12 +261,12 @@ class Contact(Base, TimestampMixin):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
 
-    # Cross-channel identifier, e.g., "whatsapp:+5511999999999"; immutable key
-    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    # Optional display name from the provider profile
-    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # Raw number if available; stored for convenience/minimization
-    phone_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Cross-channel identifier, e.g., "whatsapp:+5511999999999"; immutable key (GDPR/LGPD: Contains PII)
+    external_id: Mapped[str] = mapped_column(EncryptedString, nullable=False)
+    # Optional display name from the provider profile (GDPR/LGPD: Names are PII)
+    display_name: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    # Raw number if available; stored for convenience/minimization (GDPR/LGPD: Phone numbers are PII)
+    phone_number: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
 
     # GDPR/consent tracking
     consent_opt_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

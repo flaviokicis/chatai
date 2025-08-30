@@ -38,3 +38,12 @@ class WhatsAppAdapter(Protocol):
             reply_id: Unique ID for this conversation turn, used for interruption handling
             store: Redis store for checking if reply is still current
         """
+
+    def send_typing_indicator(self, to_phone: str, phone_number_id: str, message_id: str) -> None:
+        """Send typing indicator to show that the bot is preparing a response.
+        
+        Args:
+            to_phone: Phone number to send typing indicator to (clean format, no whatsapp: prefix)
+            phone_number_id: WhatsApp Business phone number ID
+            message_id: ID of the received message to mark as read
+        """
