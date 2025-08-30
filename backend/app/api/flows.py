@@ -145,8 +145,7 @@ async def get_example_flow_compiled() -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Example flow not found")
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(raw, dict) and raw.get("schema_version") != "v2":
-            raw["schema_version"] = "v2"
+        # Keep original schema version (no forced conversion)
         flow = Flow.model_validate(raw)
         compiled = compile_flow(flow)
         return _sanitize_compiled(compiled)

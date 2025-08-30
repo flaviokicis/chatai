@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { 
   api, 
   DEFAULT_TENANT_ID, 
-  type CreateTenantRequest, 
   type CreateFlowRequest, 
+  type UpdateFlowRequest,
   type UpdateTenantConfigRequest 
 } from "../api-client";
 
@@ -15,8 +15,9 @@ export const queryKeys = {
   tenant: (id: string | null | undefined) => ['tenants', id] as const,
   channels: (tenantId: string | null | undefined) => ['channels', tenantId] as const,
   flows: (tenantId: string | null | undefined) => ['flows', tenantId] as const,
-  chatThreads: (tenantId: string | null | undefined, params?: any) => ['chatThreads', tenantId, params] as const,
-  contacts: (tenantId: string | null | undefined, params?: any) => ['contacts', tenantId, params] as const,
+  flowVersions: (flowId: string) => ['flowVersions', flowId] as const,
+  chatThreads: (tenantId: string | null | undefined, params?: Record<string, unknown>) => ['chatThreads', tenantId, params] as const,
+  contacts: (tenantId: string | null | undefined, params?: Record<string, unknown>) => ['contacts', tenantId, params] as const,
   exampleFlow: ['exampleFlow'] as const,
 } as const;
 
@@ -96,6 +97,24 @@ export function useCreateFlow() {
   });
 }
 
+export function useUpdateFlow() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ tenantId = DEFAULT_TENANT_ID, flowId, ...flow }: UpdateFlowRequest & { tenantId?: string | null, flowId: string }) => 
+      api.flows.update(tenantId ?? undefined, flowId, flow),
+    onSuccess: (data, variables) => {
+      // Invalidate flows list and compiled flow to refetch
+      queryClient.invalidateQueries({ 
+        queryKey: queryKeys.flows(variables.tenantId || DEFAULT_TENANT_ID) 
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["compiledFlow", variables.flowId]
+      });
+    },
+  });
+}
+
 export function useExampleFlow() {
   return useQuery({
     queryKey: queryKeys.exampleFlow,
@@ -129,5 +148,28 @@ export function useContacts(
     queryFn: () => api.chats.listContacts(tenantId ?? undefined, params),
     // Contacts change less frequently
     staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+// Flow version hooks
+export function useFlowVersions(flowId: string) {
+  return useQuery({
+    queryKey: queryKeys.flowVersions(flowId),
+    queryFn: () => api.flows.getVersions(flowId),
+    staleTime: 1000 * 60 * 2, // 2 minutes
+  });
+}
+
+export function useRestoreFlowVersion() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ flowId, versionNumber }: { flowId: string; versionNumber: number }) =>
+      api.flows.restoreVersion(flowId, versionNumber),
+    onSuccess: (_, variables) => {
+      // Invalidate relevant queries
+      queryClient.invalidateQueries({ queryKey: ['compiledFlow', variables.flowId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.flowVersions(variables.flowId) });
+    },
   });
 }

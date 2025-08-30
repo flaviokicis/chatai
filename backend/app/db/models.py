@@ -156,8 +156,32 @@ class Flow(Base, TimestampMixin):
     # The full flow definition (see backend/playground/flow_example.json)
     definition: Mapped[dict] = mapped_column(JSONB, nullable=False)
     is_active: Mapped[bool] = mapped_column(nullable=False, default=True)
+    # Optimistic locking version
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="flows")
+    versions: Mapped[list[FlowVersion]] = relationship(
+        back_populates="flow", cascade="all, delete-orphan", order_by="FlowVersion.version_number.desc()"
+    )
+
+
+class FlowVersion(Base, TimestampMixin):
+    """Stores historical versions of flow definitions for change tracking and undo."""
+    
+    __tablename__ = "flow_versions"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    flow_id: Mapped[UUID] = mapped_column(ForeignKey("flows.id", ondelete="CASCADE"))
+    
+    # Version tracking
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    definition_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    change_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    
+    # User tracking (optional, could be expanded later)
+    created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    flow: Mapped[Flow] = relationship(back_populates="versions")
 
 
 class Contact(Base, TimestampMixin):
@@ -283,3 +307,13 @@ class FlowChatMessage(Base, TimestampMixin):
     flow_id: Mapped[UUID] = mapped_column(ForeignKey("flows.id", ondelete="CASCADE"))
     role: Mapped[FlowChatRole] = mapped_column(PgEnum(FlowChatRole, name="flow_chat_role"))
     content: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class FlowChatSession(Base, TimestampMixin):
+    """Tracks chat session metadata per flow, including clear history."""
+
+    __tablename__ = "flow_chat_sessions"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    flow_id: Mapped[UUID] = mapped_column(ForeignKey("flows.id", ondelete="CASCADE"), unique=True)
+    cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

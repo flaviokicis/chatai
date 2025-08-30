@@ -14,6 +14,7 @@ from app.core.channel_adapter import ConversationalRewriter
 from app.db.models import MessageDirection, MessageStatus, ThreadStatus
 from app.db.repository import (
     find_channel_instance_by_identifier,
+    get_flows_by_channel_instance,
     get_flows_by_tenant,
     get_or_create_contact,
     get_or_create_thread,
@@ -160,15 +161,22 @@ async def handle_twilio_whatsapp_webhook(
     # Load and compile flow from database (following CLI pattern)
     session = create_session()
     try:
-        flows = get_flows_by_tenant(session, tenant_id)
+        # Get channel instance first
+        channel_instance = find_channel_instance_by_identifier(session, receiver_number)
+        if not channel_instance:
+            logger.error("No channel instance found for number %s (tenant %s)", receiver_number, tenant_id)
+            return adapter.build_sync_response("Desculpe, este número do WhatsApp não está configurado.")
+        
+        # Get flows specifically for this channel instance
+        flows = get_flows_by_channel_instance(session, channel_instance.id)
         if not flows:
-            logger.error("No flows found for tenant %s", tenant_id)
+            logger.error("No flows found for channel instance %s (tenant %s)", channel_instance.id, tenant_id)
             return adapter.build_sync_response("Desculpe, nenhum fluxo configurado para este número.")
         
-        # Select first active flow (can be enhanced with flow selection logic later)
+        # Select first active flow for this specific channel
         active_flows = [f for f in flows if f.is_active]
         if not active_flows:
-            logger.error("No active flows found for tenant %s", tenant_id)
+            logger.error("No active flows found for channel instance %s (tenant %s)", channel_instance.id, tenant_id)
             return adapter.build_sync_response("Desculpe, nenhum fluxo ativo disponível.")
         
         selected_flow = active_flows[0]

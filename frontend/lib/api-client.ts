@@ -3,7 +3,7 @@
  * Provides type-safe methods for interacting with the backend API
  */
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
 
 // Types based on the API documentation
 export interface Tenant {
@@ -51,7 +51,7 @@ export interface CreateChannelRequest {
   channel_type: string;
   identifier: string;
   phone_number?: string;
-  extra?: Record<string, any>;
+  extra?: Record<string, unknown>;
 }
 
 export interface Flow {
@@ -59,14 +59,33 @@ export interface Flow {
   name: string;
   flow_id: string;
   channel_instance_id: string; // UUIDv7
-  definition?: Record<string, any>;
+  definition?: Record<string, unknown>;
+  is_active: boolean;
 }
 
 export interface CreateFlowRequest {
   name: string;
   flow_id: string;
   channel_instance_id: string; // UUIDv7
-  definition: Record<string, any>;
+  definition: Record<string, unknown>;
+}
+
+export interface UpdateFlowRequest {
+  name?: string;
+  definition?: Record<string, unknown>;
+  is_active?: boolean;
+}
+
+export interface ChannelWithFlows {
+  id: string; // UUIDv7
+  channel_type: string;
+  identifier: string;
+  phone_number?: string;
+  flows: Flow[];
+}
+
+export interface UpdateChannelFlowRequest {
+  flow_id: string; // UUIDv7
 }
 
 export interface Contact {
@@ -98,6 +117,20 @@ export interface FlowChatMessage {
   created_at: string;
 }
 
+export interface FlowChatResponse {
+  messages: FlowChatMessage[];
+  flow_was_modified: boolean;
+  modification_summary?: string;
+}
+
+export interface FlowVersion {
+  id: string; // UUIDv7
+  version_number: number;
+  change_description?: string;
+  created_at: string;
+  created_by?: string;
+}
+
 export interface ChatThread {
   id: string; // UUIDv7
   status: 'open' | 'closed' | 'archived';
@@ -112,7 +145,7 @@ class APIError extends Error {
   constructor(
     public status: number,
     public statusText: string,
-    public data: any
+    public data: unknown
   ) {
     super(`API Error ${status}: ${statusText}`);
   }
@@ -236,21 +269,50 @@ export const api = {
       });
     },
     
-    getExample: (): Promise<any> => 
+    update: async (tenantId: string | undefined, flowId: string, flow: UpdateFlowRequest): Promise<Flow> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/flows/${flowId}`, {
+        method: 'PUT',
+        body: JSON.stringify(flow),
+      });
+    },
+    
+    getExample: (): Promise<Record<string, unknown>> => 
       apiRequest('/flows/example/raw'),
     
-    getExampleCompiled: (): Promise<any> =>
+    getExampleCompiled: (): Promise<Record<string, unknown>> =>
       apiRequest('/flows/example/compiled'),
     
-    getCompiled: (flowId: string): Promise<any> =>
+    getCompiled: (flowId: string): Promise<Record<string, unknown>> =>
       apiRequest(`/flows/${flowId}/compiled`),
+    
+    // Version history endpoints
+    getVersions: (flowId: string): Promise<FlowVersion[]> =>
+      apiRequest(`/flows/${flowId}/versions`),
+    
+    restoreVersion: (flowId: string, versionNumber: number): Promise<{ message: string; current_version: number }> =>
+      apiRequest(`/flows/${flowId}/restore`, {
+        method: 'POST',
+        body: JSON.stringify({ version_number: versionNumber }),
+      }),
   },
 
   flowChat: {
-    send: (flowId: string, content: string): Promise<FlowChatMessage[]> =>
+    send: (
+      flowId: string, 
+      content: string,
+      options?: {
+        simplified_view_enabled?: boolean;
+        active_path?: string | null;
+      }
+    ): Promise<FlowChatResponse> =>
       apiRequest(`/flows/${flowId}/chat/send`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ 
+          content,
+          simplified_view_enabled: options?.simplified_view_enabled || false,
+          active_path: options?.active_path || null
+        }),
       }),
 
     list: (flowId: string): Promise<FlowChatMessage[]> =>
@@ -258,20 +320,11 @@ export const api = {
 
     receive: (flowId: string): Promise<FlowChatMessage | null> =>
       apiRequest(`/flows/${flowId}/chat/receive`),
-  },
 
-  flowChat: {
-    send: (flowId: string, content: string): Promise<FlowChatMessage[]> =>
-      apiRequest(`/flows/${flowId}/chat/send`, {
+    clear: (flowId: string): Promise<{ message: string }> =>
+      apiRequest(`/flows/${flowId}/chat/clear`, {
         method: 'POST',
-        body: JSON.stringify({ content }),
       }),
-
-    list: (flowId: string): Promise<FlowChatMessage[]> =>
-      apiRequest(`/flows/${flowId}/chat/messages`),
-
-    receive: (flowId: string): Promise<FlowChatMessage | null> =>
-      apiRequest(`/flows/${flowId}/chat/receive`),
   },
 
   // Chat endpoints
@@ -313,6 +366,32 @@ export const api = {
   // System endpoints
   health: (): Promise<string> => 
     apiRequest('/health'),
+
+  // Admin endpoints (for managing channels and flows)
+  admin: {
+    listChannels: async (tenantId?: string): Promise<ChannelInstance[]> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/channels`);
+    },
+    
+    getChannelWithFlows: async (channelId: string, tenantId?: string): Promise<ChannelWithFlows> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/channels/${channelId}`);
+    },
+    
+    setChannelActiveFlow: async (channelId: string, request: UpdateChannelFlowRequest, tenantId?: string): Promise<{ message: string }> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/channels/${channelId}/active-flow`, {
+        method: 'PATCH',
+        body: JSON.stringify(request),
+      });
+    },
+    
+    listFlows: async (tenantId?: string): Promise<Flow[]> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/admin/tenants/${id}/flows`);
+    },
+  },
 };
 
 export { DEFAULT_TENANT_ID };
