@@ -154,6 +154,10 @@ class Tenant(Base, TimestampMixin):
     owner_first_name: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     owner_last_name: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     owner_email: Mapped[str] = mapped_column(EncryptedString, nullable=False)
+    
+    # Admin phone numbers that can modify flows during conversations (GDPR/LGPD: Phone numbers are PII)
+    # Stored as list of encrypted phone numbers, e.g., ["+5511999999999", "+5511888888888"]
+    admin_phone_numbers: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
 
     # One-to-one project config
     project_config: Mapped[TenantProjectConfig] = relationship(
@@ -230,8 +234,7 @@ class Flow(Base, TimestampMixin):
     # Optimistic locking version
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-    # Training mode password (encrypted). If unset, default to "1234" at runtime.
-    training_password: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+
 
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="flows")
     versions: Mapped[list[FlowVersion]] = relationship(
@@ -313,10 +316,7 @@ class ChatThread(Base, TimestampMixin):
     human_handoff_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     human_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    # Training mode support
-    training_mode: Mapped[bool] = mapped_column(nullable=False, default=False)
-    training_mode_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    training_flow_id: Mapped[UUID | None] = mapped_column(ForeignKey("flows.id", ondelete="SET NULL"))
+
 
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="threads")
     contact: Mapped[Contact] = relationship(back_populates="threads")

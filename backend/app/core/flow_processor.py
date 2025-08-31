@@ -23,7 +23,8 @@ from app.db.session import create_session
 from app.flow_core.compiler import compile_flow
 from app.flow_core.ir import Flow
 from app.flow_core.runner import FlowTurnRunner
-from app.flow_core.tool_schemas import EnterTrainingMode
+from app.services.admin_phone_service import AdminPhoneService
+
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -178,6 +179,34 @@ class FlowProcessor:
         self._training_handler = training_handler
         self._thread_updater = thread_updater
 
+    def _check_admin_status(self, request: FlowRequest) -> bool:
+        """
+        Check if the user making the request is an admin.
+        
+        Args:
+            request: The flow request containing user and tenant information
+            
+        Returns:
+            True if user is admin, False otherwise
+        """
+        try:
+            # Extract phone number from user_id (e.g., "whatsapp:+5511999999999")
+            user_phone = request.user_id
+            
+            # Get tenant ID from project context
+            tenant_id = request.project_context.get("tenant_id") if request.project_context else None
+            if not tenant_id:
+                return False
+                
+            # Check admin status
+            with create_session() as session:
+                admin_service = AdminPhoneService(session)
+                return admin_service.is_admin_phone(user_phone, tenant_id)
+                
+        except Exception as e:
+            logger.exception(f"Error checking admin status: {e}")
+            return False
+
     async def process_flow(
         self,
         request: FlowRequest,
@@ -271,14 +300,49 @@ class FlowProcessor:
             with create_session() as thought_session:
                 thought_tracer = DatabaseThoughtTracer(thought_session)
 
-                # Create tool event handler for training mode
+                # Check if user is admin for live flow modification
+                extra_tools = []
+                instruction_prefix = ""
+                
+                # Check admin status
+                is_admin = self._check_admin_status(request)
+                if is_admin:
+                    from app.flow_core.tool_schemas import ModifyFlowLive  # noqa: F401
+                    extra_tools.append(ModifyFlowLive)
+                    instruction_prefix = (
+                        "ADMIN MODE: You have access to live flow modification.\n"
+                        "Use ModifyFlowLive ONLY when the user gives clear instructions about changing flow behavior.\n"
+                        "Examples: 'você deveria perguntar sobre tipo de unha', 'next time ask about X first'\n"
+                        "You also have access to RestartConversation to restart after modifications.\n"
+                        "Do NOT use these tools for regular conversation or questions about the flow.\n"
+                    )
+
+                # Create tool event handler for live flow modification and restart
                 def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
-                    if tool_name == "EnterTrainingMode":
-                        # Store training prompt for response
-                        prompt = "Para entrar no modo treino, informe a senha."
-                        self._session_manager.clear_context(session_id)
-                        app_context._training_prompt = prompt
-                        return True
+                    if tool_name == "ModifyFlowLive" and is_admin:
+                        # Handle live flow modification
+                        instruction = metadata.get("instruction", "")
+                        if instruction:
+                            try:
+                                from app.flow_core.live_flow_modification_tool import live_flow_modification_tool_func  # noqa: F401
+                                from uuid import UUID  # noqa: F401
+                                
+                                flow_id = UUID(request.flow_metadata.get("selected_flow_id", ""))
+                                with create_session() as mod_session:
+                                    result_message = live_flow_modification_tool_func(
+                                        instruction=instruction,
+                                        flow_id=flow_id,
+                                        session=mod_session,
+                                        llm=self._llm,
+                                        project_context=request.project_context
+                                    )
+                                    setattr(app_context, "_modification_result", result_message)
+                                    return True
+                            except Exception as e:
+                                logger.exception(f"Live flow modification failed: {e}")
+                                setattr(app_context, "_modification_result", "Desculpe, ocorreu um erro ao processar sua instrução.")
+                                return True
+
                     return False
 
                 # Create and run flow
@@ -287,12 +351,8 @@ class FlowProcessor:
                     llm=self._llm,
                     strict_mode=True,
                     thought_tracer=thought_tracer,
-                    extra_tools=[EnterTrainingMode],
-                    instruction_prefix=(
-                        "IMPORTANT: You may ONLY call EnterTrainingMode when the user explicitly mentions\n"
-                        "phrases like 'modo teste', 'modo treino', 'ativar modo de treinamento', or clear\n"
-                        "equivalents in Portuguese. Do NOT infer or guess. If not explicit, do NOT call it."
-                    ),
+                    extra_tools=extra_tools,
+                    instruction_prefix=instruction_prefix,
                     on_tool_event=on_tool_event,
                 )
 
@@ -310,17 +370,21 @@ class FlowProcessor:
                     project_context=request.project_context
                 )
 
-                # Handle training mode tool event
-                if result.tool_name == "EnterTrainingMode":
-                    prompt = getattr(app_context, "_training_prompt", "Para entrar no modo treino, informe a senha.")
-                    if hasattr(app_context, "_training_prompt"):
-                        delattr(app_context, "_training_prompt")
+
+
+                # Handle live flow modification tool event
+                if result.tool_name == "ModifyFlowLive":
+                    modification_message = getattr(app_context, "_modification_result", "Instrução processada.")
+                    if hasattr(app_context, "_modification_result"):
+                        delattr(app_context, "_modification_result")
                     return FlowResponse(
-                        result=FlowProcessingResult.TRAINING_MODE,
-                        message=prompt,
+                        result=FlowProcessingResult.CONTINUE,
+                        message=modification_message,
                         context=result.ctx,
-                        metadata={"tool_name": result.tool_name},
+                        metadata={"tool_name": result.tool_name, "flow_modified": True},
                     )
+
+
 
                 # Map result to response
                 if result.escalate:

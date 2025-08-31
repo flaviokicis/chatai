@@ -191,20 +191,27 @@ class RestartConversation(FlowResponse):
     )
 
 
-# Training/control tools (not part of the default registry; provided via extra_tools)
-class EnterTrainingMode(FlowResponse):
-    """Request to enter training mode.
+# Live flow modification tool (only available to admin users)
+class ModifyFlowLive(FlowResponse):
+    """Modify the current flow based on admin instructions during conversation.
 
     STRICT USAGE RULE:
-    - Use ONLY if the user explicitly mentions entering training mode, like
-      "modo treino", "modo teste", "ativar modo de treinamento", or clear equivalents.
-    - Do NOT infer or guess. If not explicit, do not call this tool.
+    - Use ONLY when user gives clear instructions about how the flow should behave differently
+    - Examples: "você deveria perguntar sobre tipo de unha", "next time ask about X first"
+    - Do NOT use for regular conversation or questions about the flow
+    - Only available when user is an admin (phone number in admin list)
     """
 
-    reason: Literal["explicit_user_request"] = Field(
-        default="explicit_user_request",
-        description="Why training mode is being entered",
+    instruction: str = Field(
+        description="The specific instruction about how to modify the flow behavior"
     )
+    reason: Literal["admin_instruction"] = Field(
+        default="admin_instruction",
+        description="Reason for the modification",
+    )
+
+
+
 
 
 # Tool registry for flow interactions
