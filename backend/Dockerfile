@@ -27,8 +27,8 @@ COPY app ./app
 COPY config.json ./config.json
 COPY config.local.json ./config.local.json
 
-# Copy frontend static files (pre-built and copied by build-frontend.sh)
-COPY static ./static
+# Create static directory for frontend files (may be empty for backend-only deploys)
+RUN mkdir -p ./static
 
 # Install dependencies using UV
 RUN uv sync --frozen
