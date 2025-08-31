@@ -15,6 +15,26 @@ class LangChainToolsLLM(LLMClient):
     def __init__(self, chat_model: BaseChatModel) -> None:
         self._chat = chat_model
         self._rewrite_chat = None  # lazy-inited lightweight model for rewrite
+    
+    @property
+    def model_name(self) -> str:
+        """Get the model name from the underlying chat model."""
+        # Try to extract model name from LangChain chat model
+        if hasattr(self._chat, 'model_name'):
+            return self._chat.model_name
+        elif hasattr(self._chat, 'model'):
+            return self._chat.model
+        elif hasattr(self._chat, '_model_name'):
+            return self._chat._model_name
+        else:
+            # Fallback: try to get from class name or other attributes
+            class_name = self._chat.__class__.__name__
+            if 'Gemini' in class_name:
+                return 'gemini-2.5-flash'
+            elif 'OpenAI' in class_name or 'GPT' in class_name:
+                return 'gpt-4'
+            else:
+                return class_name
 
     def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
         with_tools = self._chat.bind_tools(tools)

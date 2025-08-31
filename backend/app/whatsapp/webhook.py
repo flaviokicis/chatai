@@ -36,19 +36,35 @@ async def handle_twilio_whatsapp_webhook(
     This function now delegates all complex logic to specialized services,
     maintaining a clean separation of concerns and single responsibility principle.
     """
-    # Basic validation check (adapter handles detailed validation)
-    if not x_twilio_signature:
-        # Adapter will raise HTTP 400 if required; allow test monkeypatch to proceed
-        pass
+    try:
+        # Get appropriate adapter
+        settings = get_settings()
+        use_whatsapp_api = settings.whatsapp_provider == "cloud_api"
+        adapter = _get_adapter(settings, use_whatsapp_api=use_whatsapp_api)
 
-    # Get appropriate adapter
-    settings = get_settings()
-    use_whatsapp_api = settings.whatsapp_provider == "cloud_api"
-    adapter = _get_adapter(settings, use_whatsapp_api=use_whatsapp_api)
-
-    # Process message through the complete pipeline
-    processor = WhatsAppMessageProcessor(adapter)
-    return await processor.process_message(request, x_twilio_signature)
+        # Process message through the complete pipeline
+        processor = WhatsAppMessageProcessor(adapter)
+        return await processor.process_message(request, x_twilio_signature)
+    
+    except HTTPException as e:
+        # Log webhook validation failures but return "ok" to prevent retries
+        client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+        if e.status_code == 400:
+            logger.warning("WhatsApp webhook missing signature from IP %s", client_ip)
+        elif e.status_code == 403:
+            logger.warning("WhatsApp webhook invalid signature from IP %s", client_ip)
+        else:
+            logger.warning("WhatsApp webhook validation error %d from IP %s: %s", 
+                          e.status_code, client_ip, e.detail)
+        
+        # Return "ok" to prevent webhook retries while logging the issue
+        return PlainTextResponse("ok")
+    
+    except Exception as e:
+        # Log unexpected errors but still return "ok" to prevent webhook retries
+        client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+        logger.error("Unexpected error processing WhatsApp webhook from IP %s: %s", client_ip, e)
+        return PlainTextResponse("ok")
 
 
 async def handle_whatsapp_webhook_verification(

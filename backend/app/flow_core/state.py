@@ -54,6 +54,7 @@ class FlowContext:
     user_id: str | None = None
     session_id: str | None = None
     tenant_id: Any | None = None  # UUID, but avoiding import cycle
+    channel_id: str | None = None  # Channel identifier (e.g., WhatsApp business number)
 
     # Node tracking
     node_states: dict[str, NodeState] = field(default_factory=dict)

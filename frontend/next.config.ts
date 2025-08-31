@@ -18,6 +18,26 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  
+  // STABILITY FIX: Basic Turbopack configuration
+  turbopack: {
+    rules: {},
+  },
+  
+  // Additional stability settings
+  experimental: {
+    // Disable some features that can cause instability
+    optimizePackageImports: [],
+    // Reduce memory pressure
+    webpackMemoryOptimizations: true,
+  },
+  
+  // Ensure clean builds by disabling some caching
+  onDemandEntries: {
+    // Reduce memory pressure
+    maxInactiveAge: 25 * 1000,
+    pagesBufferLength: 2,
+  },
 };
 
 export default nextConfig;

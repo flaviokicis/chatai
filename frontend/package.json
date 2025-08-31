@@ -4,9 +4,14 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack",
+    "dev:stable": "next dev",
+    "dev:clean": "rm -rf .next && next dev",
+    "dev:fresh": "rm -rf .next node_modules/.cache && next dev --turbopack",
     "build": "next build",
+    "build:clean": "rm -rf .next && next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "cache:clean": "rm -rf .next node_modules/.cache"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",

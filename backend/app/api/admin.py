@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -131,6 +131,7 @@ class ConversationInfo(BaseModel):
     message_count: int = 0
     is_active: bool = False
     tenant_id: str | None = None
+    is_historical: bool = False  # True if from database (completed), False if from Redis (active)
 
 
 class ConversationsResponse(BaseModel):
@@ -167,6 +168,7 @@ class ConversationTraceResponse(BaseModel):
     last_activity: str
     total_thoughts: int
     thoughts: list[AgentThoughtResponse]
+    channel_id: str | None = None  # Channel identifier for customer traceability
 
 
 class AllTracesResponse(BaseModel):
@@ -730,143 +732,82 @@ async def admin_health(request: Request) -> dict[str, str]:
 async def list_conversations(
     request: Request,
     active_only: bool = False,
-    limit: int = 100
+    limit: int = 100,
+    db: Session = Depends(get_db)
 ) -> ConversationsResponse:
-    """List all ongoing conversations from Redis storage."""
+    """List all conversations based on database thought traces (for debugging support)."""
     require_admin_auth(request)
 
-    app_context = get_app_context(request.app)  # type: ignore[arg-type]
-    if not isinstance(app_context.store, RedisStore):
-        raise HTTPException(
-            status_code=503,
-            detail="Conversation management requires Redis storage"
-        )
-
     try:
-        conversations = []
-        redis_client = app_context.store._r
-        namespace = app_context.store._ns
-
-        # Get all state keys
-        state_pattern = f"{namespace}:state:*"
-        state_keys = redis_client.keys(state_pattern)
-
-        # Parse state keys using the proven working logic
-        for key in state_keys:
-            key_str = key.decode("utf-8") if isinstance(key, bytes) else key
-
-            # Skip meta keys
-            if ":meta:" in key_str:
-                continue
-
-            # Remove namespace prefix
-            if not key_str.startswith(f"{namespace}:state:"):
-                continue
-
-            remainder = key_str[len(f"{namespace}:state:"):]
-
-            # Skip system keys
-            if remainder.startswith("system:"):
-                continue
-
-            # Look for flow pattern
-            flow_match = remainder.find(":flow:")
-            if flow_match != -1:
-                user_id = remainder[:flow_match]
-                full_flow_part = remainder[flow_match + 6:]  # Skip ':flow:'
-
-                # Extract the actual flow_id (the part after the last ':flow.')
-                # E.g., "whatsapp:5522988544370:flow.atendimento_luminarias" -> "flow.atendimento_luminarias"
-                if ":flow." in full_flow_part:
-                    flow_id = "flow." + full_flow_part.split(":flow.")[-1]
-                else:
-                    flow_id = full_flow_part
-
-                agent_type = f"flow:{full_flow_part}"  # Keep original for consistency
-                session_id = f"{user_id}:flow:{full_flow_part}"
-
-                # Get state data
-                last_activity = None
+        # Fetch conversations from database thought traces (primary source for debugging)
+        from app.db.models import AgentConversationTrace
+        
+        # Get all conversation traces, grouped by user+agent_type
+        all_traces = db.query(AgentConversationTrace).order_by(
+            AgentConversationTrace.last_activity_at.desc()
+        ).limit(limit * 3).all()  # Get more to account for deduplication
+        
+        # Group traces by user+agent_type to create conversation list
+        conversation_map = {}
+        
+        for trace in all_traces:
+            # Create conversation key
+            key = f"{trace.user_id}:{trace.agent_type}"
+            
+            if key not in conversation_map:
+                # Check if this conversation has active Redis state
+                app_context = get_app_context(request.app)  # type: ignore[arg-type]
                 is_active = False
-                message_count = 0
-                tenant_id = None
-
-                try:
-                    state_data = redis_client.get(key_str)
-                    if state_data:
-                        state_json = json.loads(state_data.decode("utf-8") if isinstance(state_data, bytes) else state_data)
-
-                        if "updated_at" in state_json:
-                            try:
-                                last_activity = datetime.fromisoformat(state_json["updated_at"])
-                                is_active = (datetime.now() - last_activity) <= timedelta(hours=24)
-                            except Exception:
-                                pass
-
-                        if "history" in state_json and isinstance(state_json["history"], list):
-                            message_count = len(state_json["history"])
-                        elif "turn_count" in state_json:
-                            message_count = state_json["turn_count"]
-
-                        # Extract tenant_id from flow context if available
-                        if "tenant_id" in state_json:
-                            tenant_id = str(state_json["tenant_id"])
-
-                except Exception as e:
-                    logger.warning("Error processing conversation state for key %s: %s", key_str, e)
-
-                # If tenant_id not found in state, try to get it from database
-                if not tenant_id:
-                    try:
-                        from app.db.models import Flow
-
-                        # Get database session from the app context
-                        db = next(get_db())
-                        try:
-                            # Query by flow_id string, not UUID
-                            flow_record = db.query(Flow).filter(Flow.flow_id == flow_id).first()
-                            if flow_record:
-                                tenant_id = str(flow_record.tenant_id)
-                        finally:
-                            db.close()
-                    except Exception as e:
-                        logger.warning("Failed to get tenant_id for flow %s: %s", flow_id, e)
-
-                # Skip inactive conversations if active_only is True
+                if isinstance(app_context.store, RedisStore):
+                    redis_client = app_context.store._r
+                    namespace = app_context.store._ns
+                    
+                    # Check for active Redis state
+                    # The actual Redis key format from session manager is complex:
+                    # save(user_id="whatsapp", agent_type="flow:whatsapp:5522988544370:flow.atendimento_luminarias")
+                    # Results in: chatai:state:whatsapp:flow:whatsapp:5522988544370:flow.atendimento_luminarias
+                    
+                    # Extract channel and phone from trace user_id (e.g., "whatsapp:5522988544370")
+                    user_parts = trace.user_id.split(":", 1)
+                    if len(user_parts) == 2:
+                        channel, phone = user_parts
+                        # Construct the session_id format: flow:{full_user_id}:{flow_id}
+                        session_id = f"flow:{trace.user_id}:{trace.agent_type}"
+                        # Redis key uses channel as user_id and session_id as agent_type
+                        state_key = f"{namespace}:state:{channel}:{session_id}"
+                        is_active = redis_client.exists(state_key)
+                    else:
+                        # Fallback to direct format
+                        state_key = f"{namespace}:state:{trace.user_id}:{trace.agent_type}"
+                        is_active = redis_client.exists(state_key)
+                
+                # Skip inactive if active_only is True
                 if active_only and not is_active:
                     continue
-
-                conversations.append(ConversationInfo(
-                    user_id=user_id,
-                    agent_type=agent_type,
-                    session_id=session_id,
-                    last_activity=last_activity,
-                    message_count=message_count,
+                    
+                conversation_map[key] = ConversationInfo(
+                    user_id=trace.user_id,
+                    agent_type=trace.agent_type,
+                    session_id=trace.session_id or f"{trace.user_id}:{trace.agent_type}",
+                    last_activity=trace.last_activity_at,
+                    message_count=trace.total_thoughts,  # Use thought count as message approximation
                     is_active=is_active,
-                    tenant_id=tenant_id
-                ))
+                    tenant_id=str(trace.tenant_id),
+                    is_historical=not is_active  # Historical if no active Redis state
+                )
             else:
-                # Handle legacy format
-                parts = remainder.rsplit(":", 1)
-                if len(parts) == 2:
-                    user_id = parts[0]
-                    agent_type = parts[1]
-                    session_id = f"{user_id}:{agent_type}"
-
-                    conversations.append(ConversationInfo(
-                        user_id=user_id,
-                        agent_type=agent_type,
-                        session_id=session_id,
-                        last_activity=None,
-                        message_count=0,
-                        is_active=False,
-                        tenant_id=None  # Legacy format doesn't have tenant info
-                    ))
+                # Update with more recent activity if this trace is newer
+                existing = conversation_map[key]
+                if trace.last_activity_at > existing.last_activity:
+                    existing.last_activity = trace.last_activity_at
+                    existing.message_count += trace.total_thoughts  # Accumulate thoughts
+        
+        conversations = list(conversation_map.values())
 
         # Sort by last activity (most recent first)
         conversations.sort(key=lambda x: x.last_activity or datetime.min, reverse=True)
 
-        # Apply limit
+        # Apply limit and calculate counts
         limited_conversations = conversations[:limit]
         active_count = sum(1 for conv in conversations if conv.is_active)
 
@@ -884,11 +825,11 @@ async def list_conversations(
 
 
 @router.post("/conversations/reset")
-async def reset_conversation(
+async def reset_conversation_context(
     request: Request,
     reset_req: ResetConversationRequest
 ) -> dict[str, str]:
-    """Reset conversation context for a user (flush Redis data)."""
+    """Reset conversation Redis context only (preserves debugging data)."""
     require_admin_auth(request)
 
     app_context = get_app_context(request.app)  # type: ignore[arg-type]
@@ -945,9 +886,13 @@ async def reset_conversation(
             elif redis_client.exists(pattern):
                 deleted_keys += redis_client.delete(pattern)
 
+        # NOTE: We do NOT delete database records (ChatThreads, Messages, or Traces)
+        # Those are valuable for debugging and customer support.
+        # Reset only clears Redis context to allow conversation restart.
+        
         agent_info = f" for agent type '{reset_req.agent_type}'" if reset_req.agent_type else " for all agent types"
         return {
-            "message": f"Successfully reset conversation context for user '{reset_req.user_id}'{agent_info}",
+            "message": f"Successfully reset conversation context for user '{reset_req.user_id}'{agent_info} (Redis only - debugging data preserved)",
             "deleted_keys": str(deleted_keys)
         }
 
@@ -955,6 +900,7 @@ async def reset_conversation(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to reset conversation: {e!s}"
+
         )
 
 
@@ -1009,7 +955,8 @@ async def list_all_traces(
                 started_at=trace.started_at,
                 last_activity=trace.last_activity,
                 total_thoughts=trace.total_thoughts,
-                thoughts=thought_responses
+                thoughts=thought_responses,
+                channel_id=trace.channel_id
             ))
 
         return AllTracesResponse(
@@ -1024,16 +971,19 @@ async def list_all_traces(
         )
 
 
-@router.get("/traces/{user_id}/{agent_type}", response_model=ConversationTraceResponse)
+@router.get("/traces/{agent_type}", response_model=ConversationTraceResponse)
 async def get_conversation_trace(
     request: Request,
-    user_id: str,
     agent_type: str,
-    tenant_id: UUID,
+    user_id: str = Query(...),
+    tenant_id: UUID = Query(...),
     db: Session = Depends(get_db)
 ) -> ConversationTraceResponse:
     """Get detailed trace for a specific conversation."""
     require_admin_auth(request)
+
+    # Debug logging to understand the path parameter parsing
+    logger.info(f"Trace lookup request - user_id: '{user_id}', agent_type: '{agent_type}', tenant_id: {tenant_id}")
 
     try:
         thought_tracer = DatabaseThoughtTracer(db)
@@ -1071,7 +1021,8 @@ async def get_conversation_trace(
             started_at=trace.started_at,
             last_activity=trace.last_activity,
             total_thoughts=trace.total_thoughts,
-            thoughts=thought_responses
+            thoughts=thought_responses,
+            channel_id=trace.channel_id
         )
 
     except HTTPException:

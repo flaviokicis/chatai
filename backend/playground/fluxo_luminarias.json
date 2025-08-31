@@ -27,7 +27,7 @@
   "nodes": [
     { "id": "q.interesse_inicial", "kind": "Question", "key": "interesse_inicial", "prompt": "Olá! Como posso te ajudar hoje? Qual é o seu interesse?" },
 
-    { "id": "d.roteamento_principal", "kind": "Decision", "label": "Roteamento por tipo de necessidade", "decision_type": "llm_assisted", "decision_prompt": "Com base no interesse do cliente, determinar o caminho: luminária de terceiro, luminária nossa, luminária fora do portfólio, posto de gasolina, ginásio/quadra/tênis/futebol society, campo de futebol, ou indústria/galpão/barracão" },
+    { "id": "d.roteamento_principal", "kind": "Decision", "label": "Roteamento por tipo de necessidade", "decision_type": "llm_assisted", "decision_prompt": "Com base no interesse ESPECÍFICO do cliente, determinar o caminho APENAS se você tem 90%+ de certeza. Se o cliente disse apenas 'comprar LEDs' ou interesse genérico, escolha um caminho que permite mais qualificação (como ginásio/quadra, campo, galpão) ao invés de 'luminária nossa'. Caminhos disponíveis: luminária de terceiro, luminária nossa, luminária fora do portfólio, posto de gasolina, ginásio/quadra/tênis/futebol society, campo de futebol, ou indústria/galpão/barracão" },
 
     { "id": "q.especificacoes_terceiro", "kind": "Question", "key": "especificacoes_terceiro", "prompt": "Fabricamos nossas luminárias conforme projeto, mas se você me informar os lumens, potência, ângulo e grau IP, posso te oferecer algo similar" },
 

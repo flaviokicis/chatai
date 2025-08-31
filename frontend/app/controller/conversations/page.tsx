@@ -47,6 +47,7 @@ interface ConversationInfo {
   message_count: number;
   is_active: boolean;
   tenant_id?: string; // Optional for backward compatibility
+  is_historical?: boolean; // True if from database (completed), False if from Redis (active)
 }
 
 interface ConversationsResponse {
@@ -78,6 +79,7 @@ interface ConversationTrace {
   last_activity: string;
   total_thoughts: number;
   thoughts: AgentThought[];
+  channel_id?: string; // Channel identifier for customer traceability
 }
 
 export default function ConversationsPage(): React.JSX.Element {
@@ -92,7 +94,7 @@ export default function ConversationsPage(): React.JSX.Element {
   const [conversationToReset, setConversationToReset] = useState<ConversationInfo | null>(null);
   const [showTraceDialog, setShowTraceDialog] = useState(false);
   const [selectedTrace, setSelectedTrace] = useState<ConversationTrace | null>(null);
-  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceLoading, setTraceLoading] = useState<string | null>(null);
   const [expandedThoughts, setExpandedThoughts] = useState<Set<string>>(new Set());
   const router = useRouter();
 
@@ -118,9 +120,6 @@ export default function ConversationsPage(): React.JSX.Element {
       }
 
       const data: ConversationsResponse = await response.json();
-      console.log('Conversations data:', data.conversations); // Debug log
-      console.log('Number of conversations:', data.conversations?.length); // Debug log
-      console.log('Sample conversation structure:', data.conversations?.[0]); // Debug log
       setConversations(data.conversations);
       setTotalCount(data.total_count);
       setActiveCount(data.active_count);
@@ -182,19 +181,28 @@ export default function ConversationsPage(): React.JSX.Element {
   };
 
   const handleViewTrace = async (conversation: ConversationInfo): Promise<void> => {
-    setTraceLoading(true);
+    const conversationKey = `${conversation.user_id}:${conversation.agent_type}`;
+    setTraceLoading(conversationKey);
     try {
       const tenant_id = conversation.tenant_id;
-      console.log('Attempting to view trace for conversation:', conversation); // Debug log
-      console.log('Tenant ID:', tenant_id); // Debug log
       
       if (!tenant_id) {
         setError("Could not determine tenant for this conversation. Trace functionality requires tenant information.");
         return;
       }
 
-      const params = new URLSearchParams({ tenant_id });
-      const response = await fetch(getControllerUrl(`/traces/${encodeURIComponent(conversation.user_id)}/${encodeURIComponent(conversation.agent_type)}?${params}`), {
+      // Extract the actual flow ID from the agent_type for trace lookup
+      // Agent type format: "flow:whatsapp:5522988544370:flow.atendimento_luminarias" -> "flow.atendimento_luminarias"
+      let traceAgentType = conversation.agent_type;
+      if (conversation.agent_type.startsWith("flow:") && conversation.agent_type.includes(":flow.")) {
+        traceAgentType = "flow." + conversation.agent_type.split(":flow.")[1];
+      }
+
+      const params = new URLSearchParams({ 
+        tenant_id, 
+        user_id: conversation.user_id 
+      });
+      const response = await fetch(getControllerUrl(`/traces/${encodeURIComponent(traceAgentType)}?${params}`), {
         credentials: "include",
       });
 
@@ -214,7 +222,7 @@ export default function ConversationsPage(): React.JSX.Element {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to fetch conversation trace");
     } finally {
-      setTraceLoading(false);
+      setTraceLoading(null);
     }
   };
 
@@ -357,7 +365,7 @@ export default function ConversationsPage(): React.JSX.Element {
               <TableHeader>
                 <TableRow>
                   <TableHead>User ID</TableHead>
-                  <TableHead>Agent Type</TableHead>
+                  <TableHead>Flow Name</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Messages</TableHead>
                   <TableHead>Last Activity</TableHead>
@@ -366,9 +374,8 @@ export default function ConversationsPage(): React.JSX.Element {
               </TableHeader>
               <TableBody>
                 {conversations.map((conversation, index) => {
-                  console.log(`Rendering conversation ${index}:`, conversation);
                   return (
-                  <TableRow key={`${conversation.user_id}-${conversation.agent_type}`}>
+                  <TableRow key={`${conversation.user_id}-${conversation.agent_type}-${index}`}>
                     <TableCell className="max-w-48">
                       <div className="flex items-center">
                         <User className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
@@ -396,11 +403,11 @@ export default function ConversationsPage(): React.JSX.Element {
                           size="sm"
                           variant="outline"
                           onClick={() => handleViewTrace(conversation)}
-                          disabled={traceLoading}
+                          disabled={traceLoading === `${conversation.user_id}:${conversation.agent_type}`}
                           className="text-blue-600 hover:text-blue-700"
                           title="View reasoning trace"
                         >
-                          {traceLoading ? (
+                          {traceLoading === `${conversation.user_id}:${conversation.agent_type}` ? (
                             <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600" />
                           ) : (
                             <Brain className="h-3 w-3" />
@@ -413,14 +420,14 @@ export default function ConversationsPage(): React.JSX.Element {
                             setConversationToReset(conversation);
                             setShowResetDialog(true);
                           }}
-                          disabled={resetLoading === `${conversation.user_id}:${conversation.agent_type}`}
-                          className="text-red-600 hover:text-red-700"
-                          title="Reset conversation"
+                          disabled={resetLoading === `${conversation.user_id}:${conversation.agent_type}` || conversation.is_historical}
+                          className={conversation.is_historical ? "text-gray-400" : "text-orange-600 hover:text-orange-700"}
+                          title={conversation.is_historical ? "Historical conversation (read-only)" : "Reset conversation context"}
                         >
                           {resetLoading === `${conversation.user_id}:${conversation.agent_type}` ? (
-                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-red-600" />
+                            <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-orange-600" />
                           ) : (
-                            <Trash2 className="h-3 w-3" />
+                            <RefreshCw className="h-3 w-3" />
                           )}
                         </Button>
                       </div>
@@ -447,12 +454,12 @@ export default function ConversationsPage(): React.JSX.Element {
         <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Reset Conversation</DialogTitle>
+              <DialogTitle>Reset Conversation Context</DialogTitle>
             </DialogHeader>
             {conversationToReset && (
               <div className="space-y-4">
                 <p>
-                  Are you sure you want to reset the conversation context for:
+                  Are you sure you want to reset the Redis context for:
                 </p>
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <p><strong>User ID:</strong> {conversationToReset.user_id}</p>
@@ -461,8 +468,8 @@ export default function ConversationsPage(): React.JSX.Element {
                   <p><strong>Status:</strong> {conversationToReset.is_active ? "Active" : "Inactive"}</p>
                 </div>
                 <p className="text-sm text-gray-600">
-                  This will permanently delete all conversation history and context for this user. 
-                  This action cannot be undone.
+                  This will clear the Redis conversation context, allowing the user to restart the flow. 
+                  All debugging data (traces, messages) will be preserved in the database.
                 </p>
                 <div className="flex justify-end space-x-2">
                   <Button
@@ -478,9 +485,9 @@ export default function ConversationsPage(): React.JSX.Element {
                     variant="default"
                     onClick={() => handleResetConversation(conversationToReset)}
                     disabled={resetLoading !== null}
-                    className="bg-red-600 hover:bg-red-700 text-white"
+                    className="bg-orange-600 hover:bg-orange-700 text-white"
                   >
-                    {resetLoading ? "Resetting..." : "Reset Conversation"}
+                    {resetLoading ? "Resetting..." : "Reset Context"}
                   </Button>
                 </div>
               </div>
@@ -490,7 +497,7 @@ export default function ConversationsPage(): React.JSX.Element {
 
         {/* Reasoning Trace Dialog */}
         <Dialog open={showTraceDialog} onOpenChange={setShowTraceDialog}>
-          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-[95vw] w-full max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Agent Reasoning Trace</DialogTitle>
             </DialogHeader>
@@ -502,6 +509,9 @@ export default function ConversationsPage(): React.JSX.Element {
                       <p><strong>User ID:</strong> {selectedTrace.user_id}</p>
                       <p><strong>Agent Type:</strong> {selectedTrace.agent_type}</p>
                       <p><strong>Session ID:</strong> {selectedTrace.session_id}</p>
+                      {selectedTrace.channel_id && (
+                        <p><strong>Channel ID:</strong> {selectedTrace.channel_id}</p>
+                      )}
                     </div>
                     <div>
                       <p><strong>Started:</strong> {new Date(selectedTrace.started_at).toLocaleString()}</p>
@@ -590,7 +600,7 @@ export default function ConversationsPage(): React.JSX.Element {
                             <div className="mt-3 space-y-3">
                               <div>
                                 <p className="text-sm font-medium text-gray-700 mb-1">Tool Arguments:</p>
-                                <pre className="text-xs bg-gray-100 p-2 rounded overflow-x-auto">
+                                <pre className="text-xs bg-gray-100 p-2 rounded overflow-x-auto whitespace-pre-wrap break-words max-h-32">
                                   {JSON.stringify(thought.tool_args, null, 2)}
                                 </pre>
                               </div>

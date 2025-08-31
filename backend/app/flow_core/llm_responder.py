@@ -134,7 +134,11 @@ class LLMFlowResponder:
             session_id = getattr(ctx, "session_id", "unknown")
             user_id = getattr(ctx, "user_id", "unknown")
             tenant_id = getattr(ctx, "tenant_id", None)
-            agent_type = "flow_responder"
+            channel_id = getattr(ctx, "channel_id", None)
+            
+            # Use the specific flow ID as agent_type for proper traceability
+            # This allows debugging specific flows rather than generic "flow_responder"
+            agent_type = ctx.flow_id if hasattr(ctx, 'flow_id') else "flow_responder"
 
             # Only trace if we have tenant_id (required for database storage)
             if tenant_id:
@@ -146,7 +150,8 @@ class LLMFlowResponder:
                     current_state=current_state,
                     available_tools=tool_names,
                     tenant_id=tenant_id,
-                    model_name=getattr(self._llm, "model_name", "unknown")
+                    model_name=getattr(self._llm, "model_name", "unknown"),
+                    channel_id=channel_id
                 )
 
         # Call LLM with tools

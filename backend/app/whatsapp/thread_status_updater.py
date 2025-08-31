@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from uuid import UUID
+from typing import TYPE_CHECKING
 
 from app.core.flow_processor import (
     FlowProcessingResult,
@@ -12,8 +12,13 @@ from app.core.flow_processor import (
     FlowResponse,
     ThreadStatusUpdater,
 )
+
 from app.db.models import ThreadStatus
+
 from app.db.session import create_session
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +36,11 @@ class WhatsAppThreadStatusUpdater(ThreadStatusUpdater):
         if flow_response.result not in [FlowProcessingResult.TERMINAL, FlowProcessingResult.ESCALATE]:
             return
 
+        # Import ChatThread model here to avoid circular imports
+        from app.db.models import ChatThread
+        
         update_session = create_session()
         try:
-            # Import ChatThread model here to avoid circular imports
-            from app.db.models import ChatThread
 
             thread_for_update = update_session.get(ChatThread, thread_id)
             if not thread_for_update:
@@ -61,8 +67,8 @@ class WhatsAppThreadStatusUpdater(ThreadStatusUpdater):
 
             update_session.commit()
 
-        except Exception as e:
-            logger.error("Failed to update thread with flow result: %s", e)
+        except Exception:
+            logger.exception("Failed to update thread with flow result")
             update_session.rollback()
             raise
         finally:

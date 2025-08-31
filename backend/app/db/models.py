@@ -418,6 +418,7 @@ class AgentConversationTrace(Base, TimestampMixin):
     user_id: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agent_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    channel_id: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Channel identifier for customer traceability
 
     # Metadata
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

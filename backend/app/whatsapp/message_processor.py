@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
 
+
 from app.core.app_context import get_app_context
 from app.core.channel_adapter import ConversationalRewriter
 from app.core.flow_processor import FlowProcessingResult, FlowProcessor, FlowRequest
@@ -63,20 +64,23 @@ class WhatsAppMessageProcessor:
         This method handles all WhatsApp-specific operations and coordinates
         with the flow processor for business logic processing.
         """
-        # Step 1: Parse WhatsApp webhook
+        # Step 1: Parse WhatsApp webhook (adapter will raise HTTPException for invalid signatures)
         params = await self.adapter.validate_and_parse(request, x_twilio_signature)
-        if not params:
-            return PlainTextResponse("ok")
 
         app_context = get_app_context(request.app)  # type: ignore[arg-type]
 
         # Step 2: Extract WhatsApp message data
         message_data = self._extract_whatsapp_message_data(params, request)
-        if not message_data:
+        
+        # Skip processing if no meaningful message content (delivery receipts, status updates, etc.)
+        if not message_data.get("sender_number") or not message_data.get("receiver_number"):
+            logger.info("WhatsApp webhook received but no sender/receiver - likely delivery receipt or status update")
             return PlainTextResponse("ok")
 
         # Step 3: Check WhatsApp-specific duplicates
         if self._is_duplicate_whatsapp_message(message_data, app_context):
+            logger.debug("WhatsApp message %s from %s is duplicate - already processed", 
+                        message_data.get("message_id", "unknown"), message_data.get("sender_number", "unknown"))
             return PlainTextResponse("ok")
 
         # Step 4: Send WhatsApp typing indicator
@@ -205,13 +209,14 @@ class WhatsAppMessageProcessor:
             },
             tenant_id=conversation_setup.tenant_id,
             project_context=conversation_setup.project_context,
+            channel_id=message_data["receiver_number"],  # WhatsApp business number for customer traceability
         )
-
+        
         # Create dependencies with dependency injection
         session_manager = RedisSessionManager(app_context.store)
         training_handler = WhatsAppTrainingHandler()
         thread_updater = WhatsAppThreadStatusUpdater()
-
+        
         # Create flow processor with injected dependencies
         flow_processor = FlowProcessor(
             llm=app_context.llm,

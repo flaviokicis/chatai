@@ -36,6 +36,8 @@ import {
   Shield,
   AlertTriangle,
   Settings,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 
 interface Tenant {
@@ -77,6 +79,8 @@ export default function TenantsManagementPage(): React.JSX.Element {
     communication_style: "",
   });
   const [formLoading, setFormLoading] = useState(false);
+  const [selectedTenants, setSelectedTenants] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const router = useRouter();
 
   const fetchTenants = useCallback(async (): Promise<void> => {
@@ -232,6 +236,122 @@ export default function TenantsManagementPage(): React.JSX.Element {
     }
   };
 
+  const handleSelectTenant = (tenantId: string) => {
+    const newSelected = new Set(selectedTenants);
+    if (newSelected.has(tenantId)) {
+      newSelected.delete(tenantId);
+    } else {
+      newSelected.add(tenantId);
+    }
+    setSelectedTenants(newSelected);
+  };
+
+  const handleSelectAll = () => {
+    if (selectedTenants.size === tenants.length) {
+      setSelectedTenants(new Set());
+    } else {
+      setSelectedTenants(new Set(tenants.map(t => t.id)));
+    }
+  };
+
+  const handleDeleteTestUsers = async () => {
+    const testTenants = tenants.filter(tenant => 
+      tenant.owner_first_name === "Test User" && 
+      tenant.owner_email.includes("test-") && 
+      tenant.owner_email.includes("@example.com")
+    );
+    
+    if (testTenants.length === 0) {
+      setError("No test users found to delete.");
+      return;
+    }
+
+    // Keep the first test user, delete the rest
+    const tenantsToDelete = testTenants.slice(1);
+    
+    if (!confirm(`Are you sure you want to delete ${tenantsToDelete.length} test users? This will delete ALL associated data including channels, flows, contacts, and messages. This action cannot be undone.\n\nThe first test user will be kept.`)) {
+      return;
+    }
+
+    setBulkDeleting(true);
+    let deletedCount = 0;
+    let failedCount = 0;
+
+    for (const tenant of tenantsToDelete) {
+      try {
+        const response = await fetch(getControllerUrl(`/tenants/${tenant.id}`), {
+          method: "DELETE",
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          console.error(`Failed to delete tenant ${tenant.id}:`, error.detail);
+          failedCount++;
+        } else {
+          deletedCount++;
+        }
+      } catch (err) {
+        console.error(`Error deleting tenant ${tenant.id}:`, err);
+        failedCount++;
+      }
+    }
+
+    setBulkDeleting(false);
+    
+    if (failedCount > 0) {
+      setError(`Deleted ${deletedCount} test users, but ${failedCount} failed to delete. Check console for details.`);
+    }
+    
+    await fetchTenants();
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedTenants.size === 0) {
+      setError("No tenants selected for deletion.");
+      return;
+    }
+
+    const selectedTenantsList = tenants.filter(t => selectedTenants.has(t.id));
+    
+    if (!confirm(`Are you sure you want to delete ${selectedTenants.size} selected tenants? This will delete ALL associated data including channels, flows, contacts, and messages. This action cannot be undone.`)) {
+      return;
+    }
+
+    setBulkDeleting(true);
+    let deletedCount = 0;
+    let failedCount = 0;
+
+    for (const tenant of selectedTenantsList) {
+      try {
+        const response = await fetch(getControllerUrl(`/tenants/${tenant.id}`), {
+          method: "DELETE",
+          credentials: "include",
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          console.error(`Failed to delete tenant ${tenant.id}:`, error.detail);
+          failedCount++;
+        } else {
+          deletedCount++;
+        }
+      } catch (err) {
+        console.error(`Error deleting tenant ${tenant.id}:`, err);
+        failedCount++;
+      }
+    }
+
+    setBulkDeleting(false);
+    setSelectedTenants(new Set());
+    
+    if (failedCount > 0) {
+      setError(`Deleted ${deletedCount} tenants, but ${failedCount} failed to delete. Check console for details.`);
+    }
+    
+    await fetchTenants();
+  };
+
   const navigateToFlows = (tenantId: string) => {
     router.push(`/controller/tenants/${tenantId}/flows`);
   };
@@ -328,111 +448,145 @@ export default function TenantsManagementPage(): React.JSX.Element {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Tenant Management</CardTitle>
-              <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create Tenant
+              <div className="flex space-x-2">
+                {selectedTenants.size > 0 && (
+                  <Button
+                    variant="outline"
+                    onClick={handleBulkDelete}
+                    disabled={bulkDeleting}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Selected ({selectedTenants.size})
                   </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-2xl">
-                  <DialogHeader>
-                    <DialogTitle>Create New Tenant</DialogTitle>
-                  </DialogHeader>
-                  <form onSubmit={handleCreate} className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                )}
+                <Button
+                  variant="outline"
+                  onClick={handleDeleteTestUsers}
+                  disabled={bulkDeleting}
+                  className="text-orange-600 hover:text-orange-700"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  {bulkDeleting ? "Deleting..." : "Delete Test Users"}
+                </Button>
+                <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+                  <DialogTrigger asChild>
+                    <Button>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create Tenant
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="max-w-2xl">
+                    <DialogHeader>
+                      <DialogTitle>Create New Tenant</DialogTitle>
+                    </DialogHeader>
+                    <form onSubmit={handleCreate} className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <Label htmlFor="firstName">First Name</Label>
+                          <Input
+                            id="firstName"
+                            value={formData.owner_first_name}
+                            onChange={(e) =>
+                              setFormData({ ...formData, owner_first_name: e.target.value })
+                            }
+                            required
+                          />
+                        </div>
+                        <div>
+                          <Label htmlFor="lastName">Last Name</Label>
+                          <Input
+                            id="lastName"
+                            value={formData.owner_last_name}
+                            onChange={(e) =>
+                              setFormData({ ...formData, owner_last_name: e.target.value })
+                            }
+                            required
+                          />
+                        </div>
+                      </div>
                       <div>
-                        <Label htmlFor="firstName">First Name</Label>
+                        <Label htmlFor="email">Email</Label>
                         <Input
-                          id="firstName"
-                          value={formData.owner_first_name}
+                          id="email"
+                          type="email"
+                          value={formData.owner_email}
                           onChange={(e) =>
-                            setFormData({ ...formData, owner_first_name: e.target.value })
+                            setFormData({ ...formData, owner_email: e.target.value })
                           }
                           required
                         />
                       </div>
                       <div>
-                        <Label htmlFor="lastName">Last Name</Label>
-                        <Input
-                          id="lastName"
-                          value={formData.owner_last_name}
+                        <Label htmlFor="description">Project Description</Label>
+                        <Textarea
+                          id="description"
+                          value={formData.project_description}
                           onChange={(e) =>
-                            setFormData({ ...formData, owner_last_name: e.target.value })
+                            setFormData({ ...formData, project_description: e.target.value })
                           }
-                          required
+                          placeholder="Describe the business or project..."
                         />
                       </div>
-                    </div>
-                    <div>
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={formData.owner_email}
-                        onChange={(e) =>
-                          setFormData({ ...formData, owner_email: e.target.value })
-                        }
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="description">Project Description</Label>
-                      <Textarea
-                        id="description"
-                        value={formData.project_description}
-                        onChange={(e) =>
-                          setFormData({ ...formData, project_description: e.target.value })
-                        }
-                        placeholder="Describe the business or project..."
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="audience">Target Audience</Label>
-                      <Textarea
-                        id="audience"
-                        value={formData.target_audience}
-                        onChange={(e) =>
-                          setFormData({ ...formData, target_audience: e.target.value })
-                        }
-                        placeholder="Who is the target audience?"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="style">Communication Style</Label>
-                      <Textarea
-                        id="style"
-                        value={formData.communication_style}
-                        onChange={(e) =>
-                          setFormData({ ...formData, communication_style: e.target.value })
-                        }
-                        placeholder="Describe the desired communication tone and style..."
-                      />
-                    </div>
-                    <div className="flex justify-end space-x-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setShowCreateDialog(false);
-                          resetForm();
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                      <Button type="submit" disabled={formLoading}>
-                        {formLoading ? "Creating..." : "Create Tenant"}
-                      </Button>
-                    </div>
-                  </form>
-                </DialogContent>
-              </Dialog>
+                      <div>
+                        <Label htmlFor="audience">Target Audience</Label>
+                        <Textarea
+                          id="audience"
+                          value={formData.target_audience}
+                          onChange={(e) =>
+                            setFormData({ ...formData, target_audience: e.target.value })
+                          }
+                          placeholder="Who is the target audience?"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="style">Communication Style</Label>
+                        <Textarea
+                          id="style"
+                          value={formData.communication_style}
+                          onChange={(e) =>
+                            setFormData({ ...formData, communication_style: e.target.value })
+                          }
+                          placeholder="Describe the desired communication tone and style..."
+                        />
+                      </div>
+                      <div className="flex justify-end space-x-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setShowCreateDialog(false);
+                            resetForm();
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button type="submit" disabled={formLoading}>
+                          {formLoading ? "Creating..." : "Create Tenant"}
+                        </Button>
+                      </div>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
             </div>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-12">
+                    <button
+                      onClick={handleSelectAll}
+                      className="flex items-center justify-center w-5 h-5"
+                    >
+                      {selectedTenants.size === tenants.length && tenants.length > 0 ? (
+                        <CheckSquare className="h-4 w-4" />
+                      ) : (
+                        <Square className="h-4 w-4" />
+                      )}
+                    </button>
+                  </TableHead>
                   <TableHead>Owner</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Channels</TableHead>
@@ -444,6 +598,18 @@ export default function TenantsManagementPage(): React.JSX.Element {
               <TableBody>
                 {tenants.map((tenant) => (
                   <TableRow key={tenant.id}>
+                    <TableCell>
+                      <button
+                        onClick={() => handleSelectTenant(tenant.id)}
+                        className="flex items-center justify-center w-5 h-5"
+                      >
+                        {selectedTenants.has(tenant.id) ? (
+                          <CheckSquare className="h-4 w-4" />
+                        ) : (
+                          <Square className="h-4 w-4" />
+                        )}
+                      </button>
+                    </TableCell>
                     <TableCell>
                       <div>
                         <p className="font-medium">

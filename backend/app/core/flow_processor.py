@@ -17,18 +17,19 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
-from uuid import UUID
 
 from app.core.thought_tracer import DatabaseThoughtTracer
 from app.db.session import create_session
 from app.flow_core.compiler import compile_flow
 from app.flow_core.ir import Flow
 from app.flow_core.runner import FlowTurnRunner
-from app.flow_core.state import FlowContext
 from app.flow_core.tool_schemas import EnterTrainingMode
 
 if TYPE_CHECKING:
+    from uuid import UUID
+    
     from app.core.llm import LLMClient
+    from app.flow_core.state import FlowContext
     from app.services.tenant_config_service import ProjectContext
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,9 @@ class FlowRequest:
     user_message: str
     flow_definition: dict[str, Any]
     flow_metadata: dict[str, Any]  # flow_name, flow_id, etc.
-    tenant_id: UUID
-    project_context: ProjectContext
+    tenant_id: UUID  # type: ignore[name-defined]
+    project_context: ProjectContext  # type: ignore[name-defined]
+    channel_id: str | None = None  # Channel identifier for customer traceability
 
 
 @dataclass(frozen=True)
@@ -62,7 +64,7 @@ class FlowResponse:
 
     result: FlowProcessingResult
     message: str | None
-    context: FlowContext | None
+    context: FlowContext | None  # type: ignore[name-defined]
     metadata: dict[str, Any]
     error: str | None = None
 
@@ -241,7 +243,7 @@ class FlowProcessor:
                     self._session_manager.release_lock(session_id)
 
         except Exception as e:
-            logger.error("Flow processing failed for user %s: %s", request.user_id, e)
+            logger.exception("Flow processing failed for user %s", request.user_id)
             return FlowResponse(
                 result=FlowProcessingResult.ERROR,
                 message=None,
@@ -299,6 +301,7 @@ class FlowProcessor:
                 ctx.user_id = request.user_id
                 ctx.session_id = session_id
                 ctx.tenant_id = request.tenant_id
+                ctx.channel_id = request.channel_id
 
                 # Process the turn
                 result = runner.process_turn(
@@ -338,4 +341,5 @@ class FlowProcessor:
                 )
 
         except Exception as e:
-            raise FlowProcessingError(f"Flow execution failed: {e}", e) from e
+            error_msg = f"Flow execution failed: {e!s}"
+            raise FlowProcessingError(error_msg, e) from e

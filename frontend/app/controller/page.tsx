@@ -16,8 +16,8 @@ interface LoginResponse {
   expires_at?: string;
 }
 
-export default function ControllerLoginPage(): JSX.Element {
-  const [username, setUsername] = useState("super@inboxed.com");
+export default function ControllerLoginPage(): React.JSX.Element {
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
