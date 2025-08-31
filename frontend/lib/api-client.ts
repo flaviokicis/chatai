@@ -278,20 +278,20 @@ export const api = {
     },
     
     getExample: (): Promise<Record<string, unknown>> => 
-      apiRequest('/flows/example/raw'),
+      apiRequest('/api/flows/example/raw'),
     
     getExampleCompiled: (): Promise<Record<string, unknown>> =>
-      apiRequest('/flows/example/compiled'),
+      apiRequest('/api/flows/example/compiled'),
     
     getCompiled: (flowId: string): Promise<Record<string, unknown>> =>
-      apiRequest(`/flows/${flowId}/compiled`),
+      apiRequest(`/api/flows/${flowId}/compiled`),
     
     // Version history endpoints
     getVersions: (flowId: string): Promise<FlowVersion[]> =>
-      apiRequest(`/flows/${flowId}/versions`),
+      apiRequest(`/api/flows/${flowId}/versions`),
     
     restoreVersion: (flowId: string, versionNumber: number): Promise<{ message: string; current_version: number }> =>
-      apiRequest(`/flows/${flowId}/restore`, {
+      apiRequest(`/api/flows/${flowId}/restore`, {
         method: 'POST',
         body: JSON.stringify({ version_number: versionNumber }),
       }),
@@ -306,7 +306,7 @@ export const api = {
         active_path?: string | null;
       }
     ): Promise<FlowChatResponse> =>
-      apiRequest(`/flows/${flowId}/chat/send`, {
+      apiRequest(`/api/flows/${flowId}/chat/send`, {
         method: 'POST',
         body: JSON.stringify({ 
           content,
@@ -316,13 +316,13 @@ export const api = {
       }),
 
     list: (flowId: string): Promise<FlowChatMessage[]> =>
-      apiRequest(`/flows/${flowId}/chat/messages`),
+      apiRequest(`/api/flows/${flowId}/chat/messages`),
 
     receive: (flowId: string): Promise<FlowChatMessage | null> =>
-      apiRequest(`/flows/${flowId}/chat/receive`),
+      apiRequest(`/api/flows/${flowId}/chat/receive`),
 
     clear: (flowId: string): Promise<{ message: string }> =>
-      apiRequest(`/flows/${flowId}/chat/clear`, {
+      apiRequest(`/api/flows/${flowId}/chat/clear`, {
         method: 'POST',
       }),
   },
@@ -341,12 +341,12 @@ export const api = {
       if (params?.offset) searchParams.set('offset', params.offset.toString());
       
       const query = searchParams.toString();
-      return apiRequest(`/chats/tenants/${id}/threads${query ? `?${query}` : ''}`);
+      return apiRequest(`/api/chats/tenants/${id}/threads${query ? `?${query}` : ''}`);
     },
     
     getThread: async (tenantId: string | undefined, threadId: string): Promise<ChatThread> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/chats/tenants/${id}/threads/${threadId}`);
+      return apiRequest(`/api/chats/tenants/${id}/threads/${threadId}`);
     },
     
     listContacts: async (tenantId?: string, params?: {
@@ -359,7 +359,7 @@ export const api = {
       if (params?.offset) searchParams.set('offset', params.offset.toString());
       
       const query = searchParams.toString();
-      return apiRequest(`/chats/tenants/${id}/contacts${query ? `?${query}` : ''}`);
+      return apiRequest(`/api/chats/tenants/${id}/contacts${query ? `?${query}` : ''}`);
     },
   },
 
