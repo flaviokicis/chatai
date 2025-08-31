@@ -14,7 +14,7 @@ from fastapi.responses import PlainTextResponse
 from app.core.app_context import get_app_context
 from app.core.channel_adapter import ConversationalRewriter
 from app.core.state import RedisStore
-from app.core.thought_tracer import ThoughtTracer
+from app.core.thought_tracer import DatabaseThoughtTracer
 from app.db.models import MessageDirection, MessageStatus, ThreadStatus
 from app.db.repository import (
     find_channel_instance_by_identifier,
@@ -216,10 +216,8 @@ async def handle_twilio_whatsapp_webhook(
         flow = Flow.model_validate(flow_data)
         compiled_flow = compile_flow(flow)
 
-        # Create thought tracer if Redis is available
-        thought_tracer = None
-        if isinstance(app_context.store, RedisStore):
-            thought_tracer = ThoughtTracer(app_context.store)
+        # Create database-backed thought tracer
+        thought_tracer = DatabaseThoughtTracer(main_session)
 
         # Create tool event handler for training mode
         def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
@@ -332,6 +330,11 @@ async def handle_twilio_whatsapp_webhook(
                 logger.warning("Failed to deserialize flow context, creating new: %s", e)
 
         ctx = runner.initialize_context(existing_context)
+        
+        # Set session info for thought tracing
+        ctx.user_id = sender_number
+        ctx.session_id = flow_session_id
+        ctx.tenant_id = tenant_id
 
         # If user is in the middle of entering training password, short-circuit here
         training = TrainingModeService(main_session, app_context)

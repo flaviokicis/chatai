@@ -53,6 +53,7 @@ class FlowContext:
     # Session info (for thought tracing)
     user_id: str | None = None
     session_id: str | None = None
+    tenant_id: Any | None = None  # UUID, but avoiding import cycle
 
     # Node tracking
     node_states: dict[str, NodeState] = field(default_factory=dict)

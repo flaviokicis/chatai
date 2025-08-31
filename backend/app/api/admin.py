@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.core.app_context import get_app_context
 from app.core.state import RedisStore
-from app.core.thought_tracer import ThoughtTracer, ConversationTrace, AgentThought
+from app.core.thought_tracer import DatabaseThoughtTracer, ConversationTraceData, AgentThoughtData
 from app.db.models import ChannelType
 from app.db.repository import (
     create_channel_instance,
@@ -892,21 +892,25 @@ async def reset_conversation(
 @router.get("/traces", response_model=AllTracesResponse)
 async def list_all_traces(
     request: Request,
-    limit: int = 50
+    limit: int = 50,
+    tenant_id: UUID | None = None,
+    active_only: bool = False,
+    db: Session = Depends(get_db)
 ) -> AllTracesResponse:
-    """List all conversation traces with agent reasoning."""
+    """List all conversation traces with agent reasoning for a specific tenant."""
     require_admin_auth(request)
     
-    app_context = get_app_context(request.app)  # type: ignore[arg-type]
-    if not isinstance(app_context.store, RedisStore):
+    # If no tenant_id provided, we need to get all tenants (admin can see all)
+    # For now, require tenant_id to be explicit for security
+    if not tenant_id:
         raise HTTPException(
-            status_code=503, 
-            detail="Thought tracing requires Redis storage"
+            status_code=400,
+            detail="tenant_id parameter is required"
         )
     
     try:
-        thought_tracer = ThoughtTracer(app_context.store)
-        traces = thought_tracer.get_all_traces(limit)
+        thought_tracer = DatabaseThoughtTracer(db)
+        traces = thought_tracer.get_all_traces(tenant_id, limit, active_only)
         
         # Convert to response format
         trace_responses = []
@@ -955,21 +959,16 @@ async def list_all_traces(
 async def get_conversation_trace(
     request: Request,
     user_id: str,
-    agent_type: str
+    agent_type: str,
+    tenant_id: UUID,
+    db: Session = Depends(get_db)
 ) -> ConversationTraceResponse:
     """Get detailed trace for a specific conversation."""
     require_admin_auth(request)
     
-    app_context = get_app_context(request.app)  # type: ignore[arg-type]
-    if not isinstance(app_context.store, RedisStore):
-        raise HTTPException(
-            status_code=503, 
-            detail="Thought tracing requires Redis storage"
-        )
-    
     try:
-        thought_tracer = ThoughtTracer(app_context.store)
-        trace = thought_tracer.get_conversation_trace(user_id, agent_type)
+        thought_tracer = DatabaseThoughtTracer(db)
+        trace = thought_tracer.get_conversation_trace(tenant_id, user_id, agent_type)
         
         if not trace:
             raise HTTPException(
@@ -1019,21 +1018,16 @@ async def get_conversation_trace(
 async def clear_conversation_trace(
     request: Request,
     user_id: str,
-    agent_type: str
+    agent_type: str,
+    tenant_id: UUID,
+    db: Session = Depends(get_db)
 ) -> dict[str, str]:
     """Clear the reasoning trace for a specific conversation."""
     require_admin_auth(request)
     
-    app_context = get_app_context(request.app)  # type: ignore[arg-type]
-    if not isinstance(app_context.store, RedisStore):
-        raise HTTPException(
-            status_code=503, 
-            detail="Thought tracing requires Redis storage"
-        )
-    
     try:
-        thought_tracer = ThoughtTracer(app_context.store)
-        success = thought_tracer.clear_trace(user_id, agent_type)
+        thought_tracer = DatabaseThoughtTracer(db)
+        success = thought_tracer.clear_trace(tenant_id, user_id, agent_type)
         
         if not success:
             raise HTTPException(

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 from .engine import LLMFlowEngine
 from .llm_responder import LLMFlowResponder
 from .state import FlowContext
-from app.core.thought_tracer import ThoughtTracer
+from app.core.thought_tracer import DatabaseThoughtTracer
 
 
 # Type alias for tool event callbacks
@@ -44,7 +44,7 @@ class FlowTurnRunner:
         extra_tools: list[type] | None = None,
         instruction_prefix: str | None = None,
         strict_mode: bool = False,
-        thought_tracer: ThoughtTracer | None = None,
+        thought_tracer: DatabaseThoughtTracer | None = None,
         on_tool_event: ToolEventCallback | None = None,
     ) -> None:
         """Initialize the runner.

@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 # REMOVED: dev_config import - Use DEVELOPMENT_MODE environment variable instead
 from app.core.prompt_logger import prompt_logger
-from app.core.thought_tracer import ThoughtTracer
+from app.core.thought_tracer import DatabaseThoughtTracer
 
 from .state import FlowContext
 from .tool_schemas import (
@@ -55,14 +55,14 @@ class LLMFlowResponder:
     - Provide contextual help
     """
 
-    def __init__(self, llm: LLMClient, use_all_tools: bool = False, thought_tracer: ThoughtTracer | None = None) -> None:  # type: ignore[name-defined]
+    def __init__(self, llm: LLMClient, use_all_tools: bool = False, thought_tracer: DatabaseThoughtTracer | None = None) -> None:  # type: ignore[name-defined]
         """
         Initialize the responder.
 
         Args:
             llm: The LLM client for tool calling
             use_all_tools: If True, use all available tools; if False, use a minimal set
-            thought_tracer: Optional thought tracer for capturing reasoning
+            thought_tracer: Optional database-backed thought tracer for capturing reasoning
         """
         self._llm = llm
         self._use_all_tools = use_all_tools
@@ -133,17 +133,21 @@ class LLMFlowResponder:
             # Extract session info from context if available
             session_id = getattr(ctx, 'session_id', 'unknown')
             user_id = getattr(ctx, 'user_id', 'unknown')
+            tenant_id = getattr(ctx, 'tenant_id', None)
             agent_type = "flow_responder"
             
-            thought_id = self._thought_tracer.start_thought(
-                user_id=user_id,
-                session_id=session_id,
-                agent_type=agent_type,
-                user_message=user_message,
-                current_state=current_state,
-                available_tools=tool_names,
-                model_name=getattr(self._llm, 'model_name', 'unknown')
-            )
+            # Only trace if we have tenant_id (required for database storage)
+            if tenant_id:
+                thought_id = self._thought_tracer.start_thought(
+                    user_id=user_id,
+                    session_id=session_id,
+                    agent_type=agent_type,
+                    user_message=user_message,
+                    current_state=current_state,
+                    available_tools=tool_names,
+                    tenant_id=tenant_id,
+                    model_name=getattr(self._llm, 'model_name', 'unknown')
+                )
 
         # Call LLM with tools
         try:
