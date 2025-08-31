@@ -337,27 +337,34 @@ async def handle_twilio_whatsapp_webhook(
         ctx.tenant_id = tenant_id
 
         # If user is in the middle of entering training password, short-circuit here
-        training = TrainingModeService(main_session, app_context)
-        if training.awaiting_password(thread, user_id=sender_number):
-            handled, reply = training.validate_password(
-                thread,
-                selected_flow,
-                message_text,
-                user_id=sender_number,
-                flow_session_key=flow_session_id,
-            )
-            return adapter.build_sync_response(reply)
-
-        # If training mode is active, route to flow modification system
-        if getattr(thread, "training_mode", False):
-            try:
-                reply_text = await training.handle_training_message(
-                    thread, selected_flow, message_text, project_context
+        # Create a new session for training operations since main_session is closed
+        training_session = create_session()
+        try:
+            training = TrainingModeService(training_session, app_context)
+            # Re-fetch thread in the new session to avoid DetachedInstanceError
+            thread_in_training_session = training_session.get(type(thread), thread.id)
+            if thread_in_training_session and training.awaiting_password(thread_in_training_session, user_id=sender_number):
+                handled, reply = training.validate_password(
+                    thread_in_training_session,
+                    selected_flow,
+                    message_text,
+                    user_id=sender_number,
+                    flow_session_key=flow_session_id,
                 )
-            except Exception as e:
-                logger.error("Training mode processing failed: %s", e)
-                reply_text = "Falha ao processar instrução de treino. Tente novamente."
-            return adapter.build_sync_response(reply_text)
+                return adapter.build_sync_response(reply)
+
+            # If training mode is active, route to flow modification system
+            if thread_in_training_session and getattr(thread_in_training_session, "training_mode", False):
+                try:
+                    reply_text = await training.handle_training_message(
+                        thread_in_training_session, selected_flow, message_text, project_context
+                    )
+                except Exception as e:
+                    logger.error("Training mode processing failed: %s", e)
+                    reply_text = "Falha ao processar instrução de treino. Tente novamente."
+                return adapter.build_sync_response(reply_text)
+        finally:
+            training_session.close()
 
         # Process the user message through the flow
         result = runner.process_turn(
@@ -392,32 +399,36 @@ async def handle_twilio_whatsapp_webhook(
 
         # Update ChatThread with flow completion or escalation data
         if result.escalate or result.terminal:
+            # Create a new session for thread updates since main_session is closed
+            update_session = create_session()
             try:
-                # We already have channel_instance, contact, thread from main_session
-                # Just update the existing thread object
+                # Re-fetch thread in the new session to avoid DetachedInstanceError
+                thread_for_update = update_session.get(type(thread), thread.id)
+                if thread_for_update:
+                    if result.escalate:
+                        # Track human handoff request
+                        thread_for_update.human_handoff_requested_at = datetime.now(UTC)
+                        logger.info("Marked thread %s for human handoff", thread_for_update.id)
 
-                if result.escalate:
-                    # Track human handoff request
-                    thread.human_handoff_requested_at = datetime.now(UTC)
-                    logger.info("Marked thread %s for human handoff", thread.id)
+                    if result.terminal:
+                        # Store completion data and close thread
+                        thread_for_update.flow_completion_data = {
+                            "answers": ctx.answers,
+                            "flow_id": selected_flow.flow_id,
+                            "flow_name": selected_flow.name,
+                            "completion_message": result.assistant_message,
+                            "total_messages": len(getattr(ctx, "history", [])),
+                        }
+                        thread_for_update.completed_at = datetime.now(UTC)
+                        thread_for_update.status = ThreadStatus.closed
+                        logger.info("Closed thread %s with completion data", thread_for_update.id)
 
-                if result.terminal:
-                    # Store completion data and close thread
-                    thread.flow_completion_data = {
-                        "answers": ctx.answers,
-                        "flow_id": selected_flow.flow_id,
-                        "flow_name": selected_flow.name,
-                        "completion_message": result.assistant_message,
-                        "total_messages": len(getattr(ctx, "history", [])),
-                    }
-                    thread.completed_at = datetime.now(UTC)
-                    thread.status = ThreadStatus.closed
-                    logger.info("Closed thread %s with completion data", thread.id)
-
-                main_session.commit()
+                    update_session.commit()
             except Exception as e:
                 logger.error("Failed to update thread with flow result: %s", e)
-                main_session.rollback()
+                update_session.rollback()
+            finally:
+                update_session.close()
 
         # Store updated context back to session storage for next turn
         if not result.terminal:  # Only save if conversation is continuing
