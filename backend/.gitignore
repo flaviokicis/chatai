@@ -39,7 +39,7 @@ dist/
 .cache/
 
 # Static frontend files (built by Docker/development)
-static/
+# Uncomment for Railway deployment: static/
 
 # Temporary test files
 cookies.txt
