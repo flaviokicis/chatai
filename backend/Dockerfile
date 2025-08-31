@@ -1,19 +1,22 @@
 # syntax=docker/dockerfile:1.6
 
+# Note: This Dockerfile assumes Railway root directory is set to the project root (not /backend)
+# If Railway root is /backend, change it to the project root in Railway settings
+
 # Frontend build stage
 FROM node:18-alpine AS frontend-builder
 
 WORKDIR /frontend
 
 # Copy frontend package files
-COPY ../frontend/package.json ../frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
 
 # Install pnpm and dependencies
 RUN npm install -g pnpm
 RUN pnpm install --frozen-lockfile
 
 # Copy frontend source
-COPY ../frontend/ ./
+COPY frontend/ ./
 
 # Build static export
 RUN pnpm run build
@@ -36,7 +39,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir --upgrade pip
 
 # Copy project metadata for dependency install
-COPY pyproject.toml ./
+COPY backend/pyproject.toml ./
 
 # Provide README expected by pyproject metadata during build
 RUN echo "# ChatAI Backend" > README.md
@@ -46,10 +49,10 @@ RUN echo "# ChatAI Backend" > README.md
 RUN pip install --no-cache-dir .
 
 # Copy backend project files and source
-COPY uv.lock ./
-COPY app ./app
-COPY config.json ./config.json
-COPY config.local.json ./config.local.json
+COPY backend/uv.lock ./
+COPY backend/app ./app
+COPY backend/config.json ./config.json
+COPY backend/config.local.json ./config.local.json
 
 # Copy frontend static files from build stage
 COPY --from=frontend-builder /frontend/.next ./static

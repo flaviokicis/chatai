@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Client-side-only React app (like old React days)
-  // No static export - just build regular React app served from Python
+  // Client-side SPA served from Python (like old React days)
+  // No static export - regular Next.js build for SPA behavior
   
   // Disable image optimization since we're serving from Python
   images: {

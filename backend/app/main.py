@@ -157,7 +157,13 @@ app.include_router(api_router)
 
 # Serve Next.js frontend with SPA-style routing (PRODUCTION ONLY)
 # In development, frontend runs separately on port 3000
-if os.getenv("NODE_ENV") == "production":
+# Override with SERVE_FRONTEND=true for local production testing
+serve_frontend = (
+    os.getenv("NODE_ENV") == "production" or 
+    os.getenv("SERVE_FRONTEND", "").lower() == "true"
+)
+
+if serve_frontend:
     static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
     if os.path.exists(static_dir):
         # Serve Next.js static assets (JS, CSS, images)
@@ -195,8 +201,10 @@ if os.getenv("NODE_ENV") == "production":
             # Final fallback
             raise HTTPException(status_code=404, detail="Page not found")
         
-        logger.info("PRODUCTION: SPA routing configured for frontend from %s", server_app_dir)
+        mode = "PRODUCTION" if os.getenv("NODE_ENV") == "production" else "DEBUG"
+        logger.info("%s: SPA routing configured for frontend from %s", mode, server_app_dir)
     else:
-        logger.warning("PRODUCTION: Static files directory not found: %s", static_dir)
+        logger.warning("Static files directory not found: %s", static_dir)
 else:
     logger.info("DEVELOPMENT: Frontend static serving disabled - run 'pnpm dev' separately")
+    logger.info("To test production-like serving locally: SERVE_FRONTEND=true make dev")
