@@ -155,6 +155,10 @@ async def health() -> str:
 # Aggregate API router mounted
 app.include_router(api_router)
 
+# Add legacy webhook routes for backward compatibility (without /api prefix)
+from app.whatsapp.router import router as whatsapp_router
+app.include_router(whatsapp_router)
+
 # Serve Next.js frontend with SPA-style routing (PRODUCTION ONLY)
 # In development, frontend runs separately on port 3000
 # Override with SERVE_FRONTEND=true for local production testing
