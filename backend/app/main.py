@@ -121,8 +121,18 @@ app.add_middleware(
         "http://localhost:8080",  # Allow backend to call itself
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "Accept",
+        "Accept-Language",
+        "Content-Language", 
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "X-CSRF-Token",
+        "Cache-Control",
+        "Pragma",
+    ],
 )
 app.add_middleware(RequestIdMiddleware)
 

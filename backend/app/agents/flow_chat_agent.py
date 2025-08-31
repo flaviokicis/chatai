@@ -80,17 +80,32 @@ class FlowChatAgent:
             prompt = self._build_prompt(flow, messages, simplified_view_enabled, active_path)
             logger.info(f"Agent iteration {iteration+1}: Calling LLM extract with prompt length {len(prompt)}")
             
-            # Write the raw prompt exactly as sent to LLM (no formatting)
-            import os
-            from datetime import datetime
-            log_filename = f"llm_raw_prompt_{datetime.now().strftime('%Y%m%d_%H%M%S')}_iter{iteration+1}.txt"
-            log_path = os.path.join("/Users/jessica/me/chatai", log_filename)
-            try:
-                with open(log_path, 'w', encoding='utf-8') as f:
-                    f.write(prompt)
-                logger.info(f"Agent iteration {iteration+1}: Raw prompt written to {log_filename}")
-            except Exception as e:
-                logger.error(f"Failed to write raw prompt: {e}")
+            # DEVELOPMENT MODE ONLY: Write raw prompts to disk for debugging
+            # This prevents disk space exhaustion and security issues in production
+            from app.settings import is_development_mode
+            is_development = is_development_mode()
+            
+            if is_development:
+                import os
+                import tempfile
+                from datetime import datetime
+                
+                # Use system temp directory instead of hardcoded path
+                temp_dir = tempfile.gettempdir()
+                log_filename = f"llm_raw_prompt_{datetime.now().strftime('%Y%m%d_%H%M%S')}_iter{iteration+1}.txt"
+                log_path = os.path.join(temp_dir, "chatai_debug", log_filename)
+                
+                try:
+                    # Ensure debug directory exists
+                    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                    
+                    with open(log_path, 'w', encoding='utf-8') as f:
+                        f.write(prompt)
+                    logger.info(f"Agent iteration {iteration+1}: Raw prompt written to {log_filename} (development mode)")
+                except Exception as e:
+                    logger.warning(f"Failed to write debug prompt file: {e}")
+            else:
+                logger.debug(f"Agent iteration {iteration+1}: Prompt logging disabled in production mode")
             
             # Run LLM call in executor to avoid blocking event loop
             loop = asyncio.get_event_loop()
@@ -98,20 +113,21 @@ class FlowChatAgent:
             content = result.get("content")
             tool_calls = result.get("tool_calls") or []
             
-            # Append the LLM response to the same file
-            try:
-                with open(log_path, 'a', encoding='utf-8') as f:
-                    f.write(f"\n\n=== LLM RESPONSE ===\n")
-                    f.write(f"Content Length: {len(content) if content else 0}\n")
-                    f.write(f"Tool Calls Count: {len(tool_calls)}\n")
-                    if content:
-                        f.write(f"Content: {content}\n")
-                    if tool_calls:
-                        f.write("Tool Calls:\n")
-                        for i, call in enumerate(tool_calls):
-                            f.write(f"  {i+1}. {call.get('name')}: {call.get('arguments', {})}\n")
-            except Exception as e:
-                logger.error(f"Failed to log LLM response: {e}")
+            # DEVELOPMENT MODE ONLY: Append the LLM response to debug file
+            if is_development and 'log_path' in locals():
+                try:
+                    with open(log_path, 'a', encoding='utf-8') as f:
+                        f.write(f"\n\n=== LLM RESPONSE ===\n")
+                        f.write(f"Content Length: {len(content) if content else 0}\n")
+                        f.write(f"Tool Calls Count: {len(tool_calls)}\n")
+                        if content:
+                            f.write(f"Content: {content}\n")
+                        if tool_calls:
+                            f.write("Tool Calls:\n")
+                            for i, call in enumerate(tool_calls):
+                                f.write(f"  {i+1}. {call.get('name')}: {call.get('arguments', {})}\n")
+                except Exception as e:
+                    logger.warning(f"Failed to append LLM response to debug file: {e}")
             
             logger.info(f"Agent iteration {iteration+1}: LLM returned content_len={len(content) if content else 0}, tool_calls_count={len(tool_calls)}")
             if content:

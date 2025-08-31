@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
 
-from app import dev_config
+# REMOVED: dev_config import - Use DEVELOPMENT_MODE environment variable instead
 from app.core.prompt_logger import prompt_logger
+from app.core.thought_tracer import ThoughtTracer
 
 from .state import FlowContext
 from .tool_schemas import (
@@ -54,16 +55,18 @@ class LLMFlowResponder:
     - Provide contextual help
     """
 
-    def __init__(self, llm: LLMClient, use_all_tools: bool = False) -> None:  # type: ignore[name-defined]
+    def __init__(self, llm: LLMClient, use_all_tools: bool = False, thought_tracer: ThoughtTracer | None = None) -> None:  # type: ignore[name-defined]
         """
         Initialize the responder.
 
         Args:
             llm: The LLM client for tool calling
             use_all_tools: If True, use all available tools; if False, use a minimal set
+            thought_tracer: Optional thought tracer for capturing reasoning
         """
         self._llm = llm
         self._use_all_tools = use_all_tools
+        self._thought_tracer = thought_tracer
 
     def respond(
         self,
@@ -105,11 +108,42 @@ class LLMFlowResponder:
             tools = self._merge_tools(tools, extra_tools)
 
         # Debug logging
-        if dev_config.debug:
+        from app.settings import is_development_mode
+        if is_development_mode():
             tool_names = [getattr(t, "__name__", str(t)) for t in tools]
             print(f"[DEBUG] Available tools: {tool_names}")
             print(f"[DEBUG] User message: '{user_message}'")
             print(f"[DEBUG] Pending field: {pending_field}")
+
+        # Start thought tracing if available
+        thought_id = None
+        start_time = None
+        if self._thought_tracer:
+            import time
+            start_time = time.time()
+            
+            tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+            current_state = {
+                "answers": dict(ctx.answers),
+                "pending_field": pending_field,
+                "active_path": ctx.active_path,
+                "clarification_count": ctx.clarification_count
+            }
+            
+            # Extract session info from context if available
+            session_id = getattr(ctx, 'session_id', 'unknown')
+            user_id = getattr(ctx, 'user_id', 'unknown')
+            agent_type = "flow_responder"
+            
+            thought_id = self._thought_tracer.start_thought(
+                user_id=user_id,
+                session_id=session_id,
+                agent_type=agent_type,
+                user_message=user_message,
+                current_state=current_state,
+                available_tools=tool_names,
+                model_name=getattr(self._llm, 'model_name', 'unknown')
+            )
 
         # Call LLM with tools
         try:
@@ -129,7 +163,7 @@ class LLMFlowResponder:
                 }
             )
             
-            if dev_config.debug:
+            if is_development_mode():
                 print(f"[DEBUG] LLM result: {result}")
         except Exception as e:
             # Log the error
@@ -142,7 +176,7 @@ class LLMFlowResponder:
                 metadata={"error": str(e), "pending_field": pending_field}
             )
             
-            if dev_config.debug:
+            if is_development_mode():
                 print(f"[DEBUG] LLM extraction failed: {e}")
             # Fallback response on error
             return FlowResponse(
@@ -166,7 +200,41 @@ class LLMFlowResponder:
                     pass
 
         # Process the tool response
-        return self._process_tool_response(result, pending_field, ctx)
+        flow_response = self._process_tool_response(result, pending_field, ctx)
+        
+        # Complete thought tracing if available
+        if self._thought_tracer and thought_id and start_time:
+            import time
+            processing_time_ms = int((time.time() - start_time) * 1000)
+            
+            # Extract reasoning and tool info from result
+            reasoning = ""
+            selected_tool = ""
+            tool_args = {}
+            errors = []
+            
+            if isinstance(result, dict):
+                reasoning = result.get("reasoning", "No reasoning provided")
+                selected_tool = result.get("__tool_name__", flow_response.tool_name or "unknown")
+                tool_args = {k: v for k, v in result.items() if not k.startswith("__") and k != "reasoning"}
+            
+            if flow_response.metadata and isinstance(flow_response.metadata, dict):
+                if "error" in flow_response.metadata:
+                    errors.append(flow_response.metadata["error"])
+            
+            self._thought_tracer.complete_thought(
+                thought_id=thought_id,
+                reasoning=reasoning,
+                selected_tool=selected_tool,
+                tool_args=tool_args,
+                tool_result=str(flow_response.updates) if flow_response.updates else None,
+                agent_response=flow_response.message,
+                errors=errors if errors else None,
+                processing_time_ms=processing_time_ms,
+                metadata=flow_response.metadata if isinstance(flow_response.metadata, dict) else {}
+            )
+        
+        return flow_response
 
     def _build_instruction(
         self,

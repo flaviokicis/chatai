@@ -191,6 +191,22 @@ class RestartConversation(FlowResponse):
     )
 
 
+# Training/control tools (not part of the default registry; provided via extra_tools)
+class EnterTrainingMode(FlowResponse):
+    """Request to enter training mode.
+
+    STRICT USAGE RULE:
+    - Use ONLY if the user explicitly mentions entering training mode, like
+      "modo treino", "modo teste", "ativar modo de treinamento", or clear equivalents.
+    - Do NOT infer or guess. If not explicit, do not call this tool.
+    """
+
+    reason: Literal["explicit_user_request"] = Field(
+        default="explicit_user_request",
+        description="Why training mode is being entered",
+    )
+
+
 # Tool registry for flow interactions
 FLOW_TOOLS = [
     UpdateAnswersFlow,

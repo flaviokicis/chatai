@@ -60,9 +60,18 @@ def run_migrations_online() -> None:
 
     """
     # Use DATABASE_URL from environment if available
-    configuration = config.get_section(config.config_ini_section, {})
-    if os.getenv("DATABASE_URL"):
-        configuration["sqlalchemy.url"] = os.getenv("DATABASE_URL")
+    configuration = config.get_section(config.config_ini_section) or {}
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        configuration["sqlalchemy.url"] = database_url
+    elif not configuration.get("sqlalchemy.url"):
+        # Fallback: use application settings
+        try:
+            from app.settings import get_settings
+            settings = get_settings()
+            configuration["sqlalchemy.url"] = settings.sqlalchemy_database_url
+        except Exception as e:
+            raise RuntimeError(f"No database URL configured. Set DATABASE_URL environment variable or configure alembic.ini. Error: {e}")
     
     connectable = engine_from_config(
         configuration,

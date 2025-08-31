@@ -35,6 +35,7 @@ import {
   LogOut,
   Shield,
   AlertTriangle,
+  Settings,
 } from "lucide-react";
 
 interface Tenant {
@@ -60,7 +61,7 @@ interface TenantFormData {
   communication_style?: string;
 }
 
-export default function TenantsManagementPage(): JSX.Element {
+export default function TenantsManagementPage(): React.JSX.Element {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -235,6 +236,10 @@ export default function TenantsManagementPage(): JSX.Element {
     router.push(`/controller/tenants/${tenantId}/flows`);
   };
 
+  const navigateToConversations = () => {
+    router.push("/controller/conversations");
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -257,10 +262,16 @@ export default function TenantsManagementPage(): JSX.Element {
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Admin Panel</h1>
           </div>
-          <Button onClick={handleLogout} variant="outline">
-            <LogOut className="h-4 w-4 mr-2" />
-            Logout
-          </Button>
+          <div className="flex space-x-2">
+            <Button onClick={navigateToConversations} variant="outline">
+              <Settings className="h-4 w-4 mr-2" />
+              Conversations
+            </Button>
+            <Button onClick={handleLogout} variant="outline">
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}

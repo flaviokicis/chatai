@@ -3,17 +3,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
     from app.services.tenant_config_service import ProjectContext
 
-from app import dev_config
+# REMOVED: dev_config import - Use DEVELOPMENT_MODE environment variable instead
 
 from .engine import LLMFlowEngine
 from .llm_responder import LLMFlowResponder
 from .state import FlowContext
+from app.core.thought_tracer import ThoughtTracer
+
+
+# Type alias for tool event callbacks
+ToolEventCallback = Callable[[str, dict[str, Any]], bool]
 
 
 @dataclass(slots=True)
@@ -39,6 +44,8 @@ class FlowTurnRunner:
         extra_tools: list[type] | None = None,
         instruction_prefix: str | None = None,
         strict_mode: bool = False,
+        thought_tracer: ThoughtTracer | None = None,
+        on_tool_event: ToolEventCallback | None = None,
     ) -> None:
         """Initialize the runner.
 
@@ -48,12 +55,16 @@ class FlowTurnRunner:
             extra_tools: Additional tools to make available
             instruction_prefix: Custom instruction text to prepend
             strict_mode: If True, enforce traditional state machine behavior
+            thought_tracer: Optional thought tracer for capturing reasoning
+            on_tool_event: Optional callback for intercepting tool events
         """
         self._engine = LLMFlowEngine(compiled_flow, llm, strict_mode=strict_mode)
-        self._responder = LLMFlowResponder(llm)
+        self._responder = LLMFlowResponder(llm, thought_tracer=thought_tracer)
         self._compiled = compiled_flow
         self._extra_tools = extra_tools or []
         self._instruction_prefix = instruction_prefix
+        self._thought_tracer = thought_tracer
+        self._on_tool_event = on_tool_event
 
     def initialize_context(self, existing_context: FlowContext | None = None) -> FlowContext:
         """Initialize or restore flow context."""
@@ -131,12 +142,28 @@ class FlowTurnRunner:
             agent_custom_instructions=self._instruction_prefix,
         )
 
+        # Generic tool event callback: allow callers to intercept any tool
+        # without altering engine state (e.g., EnterTrainingMode, custom control flows)
+        if self._on_tool_event and responder_result.tool_name:
+            metadata = responder_result.metadata or {}
+            intercepted = self._on_tool_event(responder_result.tool_name, metadata)
+            if intercepted:
+                return TurnResult(
+                    assistant_message=None,
+                    answers_diff={},
+                    tool_name=responder_result.tool_name,
+                    escalate=False,
+                    terminal=False,
+                    ctx=ctx,
+                )
+
         # Apply updates to context first
         for k, v in responder_result.updates.items():
             ctx.answers[k] = v
 
         # Debug logging (after updates are applied)
-        if dev_config.debug:
+        from app.settings import is_development_mode
+        if is_development_mode():
             print(f"[DEBUG] Tool chosen: {responder_result.tool_name}")
             print(f"[DEBUG] Updates: {responder_result.updates}")
             print(f"[DEBUG] Metadata: {responder_result.metadata}")

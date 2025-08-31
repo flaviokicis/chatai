@@ -25,10 +25,7 @@ pytest tests/test_integration_specific_tools.py -v -s
 ### 3. **Debug Mode (see all LLM calls)**
 ```bash
 # Run with debug output to see LLM reasoning
-PYTHONPATH=. python -c "
-from app import dev_config
-dev_config.debug = True
-" && pytest tests/test_comprehensive_dentist_flow.py -v -s
+DEVELOPMENT_MODE=true pytest tests/test_comprehensive_dentist_flow.py -v -s
 ```
 
 ## 🔑 Environment Setup

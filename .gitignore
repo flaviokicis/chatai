@@ -1,0 +1,12 @@
+# Database dump artifacts (repo root)
+/db_dump_*.sql
+/db_dump_*.sql.gz
+/*.dump
+/*.custom
+/*.tar
+
+# Verification reports and temp files
+/db_dump_verification_*.txt
+/.tmp_pg_url
+
+

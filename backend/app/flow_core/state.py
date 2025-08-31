@@ -49,6 +49,10 @@ class FlowContext:
     flow_id: str
     current_node_id: str | None = None
     answers: dict[str, Any] = field(default_factory=dict)
+    
+    # Session info (for thought tracing)
+    user_id: str | None = None
+    session_id: str | None = None
 
     # Node tracking
     node_states: dict[str, NodeState] = field(default_factory=dict)

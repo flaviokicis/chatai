@@ -109,7 +109,10 @@ def run_cli() -> None:
     )
 
     # Setup channel adapter and rewriter with tenant context
-    cli_adapter = CLIAdapter(enable_delays=not args.no_delays, debug_mode=args.debug)
+    from app.settings import is_development_mode
+    # Use CLI debug flag OR unified development mode
+    debug_enabled = args.debug or is_development_mode()
+    cli_adapter = CLIAdapter(enable_delays=not args.no_delays, debug_mode=debug_enabled)
     rewriter = ConversationalRewriter(llm_client if not args.no_rewrite else None)
 
     # Initialize context
@@ -156,7 +159,7 @@ def run_cli() -> None:
 
             # Display with debug info
             debug_info = None
-            if args.debug:
+            if debug_enabled:
                 debug_info = {
                     "node_id": ctx.current_node_id,
                     "pending_field": getattr(ctx, "pending_field", None),

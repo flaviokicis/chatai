@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from app import dev_config
+# REMOVED: dev_config import - Use DEVELOPMENT_MODE environment variable instead
 from app.core.naturalize import naturalize_prompt
 
 if TYPE_CHECKING:
@@ -183,7 +183,9 @@ class LLMFlowEngine:
         - NavigateFlow: jump to target node
         """
         tool_name = str(event.get("tool_name") or "")
-        print(f"[DEBUG ENGINE] _handle_tool_event called with tool_name='{tool_name}', event={event}")
+        from app.settings import is_development_mode
+        if is_development_mode():
+            print(f"[DEBUG ENGINE] _handle_tool_event called with tool_name='{tool_name}', event={event}")
         # The runner no longer forwards LLM-generated text; all user-facing phrasing is done by the rewrite model.
         # Keep ack_text empty to avoid mixing tool LLM text with final outbound.
         ack_text = ""

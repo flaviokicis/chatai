@@ -6,11 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 load_dotenv()
 
-try:
-    # Optional dev config; ignore if missing
-    from app import dev_config as _dev  # type: ignore
-except Exception:  # pragma: no cover - optional
-    _dev = None  # type: ignore[assignment]
+# REMOVED: dev_config.py support - Use DEVELOPMENT_MODE environment variable instead
 
 
 class Settings(BaseSettings):
@@ -34,8 +30,13 @@ class Settings(BaseSettings):
     redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
     # Database
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
-    # Optional debug flag via environment (DEBUG=true) in addition to dev_config.py
+    # Legacy debug flag - DEPRECATED: Use DEVELOPMENT_MODE instead
     debug: bool = Field(default=False, alias="DEBUG")
+    # Development mode flag - THE UNIFIED FLAG for all development features
+    development_mode: bool = Field(default=False, alias="DEVELOPMENT_MODE")
+    # Admin authentication
+    admin_username: str = Field(default="super@inboxed.com", alias="ADMIN_USERNAME")
+    admin_password: str | None = Field(default=None, alias="ADMIN_PASSWORD")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -76,17 +77,26 @@ def get_settings() -> Settings:
 
 
 def is_debug_enabled() -> bool:
-    """Return True if debug logging is enabled.
-
-    Priority:
-    1) app.dev_config.debug (if present)
-    2) Settings().debug (env var DEBUG)
     """
-    if _dev is not None:
-        val = getattr(_dev, "debug", None)
-        if isinstance(val, bool):
-            return val
+    DEPRECATED: Use is_development_mode() instead.
+    
+    This function is kept for backward compatibility only.
+    """
+    return is_development_mode()
+
+
+def is_development_mode() -> bool:
+    """
+    Unified function to check if we're in development mode.
+    
+    This should be used throughout the codebase for ANY development-only features.
+    
+    Returns True ONLY if DEVELOPMENT_MODE=true environment variable is set.
+    
+    This is the single source of truth for development vs production mode.
+    """
     try:
-        return bool(get_settings().debug)
+        settings = get_settings()
+        return bool(settings.development_mode)
     except Exception:
         return False

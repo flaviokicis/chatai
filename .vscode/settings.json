@@ -7,7 +7,11 @@
   "python.analysis.extraPaths": ["./backend"],
   "python.analysis.autoImportCompletions": true,
   "python.analysis.typeCheckingMode": "strict",
+  "python.analysis.include": ["./backend"],
+  "python.analysis.exclude": ["./frontend", "./node_modules"],
+  "python.languageServer": "Pylance",
   "files.associations": {
     "*.py": "python"
-  }
+  },
+  "python.analysis.diagnosticMode": "workspace"
 }

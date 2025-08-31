@@ -229,6 +229,9 @@ class Flow(Base, TimestampMixin):
     # Optimistic locking version
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
+    # Training mode password (encrypted). If unset, default to "1234" at runtime.
+    training_password: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="flows")
     versions: Mapped[list[FlowVersion]] = relationship(
         back_populates="flow", cascade="all, delete-orphan", order_by="FlowVersion.version_number.desc()"
@@ -308,6 +311,11 @@ class ChatThread(Base, TimestampMixin):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     human_handoff_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     human_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Training mode support
+    training_mode: Mapped[bool] = mapped_column(nullable=False, default=False)
+    training_mode_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    training_flow_id: Mapped[UUID | None] = mapped_column(ForeignKey("flows.id", ondelete="SET NULL"))
 
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="threads")
     contact: Mapped[Contact] = relationship(back_populates="threads")
