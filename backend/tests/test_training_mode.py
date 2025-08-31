@@ -313,3 +313,4 @@ def test_training_mode_simulation(monkeypatch):
     assert response.status_code == 200
     # Should simulate the flow response (exact text varies based on flow)
     assert len(response.text) > 5  # Some meaningful response
+
