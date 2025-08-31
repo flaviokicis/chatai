@@ -1,27 +1,20 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // For now, disable static export due to dynamic routes
-  // Enable this when ready for CDN deployment
-  // output: 'export',
+  // Client-side-only React app (like old React days)
+  // No static export - just build regular React app served from Python
   
-  // Disable image optimization for better performance
+  // Disable image optimization since we're serving from Python
   images: {
     unoptimized: true,
   },
   
-  // Configure trailing slash behavior
-  trailingSlash: true,
-  
-  // Configure asset prefix for CDN (can be set via env var)
-  assetPrefix: process.env.NEXT_PUBLIC_CDN_URL || '',
-  
-  // Disable ESLint during builds for now
+  // Disable ESLint during builds for clean CI/CD
   eslint: {
     ignoreDuringBuilds: true,
   },
   
-  // Disable TypeScript checking during builds for now
+  // Disable TypeScript checking during builds for clean CI/CD
   typescript: {
     ignoreBuildErrors: true,
   },

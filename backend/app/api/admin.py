@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Dict, Generator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -70,11 +70,11 @@ class ChannelCreateRequest(BaseModel):
     channel_type: ChannelType
     identifier: str = Field(..., min_length=1)
     phone_number: str | None = None
-    extra: dict[str, Any] | None = None
+    extra: Dict[str, Any] | None = None
 
 
 class FlowUpdateRequest(BaseModel):
-    definition: dict[str, Any]
+    definition: Dict[str, Any]
 
 
 class TenantResponse(BaseModel):
@@ -104,7 +104,7 @@ class FlowResponse(BaseModel):
     id: UUID
     name: str
     flow_id: str
-    definition: dict[str, Any]
+    definition: Dict[str, Any]
     created_at: datetime
     updated_at: datetime
 
@@ -146,7 +146,7 @@ def require_admin_auth(request: Request) -> None:
         )
 
 
-def get_db() -> Session:
+def get_db() -> Generator[Session, None, None]:
     """Database session dependency."""
     session = create_session()
     try:
@@ -252,9 +252,12 @@ async def create_tenant(
             channel_count=0,
             flow_count=0
         )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid data: {str(e)}")
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @router.put("/tenants/{tenant_id}", response_model=TenantResponse)

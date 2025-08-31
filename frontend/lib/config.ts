@@ -4,10 +4,10 @@
  */
 
 export const API_CONFIG = {
-  // In development: use localhost
-  // In production: use environment variable
+  // In development: use localhost backend
+  // In production: use relative paths (same server serves frontend + API)
   BASE_URL: process.env.NODE_ENV === 'production' 
-    ? (process.env.NEXT_PUBLIC_API_URL || 'https://your-api-domain.com')
+    ? '' // Empty string for relative paths when served from Python
     : 'http://localhost:8080',
     
   ENDPOINTS: {

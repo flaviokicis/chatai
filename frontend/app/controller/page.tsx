@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { getControllerUrl } from "@/lib/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,7 +16,7 @@ interface LoginResponse {
   expires_at?: string;
 }
 
-export default function AdminLoginPage() {
+export default function ControllerLoginPage(): JSX.Element {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -24,12 +24,7 @@ export default function AdminLoginPage() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const router = useRouter();
 
-  // Check if already authenticated
-  useEffect(() => {
-    checkAuthStatus();
-  }, []);
-
-  const checkAuthStatus = async () => {
+  const checkAuthStatus = useCallback(async (): Promise<void> => {
     try {
       const response = await fetch(getControllerUrl("/tenants"), {
         credentials: "include",
@@ -38,12 +33,17 @@ export default function AdminLoginPage() {
         setIsAuthenticated(true);
         router.push("/controller/tenants");
       }
-    } catch (error) {
+    } catch {
       // Not authenticated, stay on login page
     }
-  };
+  }, [router]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Check authentication on mount
+  useEffect(() => {
+    checkAuthStatus();
+  }, [checkAuthStatus]);
+
+  const handleLogin = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault();
     setLoading(true);
     setError("");
@@ -66,7 +66,7 @@ export default function AdminLoginPage() {
       } else {
         setError(data.message || "Authentication failed");
       }
-    } catch (err) {
+    } catch {
       setError("Network error. Please try again.");
     } finally {
       setLoading(false);

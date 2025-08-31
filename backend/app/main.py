@@ -3,9 +3,13 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from langchain.chat_models import init_chat_model
 
@@ -28,7 +32,85 @@ from app.services.tenant_service import TenantService
 from app.settings import get_settings
 
 setup_logging()
-app = FastAPI(title="Chatai Twilio Webhook", version="0.2.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Modern FastAPI lifespan event handler for startup/shutdown."""
+    # Startup
+    settings = get_settings()
+    
+    # Configure API keys based on provider
+    if settings.llm_provider == "openai":
+        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
+    else:
+        os.environ["GOOGLE_API_KEY"] = settings.google_api_key
+    
+    # Default bootstrap LLM; per-agent overrides supported via config
+    chat = init_chat_model(settings.llm_model, model_provider=settings.llm_provider)
+    ctx = get_app_context(app)
+    ctx.llm = LangChainToolsLLM(chat)
+    ctx.llm_model = settings.llm_model
+    logger.info("Default LLM initialized: model=%s provider=%s", settings.llm_model, settings.llm_provider)
+    
+    # Load multitenant config from JSON if provided
+    config_path = os.environ.get("CONFIG_JSON_PATH") or os.getenv("CONFIG_JSON_PATH")
+    if config_path:
+        ctx.config_provider = load_json_config(config_path)
+        logger.info("Config provider initialized from %s", config_path)
+    else:
+        ctx.config_provider = load_json_config("config.json")
+        logger.info("Config provider initialized from default config.json")
+
+    # Initialize conversation store: prefer Redis when configured
+    try:
+        redis_url = settings.redis_conn_url
+    except Exception:
+        redis_url = settings.redis_url
+    if redis_url:
+        try:
+            ctx.store = RedisStore(redis_url)
+            logger.info("Conversation store initialized with Redis: %s", redis_url)
+        except Exception as e:
+            logger.warning("Redis connection failed (%s), falling back to in-memory store", e)
+            ctx.store = InMemoryStore()
+    else:
+        ctx.store = InMemoryStore()
+        logger.info("Conversation store initialized with in-memory backend")
+
+    # Initialize rate limiter
+    try:
+        if redis_url:
+            ctx.rate_limiter = RateLimiter(RedisRateLimiterBackend(redis_url))
+            logger.info("Rate limiter initialized with Redis backend")
+        else:
+            ctx.rate_limiter = RateLimiter(InMemoryRateLimiterBackend())
+            logger.info("Rate limiter initialized with in-memory backend")
+    except Exception as e:
+        logger.warning("Rate limiter initialization failed: %s", e)
+        ctx.rate_limiter = None
+
+    # Configure default session policy (stable); channels may override
+    ctx.session_policy = StableSessionPolicy()
+
+    # Initialize database tables
+    try:
+        engine = get_engine()
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables ensured (create_all)")
+    except Exception as e:
+        logger.warning("Failed to create DB tables on startup: %s", e)
+
+    yield
+    
+    # Shutdown (if needed)
+    logger.info("Application shutting down")
+
+app = FastAPI(
+    title="ChatAI Backend API", 
+    version="0.3.0",
+    description="Modern ChatAI backend with admin panel and GDPR compliance",
+    lifespan=lifespan
+)
 
 # Enable CORS for the Next.js frontend (localhost dev defaults)
 app.add_middleware(
@@ -62,85 +144,7 @@ set_app_context(
 )
 
 
-@app.on_event("startup")
-def _init_llm() -> None:
-    settings = get_settings()
-    
-    # Configure API keys based on provider
-    if settings.llm_provider == "openai":
-        os.environ["OPENAI_API_KEY"] = settings.openai_api_key
-    else:
-        os.environ["GOOGLE_API_KEY"] = settings.google_api_key
-    
-    # Default bootstrap LLM; per-agent overrides supported via config
-    chat = init_chat_model(settings.llm_model, model_provider=settings.llm_provider)
-    ctx = get_app_context(app)
-    ctx.llm = LangChainToolsLLM(chat)
-    ctx.llm_model = settings.llm_model
-    logger.info("Default LLM initialized: model=%s provider=%s", settings.llm_model, settings.llm_provider)
-    # Load multitenant config from JSON if provided
-    config_path = os.environ.get("CONFIG_JSON_PATH") or os.getenv("CONFIG_JSON_PATH")
-    if config_path:
-        ctx.config_provider = load_json_config(config_path)
-        logger.info("Config provider initialized from %s", config_path)
-    else:
-        ctx.config_provider = load_json_config("config.json")
-        logger.info("Config provider initialized from default config.json")
-
-    # Initialize conversation store: prefer Redis when configured
-    try:
-        redis_url = settings.redis_conn_url
-    except Exception:
-        redis_url = settings.redis_url
-    if redis_url:
-        try:
-            ctx.store = RedisStore(redis_url)
-            logger.info("Conversation store initialized with Redis: %s", redis_url)
-        except Exception as exc:  # pragma: no cover - startup log only
-            logger.warning("Failed to initialize Redis store (%s). Falling back to memory.", exc)
-            ctx.store = InMemoryStore()
-    else:
-        logger.info("Conversation store initialized in-memory")
-
-    # Configure default session policy (stable); channels may override
-    ctx.session_policy = StableSessionPolicy()
-
-    # Initialize rate limiter backend based on Redis availability (re-use redis_url)
-    try:
-        if redis_url:
-            ctx.rate_limiter = RateLimiter(RedisRateLimiterBackend(redis_url))
-            logger.info("Rate limiter initialized with Redis backend")
-        else:
-            ctx.rate_limiter = RateLimiter(InMemoryRateLimiterBackend())
-            logger.info("Rate limiter initialized in-memory")
-    except Exception as exc:  # pragma: no cover - startup log only
-        logger.warning("Rate limiter initialization failed (%s); disabling rate limiting", exc)
-        ctx.rate_limiter = None
-
-    # Ensure database tables exist in local/dev environments.
-    try:
-        engine = get_engine()
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables ensured (create_all)")
-        # Seed a default tenant in empty dev DBs to improve DX
-        try:
-            session = create_session()
-            try:
-                exists = session.query(Tenant).first() is not None
-                if not exists:
-                    TenantService(session).create_tenant(
-                        first_name="Demo",
-                        last_name="Tenant",
-                        email="demo@example.com",
-                    )
-                    logger.info("Seeded default demo tenant (UUIDv7)")
-            finally:
-                session.close()
-        except Exception:
-            # Non-fatal in production/CI
-            pass
-    except Exception as exc:  # pragma: no cover - startup log only
-        logger.warning("Failed to create DB tables on startup: %s", exc)
+# Modern FastAPI startup moved to lifespan context manager
 
 
 @app.get("/health", response_class=PlainTextResponse)
@@ -150,3 +154,47 @@ async def health() -> str:
 
 # Aggregate API router mounted
 app.include_router(api_router)
+
+# Serve Next.js frontend with SPA-style routing
+static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
+if os.path.exists(static_dir):
+    # Serve Next.js static assets (JS, CSS, images)
+    static_assets_dir = os.path.join(static_dir, "static")
+    if os.path.exists(static_assets_dir):
+        app.mount("/_next/static", StaticFiles(directory=static_assets_dir), name="nextjs_assets")
+        logger.info("Next.js static assets mounted from %s", static_assets_dir)
+    
+    # Custom SPA handler for client-side routing
+    from fastapi import Request
+    from fastapi.responses import FileResponse
+    
+    server_app_dir = os.path.join(static_dir, "server", "app")
+    
+    @app.get("/{full_path:path}")
+    async def spa_handler(request: Request, full_path: str):
+        """Handle SPA routing - serve appropriate HTML file or fallback to index."""
+        
+        # CRITICAL: Skip ALL API routes to prevent conflicts
+        if (full_path.startswith("controller/") or 
+            full_path.startswith("webhooks/") or
+            full_path.startswith("chats/") or
+            full_path.startswith("flows/") or
+            full_path.startswith("health")):
+            raise HTTPException(status_code=404, detail="Not Found")
+        
+        # Try to find the specific HTML file for this route
+        html_file_path = os.path.join(server_app_dir, f"{full_path}.html")
+        if os.path.exists(html_file_path):
+            return FileResponse(html_file_path, media_type="text/html")
+        
+        # For dynamic routes or missing pages, try index.html as fallback
+        index_path = os.path.join(server_app_dir, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path, media_type="text/html")
+        
+        # Final fallback
+        raise HTTPException(status_code=404, detail="Page not found")
+    
+    logger.info("SPA routing configured for frontend from %s", server_app_dir)
+else:
+    logger.warning("Static files directory not found: %s", static_dir)

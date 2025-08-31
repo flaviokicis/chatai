@@ -38,3 +38,9 @@ dist/
 # Misc
 .cache/
 
+# Static frontend files (built by Docker/development)
+static/
+
+# Temporary test files
+cookies.txt
+

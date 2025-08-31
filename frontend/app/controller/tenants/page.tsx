@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { getControllerUrl } from "@/lib/config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -60,7 +60,7 @@ interface TenantFormData {
   communication_style?: string;
 }
 
-export default function AdminTenantsPage() {
+export default function TenantsManagementPage(): JSX.Element {
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -78,11 +78,7 @@ export default function AdminTenantsPage() {
   const [formLoading, setFormLoading] = useState(false);
   const router = useRouter();
 
-  useEffect(() => {
-    fetchTenants();
-  }, []);
-
-  const fetchTenants = async () => {
+  const fetchTenants = useCallback(async (): Promise<void> => {
     try {
       const response = await fetch(getControllerUrl("/tenants"), {
         credentials: "include",
@@ -109,22 +105,26 @@ export default function AdminTenantsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [router]);
 
-  const handleLogout = async () => {
+  useEffect(() => {
+    fetchTenants();
+  }, [fetchTenants]);
+
+  const handleLogout = async (): Promise<void> => {
     try {
       await fetch(getControllerUrl("/logout"), {
         method: "POST",
         credentials: "include",
       });
       router.push("/controller");
-    } catch (err) {
+    } catch {
       // Force redirect even if logout fails
       router.push("/controller");
     }
   };
 
-  const resetForm = () => {
+  const resetForm = (): void => {
     setFormData({
       owner_first_name: "",
       owner_last_name: "",
