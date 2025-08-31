@@ -1,0 +1,11 @@
+# This file tells Railway/Nixpacks this is a Python project
+# Actual dependencies are in backend/pyproject.toml
+# This is just for Railway detection
+
+# Core FastAPI dependencies (Railway needs these to detect Python app)
+fastapi>=0.100.0
+uvicorn[standard]>=0.20.0
+pydantic>=2.0.0
+
+# Note: Full dependencies are managed by uv in backend/pyproject.toml
+# This file is only for Railway's Nixpacks detection
