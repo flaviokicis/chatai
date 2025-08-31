@@ -36,7 +36,11 @@ class TrainingModeService:
 
     def is_trigger(self, text: str) -> bool:
         t = self._norm(text)
-        return t in {"começar treino", "comecar treino", "ativar modo treino"}
+        return t in {
+            "começar treino", "comecar treino", 
+            "modo treino", "modo teste",
+            "ativar modo treino", "ativar modo de treinamento"
+        }
 
     def start_handshake(self, thread: ChatThread, flow: Flow, *, user_id: str, flow_session_key: str) -> str:  # type: ignore[type-arg]
         extra = thread.extra or {}

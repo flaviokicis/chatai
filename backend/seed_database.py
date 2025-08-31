@@ -21,7 +21,7 @@ from app.db.repository import (
     get_channel_instances_by_tenant,
     get_flows_by_tenant,
 )
-from app.db.session import create_session
+from app.db.session import db_transaction
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -64,9 +64,7 @@ def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
     Returns:
         tuple: (tenant_id, channel_instance_id, flow_id)
     """
-    session = create_session()
-    
-    try:
+    with db_transaction() as session:
         # Check if there are existing active tenants
         logger.info("Checking for existing tenants...")
         existing_tenants = get_active_tenants(session)
@@ -161,24 +159,14 @@ def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
             
             logger.info(f"Created flow: {flow.id}")
             
-            # Commit all changes
-            session.commit()
-            
-            logger.info("✅ Demo tenant created successfully!")
-            logger.info(f"📋 Tenant ID: {tenant.id}")
-            logger.info(f"📱 Channel ID: {channel.id}")
-            logger.info(f"🌊 Flow ID: {flow.id}")
-            logger.info(f"📞 WhatsApp Number: {channel.phone_number}")
-            
-            return tenant.id, channel.id, flow.id
+        # Auto-commit happens here with db_transaction context manager
+        logger.info("✅ Demo tenant created successfully!")
+        logger.info(f"📋 Tenant ID: {tenant.id}")
+        logger.info(f"📱 Channel ID: {channel.id}")
+        logger.info(f"🌊 Flow ID: {flow.id}")
+        logger.info(f"📞 WhatsApp Number: {channel.phone_number}")
         
-    except Exception as e:
-        session.rollback()
-        logger.error(f"❌ Failed to get or create demo tenant: {e}")
-        sys.exit(1)
-        
-    finally:
-        session.close()
+        return tenant.id, channel.id, flow.id
 
 
 
@@ -195,29 +183,26 @@ def main() -> None:
     tenant_id, channel_id, dentist_flow_id = get_or_create_demo_tenant()
 
     # Ensure the English course flow also exists on the same tenant
-    session = create_session()
     try:
-        flows = get_flows_by_tenant(session, tenant_id)
-        if not any(f.flow_id == "english_course_sales_flow_v1" for f in flows):
-            logger.info("Adding English course flow to tenant...")
-            english_definition = load_english_course_flow()
-            english_flow = create_flow(
-                session,
-                tenant_id=tenant_id,
-                channel_instance_id=channel_id,
-                name="Vendas Curso de Inglês",
-                flow_id="english_course_sales_flow_v1",
-                definition=english_definition,
-            )
-            session.commit()
-            logger.info(f"Added English course flow: {english_flow.id}")
-        else:
-            logger.info("English course flow already exists on tenant")
+        with db_transaction() as session:
+            flows = get_flows_by_tenant(session, tenant_id)
+            if not any(f.flow_id == "english_course_sales_flow_v1" for f in flows):
+                logger.info("Adding English course flow to tenant...")
+                english_definition = load_english_course_flow()
+                english_flow = create_flow(
+                    session,
+                    tenant_id=tenant_id,
+                    channel_instance_id=channel_id,
+                    name="Vendas Curso de Inglês",
+                    flow_id="english_course_sales_flow_v1",
+                    definition=english_definition,
+                )
+                # Auto-commit happens here
+                logger.info(f"Added English course flow: {english_flow.id}")
+            else:
+                logger.info("English course flow already exists on tenant")
     except Exception as e:
-        session.rollback()
         logger.error(f"❌ Failed to add English course flow: {e}")
-    finally:
-        session.close()
     
     logger.info("🎉 Database seeding completed!")
     logger.info("")

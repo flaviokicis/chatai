@@ -234,8 +234,7 @@ class LLMFlowResponder:
                 tool_result=str(flow_response.updates) if flow_response.updates else None,
                 agent_response=flow_response.message,
                 errors=errors if errors else None,
-                processing_time_ms=processing_time_ms,
-                metadata=flow_response.metadata if isinstance(flow_response.metadata, dict) else {}
+                extra_metadata=flow_response.metadata if isinstance(flow_response.metadata, dict) else {}
             )
         
         return flow_response

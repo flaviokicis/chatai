@@ -11,7 +11,7 @@ from langchain.chat_models import init_chat_model
 
 from app.core.channel_adapter import CLIAdapter, ConversationalRewriter
 from app.core.langchain_adapter import LangChainToolsLLM
-from app.db.session import create_session
+from app.db.session import db_session
 from app.services.tenant_config_service import TenantConfigService, ProjectContext
 from app.db.repository import get_active_tenants, get_flows_by_tenant
 
@@ -185,8 +185,7 @@ def _load_flow_and_tenant(args) -> tuple[Flow, ProjectContext | None]:
         return flow, None
 
     # Load from database using tenant
-    session = create_session()
-    try:
+    with db_session() as session:
         tenant_service = TenantConfigService(session)
         project_context = None
 
@@ -250,9 +249,6 @@ def _load_flow_and_tenant(args) -> tuple[Flow, ProjectContext | None]:
         flow = Flow.model_validate(flow_data)
         print(f"[database] Loaded flow '{selected_flow.name}' (flow_id='{selected_flow.flow_id}') from database")
         return flow, project_context
-
-    finally:
-        session.close()
 
 
 if __name__ == "__main__":

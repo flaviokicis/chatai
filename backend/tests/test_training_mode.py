@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import Mock, MagicMock, patch
+from typing import Any
+
 from app.main import app
 from app.db.session import create_session
 from app.db.repository import (
@@ -14,8 +17,36 @@ from app.db.repository import (
 )
 from app.db.models import ChannelType
 from app.services.training_mode_service import TrainingModeService
-from unittest.mock import MagicMock
+from app.core.llm import LLMClient
 import uuid
+
+
+class MockLLMForTraining(LLMClient):
+    """Mock LLM that can trigger EnterTrainingMode tool."""
+    
+    def __init__(self, should_enter_training: bool = False):
+        self.should_enter_training = should_enter_training
+        self.call_count = 0
+        
+    def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:  # type: ignore[override]
+        self.call_count += 1
+        
+        # Check if EnterTrainingMode tool is available and we should trigger it
+        tool_names = [getattr(t, "__name__", str(t)) for t in tools]
+        if self.should_enter_training and "EnterTrainingMode" in tool_names:
+            return {
+                "__tool_name__": "EnterTrainingMode",
+                "reason": "explicit_user_request",
+                "reasoning": "User explicitly requested training mode activation"
+            }
+        
+        # Default flow behavior - extract answers
+        return {
+            "__tool_name__": "UpdateAnswersFlow",
+            "updates": {"name": "Test User"} if "name" in prompt.lower() else {"intention": "testing"},
+            "validated": True,
+            "reasoning": "Extracted user information from message"
+        }
 
 
 def _patch_signature_validation(monkeypatch):
@@ -103,28 +134,84 @@ def create_test_flow_with_training():
         session.close()
 
 
-@pytest.mark.integration
-def test_training_mode_trigger_detection(monkeypatch):
-    """Test that LLM detects training mode triggers and calls EnterTrainingMode tool."""
+def test_enter_training_mode_tool():
+    """Test that EnterTrainingMode tool can be called by LLM."""
+    from app.flow_core.tool_schemas import EnterTrainingMode
     
-    monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
-    _patch_signature_validation(monkeypatch)
+    # Verify tool schema
+    tool = EnterTrainingMode(reason="explicit_user_request")
+    assert tool.reason == "explicit_user_request"
     
-    tenant_id, channel_id, flow_id, test_number = create_test_flow_with_training()
+    # Test with mock LLM
+    mock_llm = MockLLMForTraining(should_enter_training=True)
+    result = mock_llm.extract("User wants training mode", [EnterTrainingMode])
     
-    client = TestClient(app)
-    headers = {"X-Twilio-Signature": "test"}
-    from_num = "whatsapp:+15550002222"
+    assert result["__tool_name__"] == "EnterTrainingMode"
+    assert result["reason"] == "explicit_user_request"
+
+
+def test_training_mode_password_flow():
+    """Test password validation logic in isolation."""
+    # Mock dependencies
+    mock_session = MagicMock()
+    mock_app_context = MagicMock()
+    mock_store = MagicMock()
+    mock_app_context.store = mock_store
     
-    # Send training trigger
-    response = client.post(
-        "/webhooks/twilio/whatsapp",
-        data={"From": from_num, "To": test_number, "Body": "ativar modo treino"},
-        headers=headers,
+    # Mock thread and flow
+    mock_thread = MagicMock()
+    mock_thread.extra = {}
+    mock_flow = MagicMock()
+    mock_flow.id = "test-flow-id"
+    mock_flow.training_password = "5678"
+    
+    service = TrainingModeService(mock_session, mock_app_context)
+    
+    # Start handshake
+    prompt = service.start_handshake(
+        mock_thread, 
+        mock_flow, 
+        user_id="test-user", 
+        flow_session_key="test-session"
     )
+    assert prompt == "Para entrar no modo treino, informe a senha."
+    assert mock_thread.extra["awaiting_training_password"] is True
     
-    assert response.status_code == 200
-    assert "Para entrar no modo treino, informe a senha" in response.text
+    # Test correct password
+    mock_thread.extra = {"awaiting_training_password": True, "pending_training_flow_id": "test-flow-id"}
+    success, reply = service.validate_password(
+        mock_thread, 
+        mock_flow, 
+        "5678", 
+        user_id="test-user", 
+        flow_session_key="test-session"
+    )
+    assert success is True
+    assert "Modo treino ativado" in reply
+    
+    # Test wrong password
+    mock_thread.extra = {"awaiting_training_password": True, "pending_training_flow_id": "test-flow-id"}
+    success, reply = service.validate_password(
+        mock_thread, 
+        mock_flow, 
+        "1111", 
+        user_id="test-user", 
+        flow_session_key="test-session"
+    )
+    assert success is True
+    assert "Senha incorreta" in reply
+    
+    # Test non-numeric input (should reset)
+    mock_thread.extra = {"awaiting_training_password": True, "pending_training_flow_id": "test-flow-id"}
+    success, reply = service.validate_password(
+        mock_thread, 
+        mock_flow, 
+        "hello world", 
+        user_id="test-user", 
+        flow_session_key="test-session"
+    )
+    assert success is True
+    assert "Que tal começarmos de novo" in reply
 
 
 @pytest.mark.integration

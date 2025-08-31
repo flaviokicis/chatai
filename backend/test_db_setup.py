@@ -15,7 +15,7 @@ from app.db.models import (
     Tenant,
     TenantProjectConfig,
 )
-from app.db.session import create_session, get_engine
+from app.db.session import db_transaction, get_engine
 
 
 def test_database_setup():
@@ -37,8 +37,7 @@ def test_database_setup():
         print("✅ Database tables created successfully")
 
         # Test basic operations
-        session = create_session()
-        try:
+        with db_transaction() as session:
             # Create a test tenant
             tenant = Tenant(
                 owner_first_name="Test",
@@ -107,11 +106,8 @@ def test_database_setup():
             session.delete(channel)
             session.delete(config)
             session.delete(tenant)
-            session.commit()
+            # Auto-commit and auto-close happens here
             print("✅ Test data cleaned up")
-
-        finally:
-            session.close()
 
         print("🎉 All database tests passed!")
         assert True

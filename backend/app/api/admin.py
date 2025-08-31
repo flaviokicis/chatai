@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hmac
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta
@@ -37,9 +38,10 @@ from app.db.repository import (
     update_flow_definition,
     update_tenant,
 )
-from app.db.session import create_session
+from app.db.session import create_session, db_session
 from app.settings import get_settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/controller", tags=["controller"])
 security = HTTPBearer()
 
@@ -328,12 +330,9 @@ def require_admin_auth(request: Request) -> None:
 
 
 def get_db() -> Generator[Session, None, None]:
-    """Database session dependency."""
-    session = create_session()
-    try:
+    """Database session dependency with proper resource management."""
+    with db_session() as session:
         yield session
-    finally:
-        session.close()
 
 
 # API endpoints
@@ -747,58 +746,66 @@ async def list_conversations(
         redis_client = app_context.store._r
         namespace = app_context.store._ns
         
-        # Get all state keys (chatai:state:user_id:agent_type)
+        # Get all state keys
         state_pattern = f"{namespace}:state:*"
         state_keys = redis_client.keys(state_pattern)
         
-        # Also get all meta keys for session timing
-        meta_pattern = f"{namespace}:state:*:meta:*"
-        meta_keys = redis_client.keys(meta_pattern)
-        
-        # Parse state keys to extract user_id and agent_type
+        # Parse state keys using the proven working logic
         for key in state_keys:
             key_str = key.decode('utf-8') if isinstance(key, bytes) else key
-            parts = key_str.split(':')
             
-            if len(parts) >= 4 and parts[0] == namespace and parts[1] == 'state':
-                user_id = parts[2]
-                agent_type = parts[3]
+            # Skip meta keys
+            if ':meta:' in key_str:
+                continue
+            
+            # Remove namespace prefix
+            if not key_str.startswith(f"{namespace}:state:"):
+                continue
                 
-                # Skip meta keys (they have more parts)
-                if len(parts) > 4:
-                    continue
+            remainder = key_str[len(f"{namespace}:state:"):]
+            
+            # Skip system keys
+            if remainder.startswith('system:'):
+                continue
+            
+            # Look for flow pattern
+            flow_match = remainder.find(':flow:')
+            if flow_match != -1:
+                user_id = remainder[:flow_match]
+                flow_id = remainder[flow_match + 6:]  # Skip ':flow:'
                 
-                # Get last activity from meta key
-                meta_key = f"{namespace}:state:{user_id}:meta:{agent_type}"
+                agent_type = f"flow:{flow_id}"
+                session_id = f"{user_id}:flow:{flow_id}"
+                
+                # Get state data
                 last_activity = None
                 is_active = False
-                
-                try:
-                    meta_data = redis_client.get(meta_key)
-                    if meta_data:
-                        meta_json = json.loads(meta_data.decode('utf-8') if isinstance(meta_data, bytes) else meta_data)
-                        last_ts_str = meta_json.get('last_inbound_ts')
-                        if last_ts_str:
-                            last_activity = datetime.fromisoformat(last_ts_str)
-                            # Consider active if last message was within 24 hours
-                            is_active = (datetime.now() - last_activity) <= timedelta(hours=24)
-                except Exception:
-                    # If we can't parse meta, try to infer from key TTL
-                    pass
-                
-                # Get message count from history if available
                 message_count = 0
-                session_id = f"whatsapp:{user_id}:{agent_type}"  # Common session pattern
+                
                 try:
-                    history_key = f"{namespace}:history:{session_id}"
-                    message_count = redis_client.llen(history_key) or 0
-                except Exception:
-                    pass
+                    state_data = redis_client.get(key_str)
+                    if state_data:
+                        state_json = json.loads(state_data.decode('utf-8') if isinstance(state_data, bytes) else state_data)
+                        
+                        if 'updated_at' in state_json:
+                            try:
+                                last_activity = datetime.fromisoformat(state_json['updated_at'])
+                                is_active = (datetime.now() - last_activity) <= timedelta(hours=24)
+                            except Exception:
+                                pass
+                        
+                        if 'history' in state_json and isinstance(state_json['history'], list):
+                            message_count = len(state_json['history'])
+                        elif 'turn_count' in state_json:
+                            message_count = state_json['turn_count']
+                            
+                except Exception as e:
+                    logger.warning("Error processing conversation state for key %s: %s", key_str, e)
                 
                 # Skip inactive conversations if active_only is True
                 if active_only and not is_active:
                     continue
-                
+
                 conversations.append(ConversationInfo(
                     user_id=user_id,
                     agent_type=agent_type,
@@ -807,6 +814,22 @@ async def list_conversations(
                     message_count=message_count,
                     is_active=is_active
                 ))
+            else:
+                # Handle legacy format
+                parts = remainder.rsplit(':', 1)
+                if len(parts) == 2:
+                    user_id = parts[0]
+                    agent_type = parts[1]
+                    session_id = f"{user_id}:{agent_type}"
+                    
+                    conversations.append(ConversationInfo(
+                        user_id=user_id,
+                        agent_type=agent_type,
+                        session_id=session_id,
+                        last_activity=None,
+                        message_count=0,
+                        is_active=False
+                    ))
         
         # Sort by last activity (most recent first)
         conversations.sort(key=lambda x: x.last_activity or datetime.min, reverse=True)
@@ -851,12 +874,27 @@ async def reset_conversation(
         if reset_req.agent_type:
             # Reset specific agent type for user
             patterns_to_delete = [
-                f"{namespace}:state:{reset_req.user_id}:{reset_req.agent_type}",
-                f"{namespace}:state:{reset_req.user_id}:meta:{reset_req.agent_type}",
                 f"{namespace}:events:{reset_req.user_id}",
-                f"{namespace}:history:*{reset_req.user_id}*{reset_req.agent_type}*",
-                f"{namespace}:history:whatsapp:{reset_req.user_id}:{reset_req.agent_type}"
             ]
+            
+            # Handle flow format agent_type (e.g., "flow:flow_id")
+            if reset_req.agent_type.startswith("flow:"):
+                flow_id = reset_req.agent_type[5:]  # Remove "flow:" prefix
+                patterns_to_delete.extend([
+                    f"{namespace}:state:{reset_req.user_id}:flow:{flow_id}",
+                    f"{namespace}:state:{reset_req.user_id}:meta:flow",
+                    f"{namespace}:state:{reset_req.user_id}:meta:{flow_id}",
+                    f"{namespace}:history:*{reset_req.user_id}*flow*{flow_id}*",
+                    f"{namespace}:history:whatsapp:{reset_req.user_id}:flow:{flow_id}"
+                ])
+            else:
+                # Handle legacy format
+                patterns_to_delete.extend([
+                    f"{namespace}:state:{reset_req.user_id}:{reset_req.agent_type}",
+                    f"{namespace}:state:{reset_req.user_id}:meta:{reset_req.agent_type}",
+                    f"{namespace}:history:*{reset_req.user_id}*{reset_req.agent_type}*",
+                    f"{namespace}:history:whatsapp:{reset_req.user_id}:{reset_req.agent_type}"
+                ])
         else:
             # Reset all agent types for user
             patterns_to_delete = [

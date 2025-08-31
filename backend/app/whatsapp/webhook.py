@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime
@@ -22,7 +23,7 @@ from app.db.repository import (
     get_or_create_contact,
     get_or_create_thread,
 )
-from app.db.session import create_session
+from app.db.session import create_session, db_transaction
 from app.flow_core.compiler import compile_flow
 from app.flow_core.ir import Flow
 from app.flow_core.runner import FlowTurnRunner
@@ -134,10 +135,14 @@ async def handle_twilio_whatsapp_webhook(
         "Incoming WhatsApp message from %s to %s: %s", sender_number, receiver_number, message_text
     )
 
-    # Send typing indicator immediately for WhatsApp Cloud API (only if we have a message_id)
+    # Send typing indicator after a minimum delay for WhatsApp Cloud API (only if we have a message_id)
     # This gives users immediate feedback that their message was received and is being processed
+    # but with a 1 second delay to prevent overly eager typing indicators
     if settings.whatsapp_provider == "cloud_api" and message_id and isinstance(adapter, WhatsAppApiAdapter):
         try:
+            # Wait 1 second before sending typing indicator
+            await asyncio.sleep(1.0)
+            
             # Extract clean phone numbers for typing indicator
             clean_to = sender_number.replace("whatsapp:", "")
             clean_from = receiver_number.replace("whatsapp:", "")
@@ -147,42 +152,39 @@ async def handle_twilio_whatsapp_webhook(
             logger.warning("Failed to send typing indicator: %s", e)
             # Continue processing even if typing indicator fails
 
-    # PRODUCTION SAFETY: Use single database session for entire webhook processing
+    # PRODUCTION SAFETY: Use single database transaction for webhook processing
     # This prevents race conditions and ensures transactional consistency
-    main_session = create_session()
-    project_context = None
-    tenant_id: UUID | None = None
-
     try:
-        # Step 1: Get tenant configuration
-        tenant_service = TenantConfigService(main_session)
-        project_context = tenant_service.get_project_context_by_channel_identifier(receiver_number)
+        with db_transaction() as session:
+            # Step 1: Get tenant configuration
+            tenant_service = TenantConfigService(session)
+            project_context = tenant_service.get_project_context_by_channel_identifier(receiver_number)
 
-        if not project_context:
-            logger.warning("No tenant configuration found for WhatsApp number: %s", receiver_number)
-            return adapter.build_sync_response(
-                "Desculpe, este número do WhatsApp não está configurado."
-            )
+            if not project_context:
+                logger.warning("No tenant configuration found for WhatsApp number: %s", receiver_number)
+                return adapter.build_sync_response(
+                    "Desculpe, este número do WhatsApp não está configurado."
+                )
 
-        tenant_id = project_context.tenant_id
-        logger.info("Found tenant %s for channel %s", tenant_id, receiver_number)
-
-        # Step 2: Get channel instance
-        channel_instance = find_channel_instance_by_identifier(main_session, receiver_number)
+            tenant_id = project_context.tenant_id
+            logger.info("Found tenant %s for channel %s", tenant_id, receiver_number)
+            
+            # Step 2: Get channel instance 
+            channel_instance = find_channel_instance_by_identifier(session, receiver_number)
         if not channel_instance:
             logger.error("No channel instance found for number %s (tenant %s)", receiver_number, tenant_id)
             return adapter.build_sync_response("Desculpe, este número do WhatsApp não está configurado.")
 
         # Step 3: Ensure contact/thread exist
         contact = get_or_create_contact(
-            main_session,
+            session,
             tenant_id,
             external_id=sender_number,
             phone_number=sender_number.replace("whatsapp:", ""),
             display_name=None,
         )
         thread = get_or_create_thread(
-            main_session,
+            session,
             tenant_id=tenant_id,
             channel_instance_id=channel_instance.id,
             contact_id=contact.id,
@@ -190,10 +192,16 @@ async def handle_twilio_whatsapp_webhook(
         )
 
         # Commit the basic setup
-        main_session.commit()
+        session.commit()
+
+        # Store IDs for later use after session is closed
+        thread_id = thread.id
+        contact_id = contact.id
+        channel_instance_id = channel_instance.id
+        selected_flow_id = None
 
         # Step 4: Get flows specifically for this channel instance
-        flows = get_flows_by_channel_instance(main_session, channel_instance.id)
+        flows = get_flows_by_channel_instance(session, channel_instance.id)
         if not flows:
             logger.error("No flows found for channel instance %s (tenant %s)", channel_instance.id, tenant_id)
             return adapter.build_sync_response("Desculpe, nenhum fluxo configurado para este número.")
@@ -205,6 +213,7 @@ async def handle_twilio_whatsapp_webhook(
             return adapter.build_sync_response("Desculpe, nenhum fluxo ativo disponível.")
 
         selected_flow = active_flows[0]
+        selected_flow_id = selected_flow.id  # Store the flow's database ID
         logger.info("Using flow '%s' (flow_id='%s') for tenant %s",
                    selected_flow.name, selected_flow.flow_id, tenant_id)
 
@@ -217,13 +226,13 @@ async def handle_twilio_whatsapp_webhook(
         compiled_flow = compile_flow(flow)
 
         # Create database-backed thought tracer
-        thought_tracer = DatabaseThoughtTracer(main_session)
+        thought_tracer = DatabaseThoughtTracer(session)
 
         # Create tool event handler for training mode
         def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
             if tool_name == "EnterTrainingMode":
                 # Handle training mode entry via callback
-                training = TrainingModeService(main_session, app_context)
+                training = TrainingModeService(session, app_context)
                 prompt = training.start_handshake(
                     thread,
                     selected_flow,
@@ -259,18 +268,7 @@ async def handle_twilio_whatsapp_webhook(
 
     except Exception as e:
         logger.error("Failed to process webhook for tenant %s: %s", tenant_id, e)
-        # Rollback any pending changes
-        try:
-            main_session.rollback()
-        except Exception:
-            pass
         return adapter.build_sync_response("Desculpe, erro interno do sistema. Tente novamente.")
-    finally:
-        # Always close the main database session
-        try:
-            main_session.close()
-        except Exception as e:
-            logger.warning("Failed to close main database session: %s", e)
 
     # Use distributed locking to prevent concurrent processing of the same user's flow
     flow_session_id = f"flow:{sender_number}:{selected_flow.flow_id}"
@@ -342,7 +340,7 @@ async def handle_twilio_whatsapp_webhook(
         try:
             training = TrainingModeService(training_session, app_context)
             # Re-fetch thread in the new session to avoid DetachedInstanceError
-            thread_in_training_session = training_session.get(type(thread), thread.id)
+            thread_in_training_session = training_session.get(type(thread), thread_id)
             if thread_in_training_session and training.awaiting_password(thread_in_training_session, user_id=sender_number):
                 handled, reply = training.validate_password(
                     thread_in_training_session,
@@ -403,7 +401,7 @@ async def handle_twilio_whatsapp_webhook(
             update_session = create_session()
             try:
                 # Re-fetch thread in the new session to avoid DetachedInstanceError
-                thread_for_update = update_session.get(type(thread), thread.id)
+                thread_for_update = update_session.get(type(thread), thread_id)
                 if thread_for_update:
                     if result.escalate:
                         # Track human handoff request
@@ -486,14 +484,14 @@ async def handle_twilio_whatsapp_webhook(
     logger.info("Sending WhatsApp reply: %r (total messages: %d)", sync_reply, len(messages))
 
     # Persist chat to SQL using async message logging service for non-blocking operation
-    if tenant_id and "channel_instance" in locals() and "thread" in locals() and "contact" in locals():
+    if tenant_id and "channel_instance_id" in locals() and "thread_id" in locals() and "contact_id" in locals():
         try:
             # Log inbound message asynchronously (non-blocking)
             await message_logging_service.save_message_async(
                 tenant_id=tenant_id,
-                channel_instance_id=channel_instance.id,
-                thread_id=thread.id,
-                contact_id=contact.id,
+                channel_instance_id=channel_instance_id,
+                thread_id=thread_id,
+                contact_id=contact_id,
                 text=message_text,
                 direction=MessageDirection.inbound,
                 provider_message_id=params.get("SmsMessageSid") or params.get("MessageSid"),
@@ -505,9 +503,9 @@ async def handle_twilio_whatsapp_webhook(
             if sync_reply:
                 await message_logging_service.save_message_async(
                     tenant_id=tenant_id,
-                    channel_instance_id=channel_instance.id,
-                    thread_id=thread.id,
-                    contact_id=contact.id,
+                    channel_instance_id=channel_instance_id,
+                    thread_id=thread_id,
+                    contact_id=contact_id,
                     text=sync_reply,
                     direction=MessageDirection.outbound,
                     status=MessageStatus.sent,

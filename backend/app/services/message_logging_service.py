@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.db import repository
 from app.db.models import MessageDirection, MessageStatus
-from app.db.session import create_session
+from app.db.session import db_transaction
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -91,9 +91,8 @@ class MessageLoggingService:
 
         for attempt in range(self.max_retries):
             try:
-                # Create a new session for each attempt
-                session = create_session()
-                try:
+                # Use context manager for guaranteed resource cleanup
+                with db_transaction() as session:
                     repository.create_message(
                         session,
                         tenant_id=tenant_id,
@@ -109,21 +108,18 @@ class MessageLoggingService:
                         delivered_at=delivered_at,
                         read_at=read_at,
                     )
-                    session.commit()
+                    # Auto-commit and auto-close happens here
 
-                    # Log success (only on retry attempts or errors)
-                    if attempt > 0:  # Only log if this was a retry attempt
-                        direction_str = (
-                            "inbound" if direction == MessageDirection.inbound else "outbound"
-                        )
-                        logger.info(
-                            f"Successfully saved {direction_str} message for tenant {tenant_id}, "
-                            f"thread {thread_id}, attempt {attempt + 1}"
-                        )
-                    return  # Success - exit retry loop
-
-                finally:
-                    session.close()
+                # Log success (only on retry attempts or errors)
+                if attempt > 0:  # Only log if this was a retry attempt
+                    direction_str = (
+                        "inbound" if direction == MessageDirection.inbound else "outbound"
+                    )
+                    logger.info(
+                        f"Successfully saved {direction_str} message for tenant {tenant_id}, "
+                        f"thread {thread_id}, attempt {attempt + 1}"
+                    )
+                return  # Success - exit retry loop
 
             except SQLAlchemyError as e:
                 last_exception = e
