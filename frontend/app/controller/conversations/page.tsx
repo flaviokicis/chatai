@@ -46,6 +46,7 @@ interface ConversationInfo {
   last_activity: string | null;
   message_count: number;
   is_active: boolean;
+  tenant_id?: string; // Optional for backward compatibility
 }
 
 interface ConversationsResponse {
@@ -117,6 +118,9 @@ export default function ConversationsPage(): React.JSX.Element {
       }
 
       const data: ConversationsResponse = await response.json();
+      console.log('Conversations data:', data.conversations); // Debug log
+      console.log('Number of conversations:', data.conversations?.length); // Debug log
+      console.log('Sample conversation structure:', data.conversations?.[0]); // Debug log
       setConversations(data.conversations);
       setTotalCount(data.total_count);
       setActiveCount(data.active_count);
@@ -180,7 +184,17 @@ export default function ConversationsPage(): React.JSX.Element {
   const handleViewTrace = async (conversation: ConversationInfo): Promise<void> => {
     setTraceLoading(true);
     try {
-      const response = await fetch(getControllerUrl(`/traces/${encodeURIComponent(conversation.user_id)}/${encodeURIComponent(conversation.agent_type)}`), {
+      const tenant_id = conversation.tenant_id;
+      console.log('Attempting to view trace for conversation:', conversation); // Debug log
+      console.log('Tenant ID:', tenant_id); // Debug log
+      
+      if (!tenant_id) {
+        setError("Could not determine tenant for this conversation. Trace functionality requires tenant information.");
+        return;
+      }
+
+      const params = new URLSearchParams({ tenant_id });
+      const response = await fetch(getControllerUrl(`/traces/${encodeURIComponent(conversation.user_id)}/${encodeURIComponent(conversation.agent_type)}?${params}`), {
         credentials: "include",
       });
 
@@ -336,7 +350,7 @@ export default function ConversationsPage(): React.JSX.Element {
         {/* Conversations Table */}
         <Card>
           <CardHeader>
-            <CardTitle>Conversations</CardTitle>
+            <CardTitle>Conversations </CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
@@ -351,19 +365,21 @@ export default function ConversationsPage(): React.JSX.Element {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {conversations.map((conversation) => (
+                {conversations.map((conversation, index) => {
+                  console.log(`Rendering conversation ${index}:`, conversation);
+                  return (
                   <TableRow key={`${conversation.user_id}-${conversation.agent_type}`}>
-                    <TableCell>
+                    <TableCell className="max-w-48">
                       <div className="flex items-center">
-                        <User className="h-4 w-4 mr-2 text-gray-400" />
-                        <div>
-                          <p className="font-medium">{conversation.user_id}</p>
-                          <p className="text-sm text-gray-500">{conversation.session_id}</p>
+                        <User className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="font-medium truncate">{conversation.user_id}</p>
+                          <p className="text-sm text-gray-500 truncate">{conversation.session_id}</p>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{conversation.agent_type}</Badge>
+                    <TableCell className="max-w-64">
+                      <Badge variant="outline" className="truncate max-w-full">{conversation.agent_type}</Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant={conversation.is_active ? "default" : "secondary"}>
@@ -410,7 +426,8 @@ export default function ConversationsPage(): React.JSX.Element {
                       </div>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
             {conversations.length === 0 && (
@@ -458,9 +475,10 @@ export default function ConversationsPage(): React.JSX.Element {
                     Cancel
                   </Button>
                   <Button
-                    variant="destructive"
+                    variant="default"
                     onClick={() => handleResetConversation(conversationToReset)}
                     disabled={resetLoading !== null}
+                    className="bg-red-600 hover:bg-red-700 text-white"
                   >
                     {resetLoading ? "Resetting..." : "Reset Conversation"}
                   </Button>

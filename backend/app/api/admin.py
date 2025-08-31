@@ -131,6 +131,7 @@ class ConversationInfo(BaseModel):
     last_activity: datetime | None = None
     message_count: int = 0
     is_active: bool = False
+    tenant_id: str | None = None
 
 
 class ConversationsResponse(BaseModel):
@@ -720,8 +721,9 @@ async def update_flow_training_password(
 
 
 @router.get("/health")
-async def admin_health() -> dict[str, str]:
+async def admin_health(request: Request) -> dict[str, str]:
     """Health check for admin API."""
+    require_admin_auth(request)
     return {"status": "healthy", "service": "controller"}
 
 
@@ -772,15 +774,23 @@ async def list_conversations(
             flow_match = remainder.find(':flow:')
             if flow_match != -1:
                 user_id = remainder[:flow_match]
-                flow_id = remainder[flow_match + 6:]  # Skip ':flow:'
+                full_flow_part = remainder[flow_match + 6:]  # Skip ':flow:'
                 
-                agent_type = f"flow:{flow_id}"
-                session_id = f"{user_id}:flow:{flow_id}"
+                # Extract the actual flow_id (the part after the last ':flow.')
+                # E.g., "whatsapp:5522988544370:flow.atendimento_luminarias" -> "flow.atendimento_luminarias"
+                if ':flow.' in full_flow_part:
+                    flow_id = 'flow.' + full_flow_part.split(':flow.')[-1]
+                else:
+                    flow_id = full_flow_part
+                
+                agent_type = f"flow:{full_flow_part}"  # Keep original for consistency
+                session_id = f"{user_id}:flow:{full_flow_part}"
                 
                 # Get state data
                 last_activity = None
                 is_active = False
                 message_count = 0
+                tenant_id = None
                 
                 try:
                     state_data = redis_client.get(key_str)
@@ -798,9 +808,31 @@ async def list_conversations(
                             message_count = len(state_json['history'])
                         elif 'turn_count' in state_json:
                             message_count = state_json['turn_count']
+                        
+                        # Extract tenant_id from flow context if available
+                        if 'tenant_id' in state_json:
+                            tenant_id = str(state_json['tenant_id'])
                             
                 except Exception as e:
                     logger.warning("Error processing conversation state for key %s: %s", key_str, e)
+                
+                # If tenant_id not found in state, try to get it from database
+                if not tenant_id:
+                    try:
+                        from sqlalchemy.orm import Session
+                        from app.db.models import Flow
+                        
+                        # Get database session from the app context
+                        db = next(get_db())
+                        try:
+                            # Query by flow_id string, not UUID
+                            flow_record = db.query(Flow).filter(Flow.flow_id == flow_id).first()
+                            if flow_record:
+                                tenant_id = str(flow_record.tenant_id)
+                        finally:
+                            db.close()
+                    except Exception as e:
+                        logger.warning("Failed to get tenant_id for flow %s: %s", flow_id, e)
                 
                 # Skip inactive conversations if active_only is True
                 if active_only and not is_active:
@@ -812,7 +844,8 @@ async def list_conversations(
                     session_id=session_id,
                     last_activity=last_activity,
                     message_count=message_count,
-                    is_active=is_active
+                    is_active=is_active,
+                    tenant_id=tenant_id
                 ))
             else:
                 # Handle legacy format
@@ -828,7 +861,8 @@ async def list_conversations(
                         session_id=session_id,
                         last_activity=None,
                         message_count=0,
-                        is_active=False
+                        is_active=False,
+                        tenant_id=None  # Legacy format doesn't have tenant info
                     ))
         
         # Sort by last activity (most recent first)
