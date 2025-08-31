@@ -108,11 +108,11 @@ class WhatsAppApiAdapter:
             # (similar to Twilio format for compatibility)
             from_number = f"whatsapp:{message.get('from', '')}"
             to_number = f"whatsapp:{value.get('metadata', {}).get('phone_number_id', '')}"
-            
+
             # Store for use in build_sync_response
             self._last_sender = from_number
             self._last_receiver = to_number
-            
+
             return {
                 "From": from_number,
                 "To": to_number,
@@ -133,13 +133,13 @@ class WhatsAppApiAdapter:
 
         if message_type == "text":
             return message.get("text", {}).get("body", "")
-        elif message_type == "button":
+        if message_type == "button":
             return message.get("button", {}).get("text", "")
-        elif message_type == "interactive":
+        if message_type == "interactive":
             interactive = message.get("interactive", {})
             if interactive.get("type") == "button_reply":
                 return interactive.get("button_reply", {}).get("title", "")
-            elif interactive.get("type") == "list_reply":
+            if interactive.get("type") == "list_reply":
                 return interactive.get("list_reply", {}).get("title", "")
 
         # For other message types (image, document, etc.), return a placeholder
@@ -159,7 +159,7 @@ class WhatsAppApiAdapter:
                 logger.debug("Successfully sent sync WhatsApp message to %s", clean_to)
             except Exception as e:
                 logger.error("Failed to send sync WhatsApp message: %s", e)
-        
+
         # WhatsApp Cloud API expects a simple 200 OK response for webhook acknowledgment
         return PlainTextResponse("ok", status_code=200)
 
@@ -199,7 +199,7 @@ class WhatsAppApiAdapter:
                     )
 
                     time.sleep(max(0, delay_ms) / 1000.0)
-                    
+
                     # Check if this reply is still current (user hasn't sent a new message)
                     if reply_id and store:
                         try:
@@ -216,7 +216,7 @@ class WhatsAppApiAdapter:
                         except Exception as e:
                             logger.warning("Failed to check reply interrupt status: %s", e)
                             # Continue sending on error - don't break the flow
-                    
+
                     # Use the phone_number_id from the original message
                     phone_number_id = from_number.replace("whatsapp:", "")
                     self._send_message_via_api(clean_to, text, phone_number_id)
@@ -234,7 +234,7 @@ class WhatsAppApiAdapter:
 
     def send_typing_indicator(self, to_phone: str, phone_number_id: str, message_id: str) -> None:
         """Send typing indicator using WhatsApp Cloud API."""
-        
+
         try:
             # WhatsApp Cloud API endpoint for typing indicators
             url = f"https://graph.facebook.com/v17.0/{phone_number_id}/messages"
@@ -309,10 +309,9 @@ class WhatsAppApiAdapter:
         if mode == "subscribe" and token == self._settings.whatsapp_verify_token:
             logger.info("WhatsApp webhook verified successfully")
             return challenge
-        else:
-            logger.warning(
-                "WhatsApp webhook verification failed: mode=%s, token_valid=%s",
-                mode,
-                token == self._settings.whatsapp_verify_token,
-            )
-            return None
+        logger.warning(
+            "WhatsApp webhook verification failed: mode=%s, token_valid=%s",
+            mode,
+            token == self._settings.whatsapp_verify_token,
+        )
+        return None

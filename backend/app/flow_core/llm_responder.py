@@ -121,7 +121,7 @@ class LLMFlowResponder:
         if self._thought_tracer:
             import time
             start_time = time.time()
-            
+
             tool_names = [getattr(t, "__name__", str(t)) for t in tools]
             current_state = {
                 "answers": dict(ctx.answers),
@@ -129,13 +129,13 @@ class LLMFlowResponder:
                 "active_path": ctx.active_path,
                 "clarification_count": ctx.clarification_count
             }
-            
+
             # Extract session info from context if available
-            session_id = getattr(ctx, 'session_id', 'unknown')
-            user_id = getattr(ctx, 'user_id', 'unknown')
-            tenant_id = getattr(ctx, 'tenant_id', None)
+            session_id = getattr(ctx, "session_id", "unknown")
+            user_id = getattr(ctx, "user_id", "unknown")
+            tenant_id = getattr(ctx, "tenant_id", None)
             agent_type = "flow_responder"
-            
+
             # Only trace if we have tenant_id (required for database storage)
             if tenant_id:
                 thought_id = self._thought_tracer.start_thought(
@@ -146,27 +146,27 @@ class LLMFlowResponder:
                     current_state=current_state,
                     available_tools=tool_names,
                     tenant_id=tenant_id,
-                    model_name=getattr(self._llm, 'model_name', 'unknown')
+                    model_name=getattr(self._llm, "model_name", "unknown")
                 )
 
         # Call LLM with tools
         try:
             result = self._llm.extract(instruction, tools)
-            
+
             # Log the tool calling prompt and response
             prompt_logger.log_prompt(
                 prompt_type="tool_calling",
                 instruction=instruction,
                 input_text=user_message or "",
                 response=json.dumps(result, ensure_ascii=False) if result else "None",
-                model=getattr(self._llm, 'model_name', 'unknown'),
+                model=getattr(self._llm, "model_name", "unknown"),
                 metadata={
                     "pending_field": pending_field,
-                    "tools": [t.__name__ if hasattr(t, '__name__') else str(t) for t in tools],
+                    "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools],
                     "allowed_values": allowed_values
                 }
             )
-            
+
             if is_development_mode():
                 print(f"[DEBUG] LLM result: {result}")
         except Exception as e:
@@ -176,10 +176,10 @@ class LLMFlowResponder:
                 instruction=instruction,
                 input_text=user_message or "",
                 response=f"ERROR: {e}",
-                model=getattr(self._llm, 'model_name', 'unknown'),
+                model=getattr(self._llm, "model_name", "unknown"),
                 metadata={"error": str(e), "pending_field": pending_field}
             )
-            
+
             if is_development_mode():
                 print(f"[DEBUG] LLM extraction failed: {e}")
             # Fallback response on error
@@ -205,27 +205,27 @@ class LLMFlowResponder:
 
         # Process the tool response
         flow_response = self._process_tool_response(result, pending_field, ctx)
-        
+
         # Complete thought tracing if available
         if self._thought_tracer and thought_id and start_time:
             import time
             processing_time_ms = int((time.time() - start_time) * 1000)
-            
+
             # Extract reasoning and tool info from result
             reasoning = ""
             selected_tool = ""
             tool_args = {}
             errors = []
-            
+
             if isinstance(result, dict):
                 reasoning = result.get("reasoning", "No reasoning provided")
                 selected_tool = result.get("__tool_name__", flow_response.tool_name or "unknown")
                 tool_args = {k: v for k, v in result.items() if not k.startswith("__") and k != "reasoning"}
-            
+
             if flow_response.metadata and isinstance(flow_response.metadata, dict):
                 if "error" in flow_response.metadata:
                     errors.append(flow_response.metadata["error"])
-            
+
             self._thought_tracer.complete_thought(
                 thought_id=thought_id,
                 reasoning=reasoning,
@@ -236,7 +236,7 @@ class LLMFlowResponder:
                 errors=errors if errors else None,
                 extra_metadata=flow_response.metadata if isinstance(flow_response.metadata, dict) else {}
             )
-        
+
         return flow_response
 
     def _build_instruction(
@@ -504,7 +504,7 @@ Recent Conversation:
                 tool_name=tool_name,
                 confidence=path_confidence,
                 metadata={
-                    "path": path, 
+                    "path": path,
                     "reasoning": result.get("reasoning"),
                     "navigate_to_decision": True  # Signal to engine to find decision node
                 },

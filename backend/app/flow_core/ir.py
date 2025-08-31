@@ -156,11 +156,11 @@ class Policies(BaseModel):
 
 class FlowUILabels(BaseModel):
     """UI labels and text customization for flow display."""
-    
+
     global_section_label: str = "Global Questions"
     branch_section_prefix: str = "Path"
     terminal_completion_label: str = "Flow Completed"
-    
+
     # Language/locale specific
     locale: str = "en"
 
@@ -175,7 +175,7 @@ class FlowMetadata(BaseModel):
     tags: list[str] = Field(default_factory=list)
     created_at: str | None = None
     updated_at: str | None = None
-    
+
     # UI customization
     ui_labels: FlowUILabels = Field(default_factory=FlowUILabels)
 

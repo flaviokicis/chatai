@@ -241,17 +241,17 @@ class Flow(Base, TimestampMixin):
 
 class FlowVersion(Base, TimestampMixin):
     """Stores historical versions of flow definitions for change tracking and undo."""
-    
+
     __tablename__ = "flow_versions"
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
     flow_id: Mapped[UUID] = mapped_column(ForeignKey("flows.id", ondelete="CASCADE"))
-    
+
     # Version tracking
     version_number: Mapped[int] = mapped_column(Integer, nullable=False)
     definition_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False)
     change_description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    
+
     # User tracking (optional, could be expanded later)
     created_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
@@ -306,7 +306,7 @@ class ChatThread(Base, TimestampMixin):
     subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     last_message_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    
+
     # Flow completion and human handoff tracking
     flow_completion_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -403,7 +403,7 @@ class FlowChatSession(Base, TimestampMixin):
 
 class AgentConversationTrace(Base, TimestampMixin):
     """Tracks conversation-level metadata for agent thought tracing."""
-    
+
     __tablename__ = "agent_conversation_traces"
     __table_args__ = (
         UniqueConstraint("tenant_id", "user_id", "agent_type", name="uq_trace_per_user_agent"),
@@ -413,21 +413,21 @@ class AgentConversationTrace(Base, TimestampMixin):
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
-    
+
     # GDPR/LGPD: User ID could contain PII (e.g., phone numbers), encrypt it
     user_id: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     agent_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    
+
     # Metadata
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     total_thoughts: Mapped[int] = mapped_column(Integer, default=0)
-    
+
     # Relationships
     tenant: Mapped[Tenant] = relationship()
     thoughts: Mapped[list[AgentThought]] = relationship(
-        back_populates="conversation_trace", 
+        back_populates="conversation_trace",
         cascade="all, delete-orphan",
         order_by="AgentThought.created_at"
     )
@@ -435,7 +435,7 @@ class AgentConversationTrace(Base, TimestampMixin):
 
 class AgentThought(Base, TimestampMixin):
     """Stores individual agent reasoning steps and tool selections."""
-    
+
     __tablename__ = "agent_thoughts"
     __table_args__ = (
         Index("ix_thought_trace_timestamp", "conversation_trace_id", "created_at"),
@@ -446,29 +446,29 @@ class AgentThought(Base, TimestampMixin):
     conversation_trace_id: Mapped[UUID] = mapped_column(
         ForeignKey("agent_conversation_traces.id", ondelete="CASCADE")
     )
-    
+
     # Context - GDPR/LGPD: User messages contain PII, must be encrypted
     user_message: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     current_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     available_tools: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-    
+
     # Agent Decision Making
     reasoning: Mapped[str] = mapped_column(Text, nullable=False)
     selected_tool: Mapped[str] = mapped_column(String(100), nullable=False)
     tool_args: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     confidence: Mapped[float | None] = mapped_column(nullable=True)
-    
+
     # Results - GDPR/LGPD: Agent responses may contain PII, encrypt them
     tool_result: Mapped[str | None] = mapped_column(Text, nullable=True)
     agent_response: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     errors: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
-    
+
     # Performance Metrics
     processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     model_name: Mapped[str] = mapped_column(String(100), nullable=False, default="unknown")
-    
+
     # Additional Metadata
     extra_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    
+
     # Relationships
     conversation_trace: Mapped[AgentConversationTrace] = relationship(back_populates="thoughts")

@@ -4,14 +4,16 @@
   "python.terminal.activateEnvInCurrentTerminal": true,
   "pylance.insidersChannel": "off",
   "python.analysis.autoSearchPaths": true,
-  "python.analysis.extraPaths": ["./backend"],
+  "python.analysis.extraPaths": ["./backend", "./backend/app"],
   "python.analysis.autoImportCompletions": true,
   "python.analysis.typeCheckingMode": "strict",
   "python.analysis.include": ["./backend"],
   "python.analysis.exclude": ["./frontend", "./node_modules"],
-  "python.languageServer": "None",
+  "python.languageServer": "Pyright",
   "files.associations": {
     "*.py": "python"
   },
-  "python.analysis.diagnosticMode": "workspace"
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.stubPath": "./backend/.venv/lib/python3.12/site-packages",
+  "python.pythonPath": "./backend/.venv/bin/python"
 }

@@ -1,8 +1,7 @@
-from logging.config import fileConfig
 import os
+from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
@@ -20,6 +19,7 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.db.models import Base
+
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
@@ -72,7 +72,7 @@ def run_migrations_online() -> None:
             configuration["sqlalchemy.url"] = settings.sqlalchemy_database_url
         except Exception as e:
             raise RuntimeError(f"No database URL configured. Set DATABASE_URL environment variable or configure alembic.ini. Error: {e}")
-    
+
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",

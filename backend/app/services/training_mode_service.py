@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
     from app.db.models import ChatThread, Flow
 
 from app.agents.flow_chat_agent import FlowChatAgent, ToolSpec
@@ -37,7 +38,7 @@ class TrainingModeService:
     def is_trigger(self, text: str) -> bool:
         t = self._norm(text)
         return t in {
-            "começar treino", "comecar treino", 
+            "começar treino", "comecar treino",
             "modo treino", "modo teste",
             "ativar modo treino", "ativar modo de treinamento"
         }

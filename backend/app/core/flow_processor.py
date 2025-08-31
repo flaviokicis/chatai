@@ -14,7 +14,6 @@ through conversational flows. It follows FAANG-level engineering practices:
 from __future__ import annotations
 
 import logging
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
@@ -37,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 class FlowProcessingResult(Enum):
     """Result types for flow processing."""
-    
+
     CONTINUE = "continue"
     TERMINAL = "terminal"
     ESCALATE = "escalate"
@@ -48,7 +47,7 @@ class FlowProcessingResult(Enum):
 @dataclass(frozen=True)
 class FlowRequest:
     """Immutable request for flow processing."""
-    
+
     user_id: str
     user_message: str
     flow_definition: dict[str, Any]
@@ -60,18 +59,18 @@ class FlowRequest:
 @dataclass(frozen=True)
 class FlowResponse:
     """Immutable response from flow processing."""
-    
+
     result: FlowProcessingResult
     message: str | None
     context: FlowContext | None
     metadata: dict[str, Any]
     error: str | None = None
-    
+
     @property
     def is_success(self) -> bool:
         """Check if processing was successful."""
         return self.result != FlowProcessingResult.ERROR
-    
+
     @property
     def should_continue(self) -> bool:
         """Check if flow should continue."""
@@ -80,27 +79,27 @@ class FlowResponse:
 
 class SessionManager(Protocol):
     """Interface for managing flow sessions and context persistence."""
-    
+
     def create_session(self, user_id: str, flow_id: str) -> str:
         """Create a new flow session."""
         ...
-    
+
     def load_context(self, session_id: str) -> FlowContext | None:
         """Load existing flow context."""
         ...
-    
+
     def save_context(self, session_id: str, context: FlowContext) -> None:
         """Save flow context."""
         ...
-    
+
     def clear_context(self, session_id: str) -> None:
         """Clear flow context."""
         ...
-    
+
     def acquire_lock(self, session_id: str) -> bool:
         """Acquire distributed lock for session."""
         ...
-    
+
     def release_lock(self, session_id: str) -> None:
         """Release distributed lock for session."""
         ...
@@ -108,7 +107,7 @@ class SessionManager(Protocol):
 
 class TrainingModeHandler(Protocol):
     """Interface for handling training mode operations."""
-    
+
     async def handle_training_request(
         self,
         request: FlowRequest,
@@ -121,7 +120,7 @@ class TrainingModeHandler(Protocol):
 
 class ThreadStatusUpdater(Protocol):
     """Interface for updating thread status after flow completion."""
-    
+
     def update_completion_status(
         self,
         thread_id: UUID,
@@ -134,7 +133,7 @@ class ThreadStatusUpdater(Protocol):
 
 class FlowProcessingError(Exception):
     """Base exception for flow processing errors."""
-    
+
     def __init__(self, message: str, cause: Exception | None = None) -> None:
         super().__init__(message)
         self.cause = cause
@@ -155,7 +154,7 @@ class FlowProcessor:
     - Comprehensive error handling
     - Thread-safe operations
     """
-    
+
     def __init__(
         self,
         llm: LLMClient,
@@ -176,7 +175,7 @@ class FlowProcessor:
         self._session_manager = session_manager
         self._training_handler = training_handler
         self._thread_updater = thread_updater
-    
+
     async def process_flow(
         self,
         request: FlowRequest,
@@ -202,11 +201,11 @@ class FlowProcessor:
                 request.user_id,
                 request.flow_metadata.get("flow_id", "unknown")
             )
-            
+
             lock_acquired = self._session_manager.acquire_lock(session_id)
             if not lock_acquired:
                 logger.warning("Failed to acquire lock for session %s", session_id)
-            
+
             try:
                 # Step 2: Check training mode
                 if self._training_handler:
@@ -215,32 +214,32 @@ class FlowProcessor:
                     )
                     if training_response:
                         return training_response
-                
+
                 # Step 3: Process through flow engine
                 flow_response = await self._execute_flow(request, session_id, app_context)
-                
+
                 # Step 4: Update thread status if needed
-                if (self._thread_updater and 
+                if (self._thread_updater and
                     flow_response.result in [FlowProcessingResult.TERMINAL, FlowProcessingResult.ESCALATE]):
-                    
+
                     thread_id = request.flow_metadata.get("thread_id")
                     if thread_id:
                         self._thread_updater.update_completion_status(
                             thread_id, flow_response, request
                         )
-                
+
                 # Step 5: Persist context
                 if flow_response.should_continue and flow_response.context:
                     self._session_manager.save_context(session_id, flow_response.context)
                 elif flow_response.result == FlowProcessingResult.TERMINAL:
                     self._session_manager.clear_context(session_id)
-                
+
                 return flow_response
-                
+
             finally:
                 if lock_acquired:
                     self._session_manager.release_lock(session_id)
-                    
+
         except Exception as e:
             logger.error("Flow processing failed for user %s: %s", request.user_id, e)
             return FlowResponse(
@@ -250,7 +249,7 @@ class FlowProcessor:
                 metadata={},
                 error=str(e),
             )
-    
+
     async def _execute_flow(
         self,
         request: FlowRequest,
@@ -262,24 +261,24 @@ class FlowProcessor:
             # Compile flow
             flow = Flow.model_validate(request.flow_definition)
             compiled_flow = compile_flow(flow)
-            
+
             # Load existing context
             existing_context = self._session_manager.load_context(session_id)
-            
+
             # Execute with thought tracing
             with create_session() as thought_session:
                 thought_tracer = DatabaseThoughtTracer(thought_session)
-                
+
                 # Create tool event handler for training mode
                 def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
                     if tool_name == "EnterTrainingMode":
                         # Store training prompt for response
                         prompt = "Para entrar no modo treino, informe a senha."
                         self._session_manager.clear_context(session_id)
-                        setattr(app_context, "_training_prompt", prompt)
+                        app_context._training_prompt = prompt
                         return True
                     return False
-                
+
                 # Create and run flow
                 runner = FlowTurnRunner(
                     compiled_flow=compiled_flow,
@@ -294,20 +293,20 @@ class FlowProcessor:
                     ),
                     on_tool_event=on_tool_event,
                 )
-                
+
                 # Initialize context
                 ctx = runner.initialize_context(existing_context)
                 ctx.user_id = request.user_id
                 ctx.session_id = session_id
                 ctx.tenant_id = request.tenant_id
-                
+
                 # Process the turn
                 result = runner.process_turn(
                     ctx=ctx,
                     user_message=request.user_message,
                     project_context=request.project_context
                 )
-                
+
                 # Handle training mode tool event
                 if result.tool_name == "EnterTrainingMode":
                     prompt = getattr(app_context, "_training_prompt", "Para entrar no modo treino, informe a senha.")
@@ -319,7 +318,7 @@ class FlowProcessor:
                         context=result.ctx,
                         metadata={"tool_name": result.tool_name},
                     )
-                
+
                 # Map result to response
                 if result.escalate:
                     flow_result = FlowProcessingResult.ESCALATE
@@ -327,7 +326,7 @@ class FlowProcessor:
                     flow_result = FlowProcessingResult.TERMINAL
                 else:
                     flow_result = FlowProcessingResult.CONTINUE
-                
+
                 return FlowResponse(
                     result=flow_result,
                     message=result.assistant_message,
@@ -337,6 +336,6 @@ class FlowProcessor:
                         "answers_diff": result.answers_diff,
                     },
                 )
-                
+
         except Exception as e:
             raise FlowProcessingError(f"Flow execution failed: {e}", e) from e

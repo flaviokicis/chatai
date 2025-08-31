@@ -73,7 +73,7 @@ class TwilioWhatsAppAdapter:
                     except Exception:
                         pass
                     time.sleep(max(0, delay_ms) / 1000.0)
-                    
+
                     # Check if this reply is still current (user hasn't sent a new message)
                     if reply_id and store:
                         try:
@@ -96,7 +96,7 @@ class TwilioWhatsAppAdapter:
                             except Exception:
                                 pass
                             # Continue sending on error - don't break the flow
-                    
+
                     client.messages.create(to=to_number, from_=from_number, body=text)
                 except Exception:
                     try:
@@ -113,4 +113,3 @@ class TwilioWhatsAppAdapter:
         """Twilio WhatsApp doesn't support typing indicators, so this is a no-op."""
         # Twilio WhatsApp API doesn't support typing indicators like the Cloud API
         # This method exists to satisfy the protocol but does nothing
-        pass

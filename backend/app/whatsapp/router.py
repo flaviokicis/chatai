@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, Query, Request, Response
-from fastapi.responses import PlainTextResponse
 
 from .webhook import handle_twilio_whatsapp_webhook, handle_whatsapp_webhook_verification
 
@@ -31,7 +30,7 @@ async def twilio_whatsapp_webhook_legacy(
 async def whatsapp_webhook_get(
     request: Request,
     hub_mode: str = Query(alias="hub.mode"),
-    hub_challenge: str = Query(alias="hub.challenge"), 
+    hub_challenge: str = Query(alias="hub.challenge"),
     hub_verify_token: str = Query(alias="hub.verify_token"),
 ) -> Response:
     """Handle WhatsApp webhook verification (GET)."""

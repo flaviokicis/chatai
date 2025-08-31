@@ -6,7 +6,12 @@ import logging
 from types import SimpleNamespace
 from typing import Any
 
-from app.core.flow_processor import FlowRequest, FlowResponse, FlowProcessingResult, TrainingModeHandler
+from app.core.flow_processor import (
+    FlowProcessingResult,
+    FlowRequest,
+    FlowResponse,
+    TrainingModeHandler,
+)
 from app.db.session import create_session
 from app.services.training_mode_service import TrainingModeService
 
@@ -15,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class WhatsAppTrainingHandler(TrainingModeHandler):
     """WhatsApp-specific implementation of training mode handling."""
-    
+
     async def handle_training_request(
         self,
         request: FlowRequest,
@@ -26,19 +31,19 @@ class WhatsAppTrainingHandler(TrainingModeHandler):
         training_session = create_session()
         try:
             training = TrainingModeService(training_session, app_context)
-            
+
             # Get thread from metadata
             thread_id = request.flow_metadata.get("thread_id")
             if not thread_id:
                 return None
-            
+
             # Import ChatThread model here to avoid circular imports
             from app.db.models import ChatThread
             thread_in_training = training_session.get(ChatThread, thread_id)
-            
+
             if not thread_in_training:
                 return None
-            
+
             # Check if awaiting password
             if training.awaiting_password(thread_in_training, user_id=request.user_id):
                 mock_flow = SimpleNamespace(
@@ -59,7 +64,7 @@ class WhatsAppTrainingHandler(TrainingModeHandler):
                     context=None,
                     metadata={"tool_name": "TrainingPasswordValidation"},
                 )
-            
+
             # Check if in active training mode
             if getattr(thread_in_training, "training_mode", False):
                 try:
@@ -91,5 +96,5 @@ class WhatsAppTrainingHandler(TrainingModeHandler):
                     )
         finally:
             training_session.close()
-        
+
         return None

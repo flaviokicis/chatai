@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
     ChannelInstance,
-    ChannelType,
     ChatThread,
     Contact,
     Flow,
@@ -151,23 +150,23 @@ def create_flow_chat_message(
 
 def list_flow_chat_messages(session: Session, flow_id: UUID) -> Sequence[FlowChatMessage]:
     """Return all chat messages for a flow ordered by creation time, excluding cleared messages."""
-    
+
     # Get the latest cleared_at timestamp for this flow
     chat_session = session.execute(
         select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
     ).scalars().first()
-    
+
     cleared_at = chat_session.cleared_at if chat_session else None
-    
+
     query = select(FlowChatMessage).where(
         FlowChatMessage.flow_id == flow_id,
         FlowChatMessage.deleted_at.is_(None),
     )
-    
+
     # Only show messages created after the last clear
     if cleared_at:
         query = query.where(FlowChatMessage.created_at > cleared_at)
-    
+
     return (
         session.execute(query.order_by(FlowChatMessage.created_at))
         .scalars()
@@ -182,19 +181,19 @@ def get_latest_assistant_message(
     chat_session = session.execute(
         select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
     ).scalars().first()
-    
+
     cleared_at = chat_session.cleared_at if chat_session else None
-    
+
     query = select(FlowChatMessage).where(
         FlowChatMessage.flow_id == flow_id,
         FlowChatMessage.role == FlowChatRole.assistant,
         FlowChatMessage.deleted_at.is_(None),
     )
-    
+
     # Only show messages created after the last clear
     if cleared_at:
         query = query.where(FlowChatMessage.created_at > cleared_at)
-    
+
     return (
         session.execute(query.order_by(desc(FlowChatMessage.created_at)))
         .scalars()
@@ -204,19 +203,19 @@ def get_latest_assistant_message(
 
 def clear_flow_chat_messages(session: Session, flow_id: UUID) -> None:
     """Mark the flow chat as cleared by setting cleared_at timestamp."""
-    from datetime import datetime, timezone
-    
+    from datetime import datetime
+
     # Get or create the chat session record
     chat_session = session.execute(
         select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
     ).scalars().first()
-    
+
     if not chat_session:
         chat_session = FlowChatSession(flow_id=flow_id)
         session.add(chat_session)
-    
+
     # Set cleared_at to current timestamp
-    chat_session.cleared_at = datetime.now(timezone.utc)
+    chat_session.cleared_at = datetime.now(UTC)
     session.flush()
 
 
@@ -399,7 +398,7 @@ def create_flow(
     existing_flows = get_flows_by_channel_instance(session, channel_instance_id)
     # Only make this flow active if it's the first one for this channel
     is_first_flow = len(existing_flows) == 0
-    
+
     flow = Flow(
         tenant_id=tenant_id,
         channel_instance_id=channel_instance_id,
@@ -607,10 +606,10 @@ def get_threads_needing_human_review(session: Session, tenant_id: UUID | None = 
         ChatThread.human_handoff_requested_at.is_not(None),
         ChatThread.human_reviewed_at.is_(None),
     )
-    
+
     if tenant_id:
         query = query.where(ChatThread.tenant_id == tenant_id)
-    
+
     return list(session.execute(query.order_by(ChatThread.human_handoff_requested_at.desc())).scalars())
 
 
@@ -619,10 +618,10 @@ def get_completed_threads(session: Session, tenant_id: UUID | None = None) -> li
     query = select(ChatThread).where(
         ChatThread.completed_at.is_not(None),
     )
-    
+
     if tenant_id:
         query = query.where(ChatThread.tenant_id == tenant_id)
-    
+
     return list(session.execute(query.order_by(ChatThread.completed_at.desc())).scalars())
 
 
@@ -654,9 +653,9 @@ def create_flow_version(
         .where(FlowVersion.flow_id == flow_id)
         .order_by(desc(FlowVersion.version_number))
     ).scalar()
-    
+
     next_version = (latest_version or 0) + 1
-    
+
     version = FlowVersion(
         flow_id=flow_id,
         version_number=next_version,
@@ -666,7 +665,7 @@ def create_flow_version(
     )
     session.add(version)
     session.flush()
-    
+
     # Clean up old versions (keep only last 50)
     old_versions = session.execute(
         select(FlowVersion)
@@ -674,16 +673,16 @@ def create_flow_version(
         .order_by(desc(FlowVersion.version_number))
         .offset(50)
     ).scalars().all()
-    
+
     for old_version in old_versions:
         session.delete(old_version)
-    
+
     return version
 
 
 def get_flow_versions(
-    session: Session, 
-    flow_id: UUID, 
+    session: Session,
+    flow_id: UUID,
     limit: int = 20
 ) -> Sequence[FlowVersion]:
     """Get flow version history."""
@@ -700,8 +699,8 @@ def get_flow_versions(
 
 
 def get_flow_version_by_number(
-    session: Session, 
-    flow_id: UUID, 
+    session: Session,
+    flow_id: UUID,
     version_number: int
 ) -> FlowVersion | None:
     """Get a specific flow version by number."""
@@ -725,7 +724,7 @@ def update_flow_with_versioning(
     flow = get_flow_by_id(session, flow_id)
     if not flow:
         return None
-    
+
     # Create version snapshot of current state before updating
     logger.info(f"Repository: About to create version snapshot for flow {flow_id}, current version: {flow.version}")
     try:
@@ -740,22 +739,22 @@ def update_flow_with_versioning(
     except Exception as e:
         logger.error(f"Repository: CRITICAL ERROR - Failed to create version snapshot for flow {flow_id}: {e}")
         raise
-    
+
     # Update the flow with explicit change detection for JSON fields
     flow.definition = new_definition
     flow.version += 1
-    
+
     # CRITICAL: Force SQLAlchemy to detect the JSON field change
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(flow, "definition")
-    
+
     session.flush()
-    
+
     # CRITICAL: Do NOT commit here - let the calling service handle the commit
     # to avoid nested transaction conflicts
     logger.info(f"Repository: Updated flow {flow_id} in session (waiting for service commit)")
     logger.info(f"Repository: JSON field explicitly marked as modified for flow {flow_id}")
-    
+
     return flow
 
 
@@ -790,7 +789,7 @@ def update_tenant(
     tenant = get_tenant_by_id(session, tenant_id)
     if not tenant:
         return None
-    
+
     # Update tenant fields
     if first_name is not None:
         tenant.owner_first_name = first_name
@@ -798,7 +797,7 @@ def update_tenant(
         tenant.owner_last_name = last_name
     if email is not None:
         tenant.owner_email = email
-    
+
     # Update project config
     if tenant.project_config:
         if project_description is not None:
@@ -807,7 +806,7 @@ def update_tenant(
             tenant.project_config.target_audience = target_audience
         if communication_style is not None:
             tenant.project_config.communication_style = communication_style
-    
+
     session.flush()
     return tenant
 
@@ -817,8 +816,8 @@ def delete_tenant_cascade(session: Session, tenant_id: UUID) -> None:
     tenant = get_tenant_by_id(session, tenant_id)
     if not tenant:
         raise ValueError(f"Tenant {tenant_id} not found")
-    
-    # SQLAlchemy will handle cascading deletes due to the ondelete="CASCADE" 
+
+    # SQLAlchemy will handle cascading deletes due to the ondelete="CASCADE"
     # foreign key constraints defined in the models
     session.delete(tenant)
     session.flush()
@@ -843,13 +842,13 @@ def update_flow_definition(session: Session, flow_id: UUID, definition: dict) ->
     flow = get_flow_by_id(session, flow_id)
     if not flow:
         return None
-    
+
     flow.definition = definition
     flow.version += 1
-    
+
     # Force SQLAlchemy to detect JSON field change
     from sqlalchemy.orm.attributes import flag_modified
     flag_modified(flow, "definition")
-    
+
     session.flush()
     return flow

@@ -5,13 +5,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from app.db.session import create_session
-from app.db.repository import (
-    create_tenant_with_config,
-    create_channel_instance, 
-    create_flow,
-)
 from app.db.models import ChannelType
+from app.db.repository import (
+    create_channel_instance,
+    create_flow,
+    create_tenant_with_config,
+)
+from app.db.session import create_session
 
 
 def _patch_signature_validation(monkeypatch):
@@ -38,25 +38,25 @@ def create_test_tenant_with_flow(
         tuple: (tenant, channel_instance, flow, channel_number)
     """
     test_id = str(uuid.uuid4())[:8]
-    
+
     session = create_session()
-    
+
     try:
         # Create tenant
         tenant = create_tenant_with_config(
             session,
             first_name=tenant_name,
-            last_name="User", 
+            last_name="User",
             email=f"test-{test_id}@example.com",
             project_description="Test project",
             target_audience="Test audience",
             communication_style="Test style"
         )
-        
+
         # Create WhatsApp channel with unique number if not provided
         if channel_number is None:
             channel_number = f"whatsapp:+1555{test_id[:4]}{test_id[4:8]}"
-        
+
         channel = create_channel_instance(
             session,
             tenant_id=tenant.id,
@@ -65,7 +65,7 @@ def create_test_tenant_with_flow(
             phone_number=channel_number.replace("whatsapp:", ""),
             extra={"display_name": "Test"}
         )
-        
+
         # Use provided flow definition or create a simple default
         if flow_definition is None:
             flow_definition = {
@@ -80,21 +80,21 @@ def create_test_tenant_with_flow(
                         "prompt": "What are you looking to accomplish today?"
                     },
                     {
-                        "id": "complete", 
+                        "id": "complete",
                         "kind": "Terminal",
                         "reason": "Thank you!"
                     }
                 ],
                 "edges": [
                     {
-                        "source": "welcome", 
-                        "target": "complete", 
+                        "source": "welcome",
+                        "target": "complete",
                         "guard": {"fn": "answers_has", "args": {"key": "intention"}},
                         "priority": 0
                     }
                 ]
             }
-        
+
         flow = create_flow(
             session,
             tenant_id=tenant.id,
@@ -103,10 +103,10 @@ def create_test_tenant_with_flow(
             flow_id=f"test_flow_{test_id}",
             definition=flow_definition
         )
-        
+
         session.commit()
         return tenant, channel, flow, channel_number
-        
+
     except Exception:
         session.rollback()
         raise
@@ -129,14 +129,14 @@ def create_sales_qualifier_flow() -> dict[str, Any]:
             },
             {
                 "id": "budget_question",
-                "kind": "Question", 
+                "kind": "Question",
                 "key": "budget",
                 "prompt": "Você tem alguma faixa de orçamento em mente?"
             },
             {
                 "id": "timeframe_question",
                 "kind": "Question",
-                "key": "timeframe", 
+                "key": "timeframe",
                 "prompt": "Qual é o seu prazo ideal?"
             },
             {
@@ -153,7 +153,7 @@ def create_sales_qualifier_flow() -> dict[str, Any]:
                 "priority": 0
             },
             {
-                "source": "budget_question", 
+                "source": "budget_question",
                 "target": "timeframe_question",
                 "guard": {"fn": "answers_has", "args": {"key": "budget"}},
                 "priority": 0
@@ -203,7 +203,7 @@ def create_paths_flow(lock_threshold: int = 2) -> dict[str, Any]:
                         ],
                         "questions": [
                             {
-                                "key": "field_size", 
+                                "key": "field_size",
                                 "prompt": "Approximate field size?",
                                 "priority": 20
                             }
@@ -218,7 +218,7 @@ def create_paths_flow(lock_threshold: int = 2) -> dict[str, Any]:
             {
                 "id": "budget_question",
                 "kind": "Question",
-                "key": "budget", 
+                "key": "budget",
                 "prompt": "Do you have a budget range in mind?"
             },
             {
@@ -234,7 +234,7 @@ def create_paths_flow(lock_threshold: int = 2) -> dict[str, Any]:
             },
             {
                 "id": "complete",
-                "kind": "Terminal", 
+                "kind": "Terminal",
                 "reason": "Thank you!"
             }
         ],
@@ -247,7 +247,7 @@ def create_paths_flow(lock_threshold: int = 2) -> dict[str, Any]:
             },
             {
                 "source": "path_selection",
-                "target": "budget_question", 
+                "target": "budget_question",
                 "guard": {"fn": "always"},
                 "priority": 0
             },

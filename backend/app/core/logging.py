@@ -13,7 +13,7 @@ import logging.config
 import os
 import uuid
 from contextvars import ContextVar
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -32,7 +32,7 @@ class RequestIdFilter(logging.Filter):
         return True
 
 
-def _build_config(log_level: str) -> Dict[str, Any]:
+def _build_config(log_level: str) -> dict[str, Any]:
     """Build logging configuration dictionary."""
 
     return {
@@ -92,5 +92,5 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             request_id_ctx_var.reset(token)
 
 
-__all__ = ["setup_logging", "RequestIdMiddleware", "request_id_ctx_var"]
+__all__ = ["RequestIdMiddleware", "request_id_ctx_var", "setup_logging"]
 

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.core.app_context import get_app_context
@@ -13,8 +11,8 @@ from app.core.llm import LLMClient
 from app.main import app
 from tests.webhook_test_utils import (
     _patch_signature_validation,
-    create_test_tenant_with_flow,
     create_sales_qualifier_flow,
+    create_test_tenant_with_flow,
 )
 
 
@@ -33,19 +31,19 @@ def test_message_truncation(monkeypatch):
     """Test that overly long messages are truncated."""
     # Force use of Twilio adapter
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
-    
+
     # Create database records
     flow_definition = create_sales_qualifier_flow()
     tenant, channel, flow, to_num = create_test_tenant_with_flow(
         flow_definition=flow_definition,
         flow_name="Truncation Test Flow"
     )
-    
+
     # Bypass signature validation
     _patch_signature_validation(monkeypatch)
-    
+
     client = TestClient(app)
-    
+
     # Setup app context
     ctx = get_app_context(app)
     ctx.llm = DummyLLM()
@@ -55,13 +53,13 @@ def test_message_truncation(monkeypatch):
 
     # Send a very long message (over 500 chars)
     long_message = "A" * 600  # 600 characters
-    
+
     response = client.post(
         "/webhooks/whatsapp",
         data={"From": from_num, "To": to_num, "Body": long_message},
         headers=headers,
     )
-    
+
     assert response.status_code == 200
     # Should get a response (not the "not configured" error)
     assert "não está configurado" not in response.text
@@ -73,19 +71,19 @@ def test_rate_limiting_per_user(monkeypatch):
     """Test rate limiting per user with database setup."""
     # Force use of Twilio adapter
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
-    
+
     # Create database records
     flow_definition = create_sales_qualifier_flow()
     tenant, channel, flow, to_num = create_test_tenant_with_flow(
         flow_definition=flow_definition,
         flow_name="Rate Limit Test Flow"
     )
-    
+
     # Bypass signature validation
     _patch_signature_validation(monkeypatch)
-    
+
     client = TestClient(app)
-    
+
     # Setup app context
     ctx = get_app_context(app)
     ctx.llm = DummyLLM()
@@ -104,7 +102,7 @@ def test_rate_limiting_per_user(monkeypatch):
 
     # Second request should also work
     r2 = client.post(
-        "/webhooks/whatsapp", 
+        "/webhooks/whatsapp",
         data={"From": from_num, "To": to_num, "Body": "Hello again"},
         headers=headers,
     )
@@ -119,19 +117,19 @@ def test_different_users_independent_limits(monkeypatch):
     """Test that different users have independent rate limits."""
     # Force use of Twilio adapter
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
-    
+
     # Create database records
     flow_definition = create_sales_qualifier_flow()
     tenant, channel, flow, to_num = create_test_tenant_with_flow(
         flow_definition=flow_definition,
         flow_name="Multi-User Rate Limit Test"
     )
-    
+
     # Bypass signature validation
     _patch_signature_validation(monkeypatch)
-    
+
     client = TestClient(app)
-    
+
     # Setup app context
     ctx = get_app_context(app)
     ctx.llm = DummyLLM()
@@ -167,7 +165,7 @@ def test_different_users_independent_limits(monkeypatch):
     assert r3.status_code == 200
 
     r4 = client.post(
-        "/webhooks/whatsapp", 
+        "/webhooks/whatsapp",
         data={"From": user2, "To": to_num, "Body": "Second message from user 2"},
         headers=headers,
     )

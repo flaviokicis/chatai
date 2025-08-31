@@ -205,7 +205,7 @@ class LLMFlowEngine:
         if tool_name == "UnknownAnswer":
             # Get the reason for unknown answer
             unknown_reason = (event or {}).get("reason", "clarification_needed")
-            
+
             if unknown_reason == "clarification_needed":
                 # User needs clarification - stay on same question and regenerate prompt
                 # The naturalization will use conversation context to provide clarification
@@ -215,13 +215,13 @@ class LLMFlowEngine:
                     node_id=node.id,
                     metadata={"is_clarification_response": True, "reason": unknown_reason},
                 )
-            
-            elif unknown_reason == "incoherent_or_confused":
+
+            if unknown_reason == "incoherent_or_confused":
                 # User seems confused/disoriented - stay on same question but track confusion
                 ctx.get_node_state(node.id).metadata["confusion_count"] = (
                     ctx.get_node_state(node.id).metadata.get("confusion_count", 0) + 1
                 )
-                
+
                 # If user is repeatedly confused (3+ times), escalate to human
                 if ctx.get_node_state(node.id).metadata.get("confusion_count", 0) >= 3:
                     return EngineResponse(
@@ -230,7 +230,7 @@ class LLMFlowEngine:
                         node_id=node.id,
                         metadata={"reason": "repeated_confusion"},
                     )
-                
+
                 # Otherwise, stay on question and try to help with context
                 return EngineResponse(
                     kind="prompt",
@@ -238,11 +238,11 @@ class LLMFlowEngine:
                     node_id=node.id,
                     metadata={"is_confusion_response": True, "reason": unknown_reason},
                 )
-            
-            elif unknown_reason == "requested_by_user":
+
+            if unknown_reason == "requested_by_user":
                 # User explicitly doesn't know and wants to skip
                 # Handle based on question requirements
-                
+
                 # Check if question is required (default: False for conversational flexibility)
                 node_required = getattr(node, "required", False)
                 escalate_on_unknown = node_required or bool(
@@ -278,15 +278,14 @@ class LLMFlowEngine:
 
                 # Otherwise, fall back to default advancement
                 return self._advance_from_node(ctx, node, event, project_context)
-            
-            else:
-                # Fallback for any unexpected reason - treat as clarification needed
-                return EngineResponse(
-                    kind="prompt",
-                    message=self._generate_contextual_prompt(node, ctx, project_context),
-                    node_id=node.id,
-                    metadata={"is_clarification_response": True, "reason": "fallback"},
-                )
+
+            # Fallback for any unexpected reason - treat as clarification needed
+            return EngineResponse(
+                kind="prompt",
+                message=self._generate_contextual_prompt(node, ctx, project_context),
+                node_id=node.id,
+                metadata={"is_clarification_response": True, "reason": "fallback"},
+            )
 
         if tool_name == "SkipQuestion":
             ctx.get_node_state(node.id).status = NodeStatus.SKIPPED
@@ -310,7 +309,7 @@ class LLMFlowEngine:
                 if normalized:
                     ctx.answers["selected_path"] = normalized
                     ctx.active_path = normalized
-                    
+
                     # Navigate to the correct path
                     decision_node_id = self._find_decision_node_for_path(ctx)
                     if decision_node_id:
@@ -403,17 +402,17 @@ class LLMFlowEngine:
             # Handle flow path selection - navigate back to decision node for re-evaluation
             selected_path = event.get("selected_path") or event.get("path")
             navigate_to_decision = event.get("navigate_to_decision", False)
-            
+
             if selected_path and navigate_to_decision:
                 # Try to find the decision node that should handle this path
                 decision_node_id = self._find_decision_node_for_path(ctx)
-                
+
                 if decision_node_id:
                     # Navigate to the decision node to re-evaluate path selection
                     ctx.current_node_id = decision_node_id
                     # Process the decision node with the selected path
                     return self.process(ctx, None, {"selected_path": selected_path}, project_context)
-            
+
             # If no navigation needed or decision node not found, stay on current node
             return EngineResponse(
                 kind="prompt",
@@ -422,22 +421,22 @@ class LLMFlowEngine:
             )
 
         if tool_name == "PathCorrection":
-            # Handle path correction - navigate back to decision node or update path  
+            # Handle path correction - navigate back to decision node or update path
             # Use normalized path for matching, not the original user input
             corrected_path = event.get("normalized_path") or event.get("corrected_path")
-            
+
             if corrected_path:
                 # Update the selected path
                 ctx.answers["selected_path"] = corrected_path
                 ctx.active_path = corrected_path
-                
+
                 # Try to find the decision node that led to this path
                 decision_node_id = self._find_decision_node_for_path(ctx)
-                    
+
                 if decision_node_id:
                     # Navigate to the target of the corrected path
                     edges = self._flow.edges_from.get(decision_node_id, [])
-                        
+
                     for edge in edges:
                         # Check if this edge matches the corrected path
                         if self._edge_matches_path(edge, corrected_path):
@@ -450,7 +449,7 @@ class LLMFlowEngine:
                                 ack_message = f"Certo, entendi! {corrected_path}."
                                 next_response.message = f"{ack_message}\n\n{next_response.message}"
                             return next_response
-                
+
             # If we can't find the right path, stay on current node
             return EngineResponse(
                 kind="prompt",
@@ -557,13 +556,13 @@ class LLMFlowEngine:
                 label = str(getattr(target_node, "id", "opção"))
             else:
                 label = "opção"
-            
-            # Extract human-readable path name from condition_description 
+
+            # Extract human-readable path name from condition_description
             # e.g., "Caminho: campo/futebol" -> "campo/futebol"
             path_name = label
             if label and ":" in label:
                 path_name = label.split(":", 1)[1].strip()
-            
+
             # Use path name as key for LLM selection, but keep node ID for navigation
             options.append({"key": path_name, "label": label, "edge": edge, "target_node": edge.target})
 
@@ -746,9 +745,9 @@ class LLMFlowEngine:
             # Get recent conversation history for context (10 messages for rich context)
             recent_history = ctx.get_recent_history(10)
             conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
-            
+
             naturalized = naturalize_prompt(
-                self._llm, 
+                self._llm,
                 base_prompt,
                 conversation_context=conversation_context,
                 project_context=project_context
@@ -816,12 +815,12 @@ class LLMFlowEngine:
         """Use LLM responder to make a decision for llm_assisted decision nodes."""
         from .llm_responder import LLMFlowResponder
         from .tool_schemas import SelectFlowPath
-        
+
         decision_prompt = getattr(node, "decision_prompt", None)
         if not decision_prompt:
             # Fall back to standard edge selection
             return self._select_edge_intelligently(edges, ctx, event, project_context)
-        
+
         # Get the user's last message for context
         last_user_message = ""
         for turn in reversed(ctx.history):
@@ -856,10 +855,10 @@ class LLMFlowEngine:
 
         # Use the responder to make the decision
         responder = LLMFlowResponder(self._llm, use_all_tools=False)
-        
+
         # Create a custom prompt that includes the decision prompt
         decision_question = f"{decision_prompt}\n\nBased on the user's response, which path should we take?"
-        
+
         try:
             response = responder.respond(
                 prompt=decision_question,
@@ -868,7 +867,7 @@ class LLMFlowEngine:
                 user_message=last_user_message,
                 extra_tools=[SelectFlowPath]
             )
-            
+
             # If we got a path selection, find the corresponding edge
             if response.tool_name == "SelectFlowPath" and "selected_path" in response.updates:
                 selected_path = response.updates["selected_path"]
@@ -957,17 +956,17 @@ class LLMFlowEngine:
                 # Get recent conversation history for context
                 recent_history = ctx.get_recent_history(3)
                 conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
-                
+
                 # Get the last user message if available
                 last_user_message = None
                 for turn in reversed(ctx.history):
                     if getattr(turn, "role", "") == "user":
                         last_user_message = getattr(turn, "content", "")
                         break
-                
+
                 naturalized = naturalize_prompt(
-                    self._llm, 
-                    base_prompt, 
+                    self._llm,
+                    base_prompt,
                     project_context=project_context,
                     user_message=last_user_message,
                     conversation_context=conversation_context
@@ -989,10 +988,10 @@ class LLMFlowEngine:
                     if getattr(turn, "role", "") == "user":
                         last_user_message = getattr(turn, "content", "")
                         break
-                
+
                 return naturalize_prompt(
-                    self._llm, 
-                    base, 
+                    self._llm,
+                    base,
                     project_context=project_context,
                     user_message=last_user_message,
                     conversation_context=conversation_context
@@ -1003,7 +1002,7 @@ class LLMFlowEngine:
             opt_text = labels[0]
         else:
             opt_text = ", ".join(labels[:-1]) + f" ou {labels[-1]}"
-        
+
         full_prompt = f"{base} {opt_text}."
         try:
             # Get conversation context
@@ -1014,10 +1013,10 @@ class LLMFlowEngine:
                 if getattr(turn, "role", "") == "user":
                     last_user_message = getattr(turn, "content", "")
                     break
-            
+
             return naturalize_prompt(
-                self._llm, 
-                full_prompt, 
+                self._llm,
+                full_prompt,
                 project_context=project_context,
                 user_message=last_user_message,
                 conversation_context=conversation_context
@@ -1036,7 +1035,7 @@ class LLMFlowEngine:
         cand = (candidate or "").strip()
         if not cand:
             return None
-            
+
         # 1) Match by path name (key)
         for opt in options:
             if cand == str(opt.get("key", "")):
@@ -1049,7 +1048,7 @@ class LLMFlowEngine:
             lab_lower = label.lower()
             if cand_lower == lab_lower or cand_lower in lab_lower:
                 return opt.get("edge")
-                
+
         # 3) Match by target node id (backward compatibility)
         for opt in options:
             target_node = opt.get("target_node")
@@ -1220,9 +1219,9 @@ class LLMFlowEngine:
                 if getattr(turn, "role", "") == "user":
                     last_user_message = getattr(turn, "content", "")
                     break
-            
+
             return naturalize_prompt(
-                self._llm, 
+                self._llm,
                 base_prompt,
                 user_message=last_user_message,
                 conversation_context=conversation_context
@@ -1251,7 +1250,7 @@ class LLMFlowEngine:
             return self._llm.rewrite(instruction, "")
         except Exception:
             return prompt
-    
+
     def _find_decision_node_for_path(self, ctx: FlowContext) -> str | None:
         """Find the decision node that controls path selection."""
         # Look for decision nodes in the flow
@@ -1260,40 +1259,40 @@ class LLMFlowEngine:
                 # Check if this decision node has edges to paths
                 edges = self._flow.edges_from.get(node_id, [])
                 for edge in edges:
-                    if hasattr(edge, 'condition_description'):
+                    if hasattr(edge, "condition_description"):
                         # This looks like a path decision node
                         return node_id
         return None
-    
+
     def _edge_matches_path(self, edge: Any, path: str) -> bool:
         """Check if an edge matches a given path name."""
         if not edge or not path:
             return False
-            
+
         path_lower = path.lower()
-        
+
         # Check condition_description
-        if hasattr(edge, 'condition_description'):
+        if hasattr(edge, "condition_description"):
             desc = str(edge.condition_description).lower()
             # Remove "caminho: " prefix if present
             desc = desc.replace("caminho:", "").strip()
             if path_lower == desc or path_lower in desc or desc in path_lower:
                 return True
-        
+
         # Check label
-        if hasattr(edge, 'label'):
+        if hasattr(edge, "label"):
             label = str(edge.label).lower()
             if path_lower == label or path_lower in label or label in path_lower:
                 return True
-        
+
         # Check guard args for path hints
-        if hasattr(edge, 'guard_args') and isinstance(edge.guard_args, dict):
-            if_cond = edge.guard_args.get('if', '').lower()
+        if hasattr(edge, "guard_args") and isinstance(edge.guard_args, dict):
+            if_cond = edge.guard_args.get("if", "").lower()
             if path_lower in if_cond:
                 return True
-        
+
         return False
-    
+
     def _normalize_path_value(self, value: str, ctx: FlowContext) -> str | None:
         """Let the LLM decide which available path best matches the value.
         
@@ -1301,11 +1300,11 @@ class LLMFlowEngine:
         """
         if not value or not ctx.available_paths:
             return value
-            
+
         try:
             # Build instruction for LLM to choose best path
             available_paths_str = ", ".join(f"'{path}'" for path in ctx.available_paths)
-            
+
             instruction = f"""The user said: "{value}"
             
 Available paths: {available_paths_str}
@@ -1314,19 +1313,18 @@ Which available path best matches what the user meant?
 Return EXACTLY one of the available paths, or 'none' if no good match.
             
 Respond with just the path name, nothing else."""
-            
+
             result = self._llm.rewrite(instruction, "")
             normalized = result.strip().strip("'\"")
-            
+
             # Verify the result is actually one of the available paths
             if normalized in ctx.available_paths:
                 return normalized
-            elif normalized.lower() == "none":
+            if normalized.lower() == "none":
                 return value  # No good match, return original
-            else:
-                # LLM returned something invalid, fall back to original
-                return value
-                
+            # LLM returned something invalid, fall back to original
+            return value
+
         except Exception:
             # If LLM call fails, return original input
             return value

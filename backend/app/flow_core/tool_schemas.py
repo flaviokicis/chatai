@@ -163,7 +163,7 @@ class PathCorrection(FlowResponse):
     typically with phrases like "actually it's...", "I meant...", "sorry, it's...".
     This is different from RevisitQuestion which is for changing answer values.
     """
-    
+
     corrected_path: str = Field(
         ...,
         description="The corrected path - choose EXACTLY from the available flow paths list. Do not use the raw user description, but the actual path name from available options."

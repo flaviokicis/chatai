@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Iterator
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -76,7 +75,7 @@ def db_session() -> Iterator[Session]:
             logger.error("Failed to close database session: %s", e)
 
 
-@contextmanager  
+@contextmanager
 def db_transaction() -> Iterator[Session]:
     """
     Context manager for database transactions with automatic commit/rollback.

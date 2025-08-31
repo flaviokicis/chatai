@@ -108,7 +108,7 @@ def naturalize_prompt(
                 "- Seja cordial mas deixe claro que a conversa está pausada temporariamente\n"
                 "- Mantenha tom profissional e reassegurador\n\n"
             )
-        
+
         instr = instruction or f"{completion_context}{DEFAULT_INSTRUCTION}"
         # Add minimal project context if available but no communication style
         if project_context and project_context.has_rewriter_context():
@@ -222,7 +222,7 @@ def rewrite_whatsapp_multi(
                 "- Seja cordial mas deixe claro que a conversa está pausada temporariamente\n"
                 "- Mantenha tom profissional e reassegurador\n\n"
             )
-        
+
         instruction = (
             f"{completion_context}"
             "Você está naturalizando mensagens para soar mais brasileira e calorosa no WhatsApp.\n\n"
@@ -342,9 +342,9 @@ def rewrite_whatsapp_multi(
         if isinstance(raw, str):
             clean_raw = raw.strip()
             # Remove markdown JSON code blocks
-            if clean_raw.startswith('```json') and clean_raw.endswith('```'):
+            if clean_raw.startswith("```json") and clean_raw.endswith("```"):
                 clean_raw = clean_raw[7:-3].strip()
-            elif clean_raw.startswith('```') and clean_raw.endswith('```'):
+            elif clean_raw.startswith("```") and clean_raw.endswith("```"):
                 clean_raw = clean_raw[3:-3].strip()
 
         messages = json.loads(clean_raw) if isinstance(clean_raw, str) else []
@@ -443,7 +443,7 @@ def _build_custom_style_instruction(
             "- Aplique o estilo do cliente para expressar essa pausa temporária cordialmente\n"
             "- Mantenha tom do cliente mas seja reassegurador\n\n"
         )
-    
+
     base_instruction = (
         f"{completion_context}"
         "Você deve seguir o ESTILO DE COMUNICAÇÃO do cliente descrito abaixo, aplicando-o naturalmente.\n\n"
@@ -481,24 +481,23 @@ def _build_custom_style_instruction(
             "• CRITICAL: Se a mensagem original termina com '?', sua resposta DEVE terminar com '?'\n"
             "• Aplique apenas o tom, não altere o conteúdo\n"
         )
-    else:
-        # Multi-message instruction
-        strategy_text = (
-            "• FINALIZAÇÃO: Divida a mensagem de handoff temporário no estilo do cliente\n"
-            "• Primeira mensagem: Agradecimento/reconhecimento no estilo\n"
-            "• Última mensagem: 'Vou entrar em contato em breve' no estilo do cliente\n"
-            "• NÃO faça perguntas - expresse pausa cordial e retorno futuro\n\n" if is_completion else
-            "• Siga o estilo natural do cliente\n"
-            "• Divida o conteúdo de forma conversacional\n"
-            "• Última mensagem sempre deve ser a pergunta principal\n"
-            "• CRITICAL: Se a mensagem original termina com '?', a ÚLTIMA mensagem deve terminar com '?'\n"
-            "• NUNCA transforme perguntas em confirmações ou afirmações\n\n"
-        )
-        
-        return (
-            f"{base_instruction}"
-            f"ESTRATÉGIA DE MÚLTIPLAS MENSAGENS:\n"
-            f"{strategy_text}"
-            'Formato: JSON array [{"text": string, "delay_ms": number}]\n'
-            "Delays: primeira sempre 0, outras entre 2000-4000ms\n"
-        )
+    # Multi-message instruction
+    strategy_text = (
+        "• FINALIZAÇÃO: Divida a mensagem de handoff temporário no estilo do cliente\n"
+        "• Primeira mensagem: Agradecimento/reconhecimento no estilo\n"
+        "• Última mensagem: 'Vou entrar em contato em breve' no estilo do cliente\n"
+        "• NÃO faça perguntas - expresse pausa cordial e retorno futuro\n\n" if is_completion else
+        "• Siga o estilo natural do cliente\n"
+        "• Divida o conteúdo de forma conversacional\n"
+        "• Última mensagem sempre deve ser a pergunta principal\n"
+        "• CRITICAL: Se a mensagem original termina com '?', a ÚLTIMA mensagem deve terminar com '?'\n"
+        "• NUNCA transforme perguntas em confirmações ou afirmações\n\n"
+    )
+
+    return (
+        f"{base_instruction}"
+        f"ESTRATÉGIA DE MÚLTIPLAS MENSAGENS:\n"
+        f"{strategy_text}"
+        'Formato: JSON array [{"text": string, "delay_ms": number}]\n'
+        "Delays: primeira sempre 0, outras entre 2000-4000ms\n"
+    )

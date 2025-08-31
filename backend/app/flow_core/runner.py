@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
@@ -11,11 +12,11 @@ if TYPE_CHECKING:
 
 # REMOVED: dev_config import - Use DEVELOPMENT_MODE environment variable instead
 
+from app.core.thought_tracer import DatabaseThoughtTracer
+
 from .engine import LLMFlowEngine
 from .llm_responder import LLMFlowResponder
 from .state import FlowContext
-from app.core.thought_tracer import DatabaseThoughtTracer
-
 
 # Type alias for tool event callbacks
 ToolEventCallback = Callable[[str, dict[str, Any]], bool]
@@ -206,7 +207,7 @@ class FlowTurnRunner:
         engine_event: dict[str, object] = {"tool_name": responder_result.tool_name or ""}
         if ctx.pending_field and ctx.pending_field in responder_result.updates:
             engine_event["answer"] = responder_result.updates[ctx.pending_field]
-        
+
         # Pass all updates to engine event so decision nodes can access path selections
         # and other non-pending-field updates
         for key, value in responder_result.updates.items():

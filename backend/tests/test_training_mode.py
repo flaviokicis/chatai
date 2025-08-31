@@ -2,35 +2,35 @@
 
 from __future__ import annotations
 
+import uuid
+from typing import Any
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, MagicMock, patch
-from typing import Any
 
-from app.main import app
-from app.db.session import create_session
-from app.db.repository import (
-    create_tenant_with_config,
-    create_channel_instance, 
-    create_flow,
-    get_flow_by_id,
-)
-from app.db.models import ChannelType
-from app.services.training_mode_service import TrainingModeService
 from app.core.llm import LLMClient
-import uuid
+from app.db.models import ChannelType
+from app.db.repository import (
+    create_channel_instance,
+    create_flow,
+    create_tenant_with_config,
+)
+from app.db.session import create_session
+from app.main import app
+from app.services.training_mode_service import TrainingModeService
 
 
 class MockLLMForTraining(LLMClient):
     """Mock LLM that can trigger EnterTrainingMode tool."""
-    
+
     def __init__(self, should_enter_training: bool = False):
         self.should_enter_training = should_enter_training
         self.call_count = 0
-        
+
     def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:  # type: ignore[override]
         self.call_count += 1
-        
+
         # Check if EnterTrainingMode tool is available and we should trigger it
         tool_names = [getattr(t, "__name__", str(t)) for t in tools]
         if self.should_enter_training and "EnterTrainingMode" in tool_names:
@@ -39,7 +39,7 @@ class MockLLMForTraining(LLMClient):
                 "reason": "explicit_user_request",
                 "reasoning": "User explicitly requested training mode activation"
             }
-        
+
         # Default flow behavior - extract answers
         return {
             "__tool_name__": "UpdateAnswersFlow",
@@ -63,7 +63,7 @@ def _patch_signature_validation(monkeypatch):
 def create_test_flow_with_training():
     """Create a test flow with training password."""
     test_id = str(uuid.uuid4())[:8]
-    
+
     session = create_session()
     try:
         tenant = create_tenant_with_config(
@@ -75,7 +75,7 @@ def create_test_flow_with_training():
             target_audience="Test users",
             communication_style="Friendly"
         )
-        
+
         test_number = f"whatsapp:+1777{test_id[:4]}{test_id[4:8]}"
         channel = create_channel_instance(
             session,
@@ -84,7 +84,7 @@ def create_test_flow_with_training():
             identifier=test_number,
             phone_number=test_number.replace("whatsapp:", ""),
         )
-        
+
         flow_definition = {
             "schema_version": "v2",
             "id": "training_flow",
@@ -111,7 +111,7 @@ def create_test_flow_with_training():
                 }
             ]
         }
-        
+
         flow = create_flow(
             session,
             tenant_id=tenant.id,
@@ -120,13 +120,13 @@ def create_test_flow_with_training():
             flow_id="training_v1",
             definition=flow_definition
         )
-        
+
         # Set training password
         flow.training_password = "5678"
-        
+
         session.commit()
         return tenant.id, channel.id, flow.id, test_number
-        
+
     except Exception as e:
         session.rollback()
         raise e
@@ -137,15 +137,15 @@ def create_test_flow_with_training():
 def test_enter_training_mode_tool():
     """Test that EnterTrainingMode tool can be called by LLM."""
     from app.flow_core.tool_schemas import EnterTrainingMode
-    
+
     # Verify tool schema
     tool = EnterTrainingMode(reason="explicit_user_request")
     assert tool.reason == "explicit_user_request"
-    
+
     # Test with mock LLM
     mock_llm = MockLLMForTraining(should_enter_training=True)
     result = mock_llm.extract("User wants training mode", [EnterTrainingMode])
-    
+
     assert result["__tool_name__"] == "EnterTrainingMode"
     assert result["reason"] == "explicit_user_request"
 
@@ -157,57 +157,57 @@ def test_training_mode_password_flow():
     mock_app_context = MagicMock()
     mock_store = MagicMock()
     mock_app_context.store = mock_store
-    
+
     # Mock thread and flow
     mock_thread = MagicMock()
     mock_thread.extra = {}
     mock_flow = MagicMock()
     mock_flow.id = "test-flow-id"
     mock_flow.training_password = "5678"
-    
+
     service = TrainingModeService(mock_session, mock_app_context)
-    
+
     # Start handshake
     prompt = service.start_handshake(
-        mock_thread, 
-        mock_flow, 
-        user_id="test-user", 
+        mock_thread,
+        mock_flow,
+        user_id="test-user",
         flow_session_key="test-session"
     )
     assert prompt == "Para entrar no modo treino, informe a senha."
     assert mock_thread.extra["awaiting_training_password"] is True
-    
+
     # Test correct password
     mock_thread.extra = {"awaiting_training_password": True, "pending_training_flow_id": "test-flow-id"}
     success, reply = service.validate_password(
-        mock_thread, 
-        mock_flow, 
-        "5678", 
-        user_id="test-user", 
+        mock_thread,
+        mock_flow,
+        "5678",
+        user_id="test-user",
         flow_session_key="test-session"
     )
     assert success is True
     assert "Modo treino ativado" in reply
-    
+
     # Test wrong password
     mock_thread.extra = {"awaiting_training_password": True, "pending_training_flow_id": "test-flow-id"}
     success, reply = service.validate_password(
-        mock_thread, 
-        mock_flow, 
-        "1111", 
-        user_id="test-user", 
+        mock_thread,
+        mock_flow,
+        "1111",
+        user_id="test-user",
         flow_session_key="test-session"
     )
     assert success is True
     assert "Senha incorreta" in reply
-    
+
     # Test non-numeric input (should reset)
     mock_thread.extra = {"awaiting_training_password": True, "pending_training_flow_id": "test-flow-id"}
     success, reply = service.validate_password(
-        mock_thread, 
-        mock_flow, 
-        "hello world", 
-        user_id="test-user", 
+        mock_thread,
+        mock_flow,
+        "hello world",
+        user_id="test-user",
         flow_session_key="test-session"
     )
     assert success is True
@@ -217,16 +217,16 @@ def test_training_mode_password_flow():
 @pytest.mark.integration
 def test_training_password_validation(monkeypatch):
     """Test password validation flow with attempts and reset."""
-    
+
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
     _patch_signature_validation(monkeypatch)
-    
+
     tenant_id, channel_id, flow_id, test_number = create_test_flow_with_training()
-    
+
     client = TestClient(app)
     headers = {"X-Twilio-Signature": "test"}
     from_num = "whatsapp:+15550003333"
-    
+
     # Step 1: Trigger training mode
     response = client.post(
         "/webhooks/twilio/whatsapp",
@@ -235,7 +235,7 @@ def test_training_password_validation(monkeypatch):
     )
     assert response.status_code == 200
     assert "Para entrar no modo treino" in response.text
-    
+
     # Step 2: Wrong password (numeric)
     response = client.post(
         "/webhooks/twilio/whatsapp",
@@ -244,7 +244,7 @@ def test_training_password_validation(monkeypatch):
     )
     assert response.status_code == 200
     assert "Senha incorreta" in response.text
-    
+
     # Step 3: Non-numeric input (should reset)
     response = client.post(
         "/webhooks/twilio/whatsapp",
@@ -253,14 +253,14 @@ def test_training_password_validation(monkeypatch):
     )
     assert response.status_code == 200
     assert "Que tal começarmos de novo" in response.text
-    
+
     # Step 4: Trigger again and provide correct password
     client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "modo treino"},
         headers=headers,
     )
-    
+
     response = client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "5678"},
@@ -273,23 +273,23 @@ def test_training_password_validation(monkeypatch):
 @pytest.mark.integration
 def test_training_password_three_attempts(monkeypatch):
     """Test that 3 wrong password attempts trigger reset."""
-    
+
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
     _patch_signature_validation(monkeypatch)
-    
+
     tenant_id, channel_id, flow_id, test_number = create_test_flow_with_training()
-    
+
     client = TestClient(app)
     headers = {"X-Twilio-Signature": "test"}
     from_num = "whatsapp:+15550004444"
-    
+
     # Trigger training mode
     client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "modo treino"},
         headers=headers,
     )
-    
+
     # Three wrong attempts
     for i in range(3):
         response = client.post(
@@ -305,22 +305,22 @@ def test_training_password_three_attempts(monkeypatch):
 
 def test_training_mode_service_unit():
     """Unit test for TrainingModeService logic."""
-    
+
     # Mock dependencies
     mock_session = MagicMock()
     mock_app_context = MagicMock()
     mock_store = MagicMock()
     mock_app_context.store = mock_store
-    
+
     service = TrainingModeService(mock_session, mock_app_context)
-    
+
     # Test trigger detection
     assert service.is_trigger("modo treino")
     assert service.is_trigger("ativar modo de treinamento")
     assert service.is_trigger("comecar treino")  # without cedilla
     assert not service.is_trigger("hello world")
     assert not service.is_trigger("treino casual mention")
-    
+
     # Test normalization
     assert service._norm("  MODO TREINO  ") == "modo treino"
     assert service._norm("Ativar Modo De Treinamento") == "ativar modo de treinamento"
@@ -329,36 +329,36 @@ def test_training_mode_service_unit():
 @pytest.mark.integration
 def test_training_mode_flow_editing(monkeypatch):
     """Test that training mode routes to flow modification tools."""
-    
+
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
     _patch_signature_validation(monkeypatch)
-    
+
     tenant_id, channel_id, flow_id, test_number = create_test_flow_with_training()
-    
+
     client = TestClient(app)
     headers = {"X-Twilio-Signature": "test"}
     from_num = "whatsapp:+15550005555"
-    
+
     # Enter training mode
     client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "modo treino"},
         headers=headers,
     )
-    
+
     client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "5678"},
         headers=headers,
     )
-    
+
     # Send flow modification instruction
     response = client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "Change the greeting prompt to 'Hello, what is your full name?'"},
         headers=headers,
     )
-    
+
     assert response.status_code == 200
     # Should get a response about the modification (exact text varies)
     assert len(response.text) > 10  # Some meaningful response
@@ -367,36 +367,36 @@ def test_training_mode_flow_editing(monkeypatch):
 @pytest.mark.integration
 def test_training_mode_simulation(monkeypatch):
     """Test that simulation triggers work in training mode."""
-    
+
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
     _patch_signature_validation(monkeypatch)
-    
+
     tenant_id, channel_id, flow_id, test_number = create_test_flow_with_training()
-    
+
     client = TestClient(app)
     headers = {"X-Twilio-Signature": "test"}
     from_num = "whatsapp:+15550006666"
-    
+
     # Enter training mode
     client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "modo treino"},
         headers=headers,
     )
-    
+
     client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "5678"},
         headers=headers,
     )
-    
+
     # Test simulation
     response = client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": test_number, "Body": "Simular: My name is John"},
         headers=headers,
     )
-    
+
     assert response.status_code == 200
     # Should simulate the flow response (exact text varies based on flow)
     assert len(response.text) > 5  # Some meaningful response

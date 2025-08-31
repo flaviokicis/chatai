@@ -12,9 +12,9 @@ from app.core.llm import LLMClient
 from app.main import app
 from tests.webhook_test_utils import (
     _patch_signature_validation,
-    create_test_tenant_with_flow,
-    create_sales_qualifier_flow,
     create_paths_flow,
+    create_sales_qualifier_flow,
+    create_test_tenant_with_flow,
 )
 
 
@@ -38,28 +38,28 @@ def test_whatsapp_like_flow(monkeypatch):
     """Test basic WhatsApp flow with database setup."""
     # Force use of Twilio adapter
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
-    
+
     # Create database records
     flow_definition = create_sales_qualifier_flow()
     tenant, channel, flow, to_num = create_test_tenant_with_flow(
         flow_definition=flow_definition,
         flow_name="Sales Qualifier"
     )
-    
+
     # Bypass signature validation
     _patch_signature_validation(monkeypatch)
-    
+
     client = TestClient(app)
-    
+
     # Setup app context with deterministic LLM
     ctx = get_app_context(app)
     ctx.llm = SeqLLM([
         {"__tool_name__": "UpdateAnswersFlow", "updates": {"intention": "buy leds"}},
     ])
-    
+
     headers = {"X-Twilio-Signature": "test"}
     from_num = "whatsapp:+15550001111"
-    
+
     # Turn 1: user greets, LLM updates intention, should move to budget question
     r1 = client.post(
         "/webhooks/whatsapp",
@@ -76,24 +76,24 @@ def test_whatsapp_like_flow(monkeypatch):
 
 
 @pytest.mark.skip(reason="Complex flow features (PathSelection, Escalation) not implemented in current flow engine")
-@pytest.mark.integration  
+@pytest.mark.integration
 def test_ambiguous_paths_escalate_to_human(monkeypatch):
     """Test that ambiguous paths escalate to human with database setup."""
     # Force use of Twilio adapter
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
-    
+
     # Create database records with paths flow
     flow_definition = create_paths_flow(lock_threshold=2)
     tenant, channel, flow, to_num = create_test_tenant_with_flow(
         flow_definition=flow_definition,
         flow_name="Paths Flow"
     )
-    
+
     # Bypass signature validation
     _patch_signature_validation(monkeypatch)
-    
+
     client = TestClient(app)
-    
+
     # LLM sequence answers the three global fields and nothing else
     class ThreeStepLLM(LLMClient):
         def __init__(self) -> None:
@@ -152,19 +152,19 @@ def test_paths_selection_and_questions_flow(monkeypatch):
     """Test path selection and questions flow with database setup."""
     # Force use of Twilio adapter
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
-    
+
     # Create database records with paths flow (immediate lock)
     flow_definition = create_paths_flow(lock_threshold=1)
     tenant, channel, flow, to_num = create_test_tenant_with_flow(
         flow_definition=flow_definition,
         flow_name="Paths Lock Flow"
     )
-    
+
     # Bypass signature validation
     _patch_signature_validation(monkeypatch)
-    
+
     client = TestClient(app)
-    
+
     # LLM: intention first, then court_type
     class PathLLM(LLMClient):
         def __init__(self) -> None:

@@ -190,7 +190,7 @@ class TenantService:
         flow = repository.get_flow_by_id(self.session, flow_id)
         if not flow:
             raise TenantServiceError(f"Flow {flow_id} not found")
-        
+
         if flow.tenant_id != tenant_id:
             raise TenantServiceError(f"Flow {flow_id} does not belong to tenant {tenant_id}")
 
@@ -212,19 +212,19 @@ class TenantService:
             self.session.rollback()
             logger.error("Failed to update flow: %s", exc)
             raise TenantServiceError("Failed to update flow") from exc
-    
+
     def get_channel_instance(self, channel_id: UUID) -> ChannelInstance | None:
         """Get a channel instance by ID."""
         return repository.get_channel_instance_by_id(self.session, channel_id)
-    
+
     def get_flows_by_channel(self, channel_id: UUID) -> Sequence[Flow]:
         """Get all flows for a specific channel instance."""
         return repository.get_flows_by_channel_instance(self.session, channel_id)
-    
+
     def get_flow_by_id(self, flow_id: UUID) -> Flow | None:
         """Get a flow by ID."""
         return repository.get_flow_by_id(self.session, flow_id)
-    
+
     def set_channel_active_flow(self, channel_id: UUID, flow_id: UUID) -> None:
         """Set the active flow for a channel (deactivates other flows for this channel)."""
         try:
@@ -237,14 +237,14 @@ class TenantService:
                         flow_id=flow.id,
                         is_active=False,
                     )
-            
+
             # Then activate the selected flow
             repository.update_flow(
                 self.session,
                 flow_id=flow_id,
                 is_active=True,
             )
-            
+
             logger.info("Set active flow %s for channel %s", str(flow_id), str(channel_id))
         except Exception as exc:
             logger.error("Failed to set active flow: %s", exc)

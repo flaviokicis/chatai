@@ -60,7 +60,6 @@ async def handle_whatsapp_webhook_verification(
     if hub_mode == "subscribe" and hub_verify_token == settings.whatsapp_verify_token:
         logger.info("WhatsApp webhook verified successfully")
         return PlainTextResponse(hub_challenge, status_code=200)
-    else:
-        logger.warning("WhatsApp webhook verification failed: mode=%s, token_valid=%s",
-                      hub_mode, hub_verify_token == settings.whatsapp_verify_token)
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verification failed")
+    logger.warning("WhatsApp webhook verification failed: mode=%s, token_valid=%s",
+                  hub_mode, hub_verify_token == settings.whatsapp_verify_token)
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verification failed")

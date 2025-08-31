@@ -11,9 +11,9 @@ from langchain.chat_models import init_chat_model
 
 from app.core.channel_adapter import CLIAdapter, ConversationalRewriter
 from app.core.langchain_adapter import LangChainToolsLLM
-from app.db.session import db_session
-from app.services.tenant_config_service import TenantConfigService, ProjectContext
 from app.db.repository import get_active_tenants, get_flows_by_tenant
+from app.db.session import db_session
+from app.services.tenant_config_service import ProjectContext, TenantConfigService
 
 from .compiler import compile_flow
 from .ir import Flow
@@ -144,8 +144,8 @@ def run_cli() -> None:
             # Rewrite into multi-message format with tenant context
             # This ensures ALL messages (including first prompt) get tenant styling
             messages = rewriter.rewrite_message(
-                display_text, 
-                chat_history, 
+                display_text,
+                chat_history,
                 enable_rewrite=not args.no_rewrite,
                 project_context=project_context
             )
@@ -245,7 +245,7 @@ def _load_flow_and_tenant(args) -> tuple[Flow, ProjectContext | None]:
 
         flow_data = selected_flow.definition
         # Keep original schema version (no forced conversion)
-        
+
         flow = Flow.model_validate(flow_data)
         print(f"[database] Loaded flow '{selected_flow.name}' (flow_id='{selected_flow.flow_id}') from database")
         return flow, project_context

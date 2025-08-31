@@ -6,17 +6,18 @@ These tests create actual database records (tenant, channel, flows) instead of
 relying on hardcoded JSON configuration files.
 """
 
+
 import pytest
 from fastapi.testclient import TestClient
-from app.main import app
-from app.db.session import create_session
-from app.db.repository import (
-    create_tenant_with_config,
-    create_channel_instance, 
-    create_flow,
-)
+
 from app.db.models import ChannelType
-import json
+from app.db.repository import (
+    create_channel_instance,
+    create_flow,
+    create_tenant_with_config,
+)
+from app.db.session import create_session
+from app.main import app
 
 
 def _patch_signature_validation(monkeypatch):
@@ -34,9 +35,9 @@ def create_test_tenant_and_flow():
     """Create a test tenant with dental flow in database."""
     import uuid
     test_id = str(uuid.uuid4())[:8]  # Short unique ID
-    
+
     session = create_session()
-    
+
     try:
         # Create tenant
         tenant = create_tenant_with_config(
@@ -48,7 +49,7 @@ def create_test_tenant_and_flow():
             target_audience="Test patients",
             communication_style="Test friendly style"
         )
-        
+
         # Create WhatsApp channel with unique identifier
         test_number = f"whatsapp:+1555{test_id[:4]}{test_id[4:8]}"
         channel = create_channel_instance(
@@ -59,7 +60,7 @@ def create_test_tenant_and_flow():
             phone_number=test_number.replace("whatsapp:", ""),
             extra={"display_name": "Test Clinic"}
         )
-        
+
         # Create simple test flow with correct schema
         flow_definition = {
             "schema_version": "v2",
@@ -73,21 +74,21 @@ def create_test_tenant_and_flow():
                     "prompt": "What are you looking to accomplish today?"
                 },
                 {
-                    "id": "complete", 
+                    "id": "complete",
                     "kind": "Terminal",
                     "reason": "Thank you for your interest!"
                 }
             ],
             "edges": [
                 {
-                    "source": "welcome", 
-                    "target": "complete", 
+                    "source": "welcome",
+                    "target": "complete",
                     "guard": {"fn": "answers_has", "args": {"key": "intention"}},
                     "priority": 0
                 }
             ]
         }
-        
+
         flow = create_flow(
             session,
             tenant_id=tenant.id,
@@ -96,10 +97,10 @@ def create_test_tenant_and_flow():
             flow_id="test_flow_v1",
             definition=flow_definition
         )
-        
+
         session.commit()
         return tenant.id, channel.id, flow.id, test_number
-        
+
     except Exception as e:
         session.rollback()
         raise e
@@ -110,60 +111,60 @@ def create_test_tenant_and_flow():
 @pytest.mark.integration
 def test_database_driven_webhook_flow(monkeypatch):
     """Test that webhook correctly loads flow from database and processes messages."""
-    
+
     # Force use of Twilio adapter for form data tests
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
     _patch_signature_validation(monkeypatch)
-    
+
     # Create test data in database
     tenant_id, channel_id, flow_id, test_number = create_test_tenant_and_flow()
-    
+
     client = TestClient(app)
-    
+
     headers = {"X-Twilio-Signature": "test"}
     from_num = "whatsapp:+15550001111"
     to_num = test_number  # Use unique test channel
-    
+
     # Turn 1: Send greeting, should get first question
     response = client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": to_num, "Body": "Hello"},
         headers=headers,
     )
-    
+
     assert response.status_code == 200
     assert "What are you looking to accomplish today?" in response.text
-    
-    # Turn 2: Answer question, should get completion message  
+
+    # Turn 2: Answer question, should get completion message
     response2 = client.post(
-        "/webhooks/twilio/whatsapp", 
+        "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": to_num, "Body": "I need dental help"},
         headers=headers,
     )
-    
+
     assert response2.status_code == 200
     # Terminal nodes return their reason field as the message
     assert "Thank you for your interest!" in response2.text
-    
 
-@pytest.mark.integration 
+
+@pytest.mark.integration
 def test_channel_not_found_error(monkeypatch):
     """Test that webhook returns appropriate error for unknown channels."""
-    
+
     monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
     _patch_signature_validation(monkeypatch)
-    
+
     client = TestClient(app)
-    
+
     headers = {"X-Twilio-Signature": "test"}
     from_num = "whatsapp:+15550001111"
     to_num = "whatsapp:+99999999999"  # Non-existent channel
-    
+
     response = client.post(
         "/webhooks/twilio/whatsapp",
         data={"From": from_num, "To": to_num, "Body": "Hello"},
         headers=headers,
     )
-    
+
     assert response.status_code == 200
     assert "não está configurado" in response.text

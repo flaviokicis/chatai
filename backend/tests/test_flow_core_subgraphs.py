@@ -9,7 +9,6 @@ import pytest
 from app.core.llm import LLMClient
 from app.flow_core.compiler import FlowCompiler
 from app.flow_core.engine import LLMFlowEngine
-from tests.test_flow_core import MockLLM
 from app.flow_core.ir import (
     ActionNode,
     DecisionNode,
@@ -25,6 +24,7 @@ from app.flow_core.ir import (
 )
 from app.flow_core.llm_responder import LLMFlowResponder
 from app.flow_core.state import FlowContext
+from tests.test_flow_core import MockLLM
 
 
 class SequentialMockLLM(LLMClient):
@@ -530,7 +530,7 @@ class TestFlowNavigation:
 
         # Create separate mocks for engine and responder to avoid interference
         engine_mock = SequentialMockLLM([])  # Engine doesn't need specific responses for this test
-        
+
         responder_mock = SequentialMockLLM(
             [
                 # Skip first question
@@ -609,7 +609,7 @@ class TestFlowNavigation:
 
         # Create separate mocks for engine and responder
         engine_mock = SequentialMockLLM([])  # Engine doesn't need specific responses for this test
-        
+
         responder_mock = SequentialMockLLM(
             [
                 # First, ask for clarification
