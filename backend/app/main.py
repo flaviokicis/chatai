@@ -155,46 +155,48 @@ async def health() -> str:
 # Aggregate API router mounted
 app.include_router(api_router)
 
-# Serve Next.js frontend with SPA-style routing
-static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
-if os.path.exists(static_dir):
-    # Serve Next.js static assets (JS, CSS, images)
-    static_assets_dir = os.path.join(static_dir, "static")
-    if os.path.exists(static_assets_dir):
-        app.mount("/_next/static", StaticFiles(directory=static_assets_dir), name="nextjs_assets")
-        logger.info("Next.js static assets mounted from %s", static_assets_dir)
-    
-    # Custom SPA handler for client-side routing
-    from fastapi import Request
-    from fastapi.responses import FileResponse
-    
-    server_app_dir = os.path.join(static_dir, "server", "app")
-    
-    @app.get("/{full_path:path}")
-    async def spa_handler(request: Request, full_path: str):
-        """Handle SPA routing - serve appropriate HTML file or fallback to index."""
+# Serve Next.js frontend with SPA-style routing (PRODUCTION ONLY)
+# In development, frontend runs separately on port 3000
+if os.getenv("NODE_ENV") == "production":
+    static_dir = os.path.join(os.path.dirname(__file__), "..", "static")
+    if os.path.exists(static_dir):
+        # Serve Next.js static assets (JS, CSS, images)
+        static_assets_dir = os.path.join(static_dir, "static")
+        if os.path.exists(static_assets_dir):
+            app.mount("/_next/static", StaticFiles(directory=static_assets_dir), name="nextjs_assets")
+            logger.info("Next.js static assets mounted from %s", static_assets_dir)
         
-        # CRITICAL: Skip ALL API routes to prevent conflicts
-        if (full_path.startswith("controller/") or 
-            full_path.startswith("webhooks/") or
-            full_path.startswith("chats/") or
-            full_path.startswith("flows/") or
-            full_path.startswith("health")):
-            raise HTTPException(status_code=404, detail="Not Found")
+        # Custom SPA handler for client-side routing
+        from fastapi import Request
+        from fastapi.responses import FileResponse
         
-        # Try to find the specific HTML file for this route
-        html_file_path = os.path.join(server_app_dir, f"{full_path}.html")
-        if os.path.exists(html_file_path):
-            return FileResponse(html_file_path, media_type="text/html")
+        server_app_dir = os.path.join(static_dir, "server", "app")
         
-        # For dynamic routes or missing pages, try index.html as fallback
-        index_path = os.path.join(server_app_dir, "index.html")
-        if os.path.exists(index_path):
-            return FileResponse(index_path, media_type="text/html")
+        @app.get("/{full_path:path}")
+        async def spa_handler(request: Request, full_path: str):
+            """Handle SPA routing - serve appropriate HTML file or fallback to index."""
+            
+            # CRITICAL: Skip ALL API routes to prevent conflicts
+            if (full_path.startswith("api/") or 
+                full_path.startswith("webhooks/") or
+                full_path.startswith("health")):
+                raise HTTPException(status_code=404, detail="Not Found")
+            
+            # Try to find the specific HTML file for this route
+            html_file_path = os.path.join(server_app_dir, f"{full_path}.html")
+            if os.path.exists(html_file_path):
+                return FileResponse(html_file_path, media_type="text/html")
+            
+            # For dynamic routes or missing pages, try index.html as fallback
+            index_path = os.path.join(server_app_dir, "index.html")
+            if os.path.exists(index_path):
+                return FileResponse(index_path, media_type="text/html")
+            
+            # Final fallback
+            raise HTTPException(status_code=404, detail="Page not found")
         
-        # Final fallback
-        raise HTTPException(status_code=404, detail="Page not found")
-    
-    logger.info("SPA routing configured for frontend from %s", server_app_dir)
+        logger.info("PRODUCTION: SPA routing configured for frontend from %s", server_app_dir)
+    else:
+        logger.warning("PRODUCTION: Static files directory not found: %s", static_dir)
 else:
-    logger.warning("Static files directory not found: %s", static_dir)
+    logger.info("DEVELOPMENT: Frontend static serving disabled - run 'pnpm dev' separately")

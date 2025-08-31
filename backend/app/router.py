@@ -8,7 +8,7 @@ from app.api.flows import router as flows_router
 from app.api.flow_chat import router as flow_chat_router, router_versions as flow_versions_router
 from app.whatsapp.router import router as whatsapp_router
 
-api_router = APIRouter()
+api_router = APIRouter(prefix="/api")
 
 # Mount channel/feature routers here
 api_router.include_router(flows_router)

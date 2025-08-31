@@ -4,14 +4,14 @@
  */
 
 export const API_CONFIG = {
-  // In development: use localhost backend
-  // In production: use relative paths (same server serves frontend + API)
+  // Development: Frontend (3000) calls Backend (8080) directly
+  // Production: Same server serves both, use relative paths
   BASE_URL: process.env.NODE_ENV === 'production' 
     ? '' // Empty string for relative paths when served from Python
     : 'http://localhost:8080',
     
   ENDPOINTS: {
-    CONTROLLER: '/controller',
+    CONTROLLER: '/api/controller',
   }
 } as const;
 

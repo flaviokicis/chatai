@@ -44,7 +44,7 @@ class TestAdminControllerIntegration:
         
         # Login as admin
         login_response = client.post(
-            "/controller/auth",
+            "/api/controller/auth",
             json={"password": "test_admin_123"}
         )
         assert login_response.status_code == 200
@@ -130,7 +130,7 @@ class TestAdminControllerIntegration:
 
     def test_admin_health_endpoint(self, client: TestClient) -> None:
         """Test admin health endpoint is accessible."""
-        response = client.get("/controller/health")
+        response = client.get("/api/controller/health")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "healthy"
@@ -141,7 +141,7 @@ class TestAdminControllerIntegration:
         os.environ["ADMIN_PASSWORD"] = "correct_password"
         
         response = client.post(
-            "/controller/auth",
+            "/api/controller/auth",
             json={"password": "wrong_password"}
         )
         assert response.status_code == 200
@@ -155,7 +155,7 @@ class TestAdminControllerIntegration:
             del os.environ["ADMIN_PASSWORD"]
         
         response = client.post(
-            "/controller/auth",
+            "/api/controller/auth",
             json={"password": "any_password"}
         )
         assert response.status_code == 200
@@ -169,7 +169,7 @@ class TestAdminControllerIntegration:
         os.environ["SESSION_SECRET_KEY"] = "test-session-secret"
         
         response = client.post(
-            "/controller/auth",
+            "/api/controller/auth",
             json={"password": "test_admin_123"}
         )
         assert response.status_code == 200
@@ -180,12 +180,12 @@ class TestAdminControllerIntegration:
 
     def test_unauthorized_access_to_tenants(self, client: TestClient) -> None:
         """Test that tenant endpoints require authentication."""
-        response = client.get("/controller/tenants")
+        response = client.get("/api/controller/tenants")
         assert response.status_code == 401
 
     def test_list_tenants_authenticated(self, admin_session: TestClient, test_tenant_data: dict) -> None:
         """Test listing tenants with authentication."""
-        response = admin_session.get("/controller/tenants")
+        response = admin_session.get("/api/controller/tenants")
         assert response.status_code == 200
         
         tenants = response.json()
@@ -216,7 +216,7 @@ class TestAdminControllerIntegration:
             "communication_style": "Friendly test style"
         }
         
-        response = admin_session.post("/controller/tenants", json=new_tenant_data)
+        response = admin_session.post("/api/controller/tenants", json=new_tenant_data)
         assert response.status_code == 200
         
         created_tenant = response.json()
@@ -242,7 +242,7 @@ class TestAdminControllerIntegration:
             "project_description": "Updated test description"
         }
         
-        response = admin_session.put(f"/controller/tenants/{tenant_id}", json=update_data)
+        response = admin_session.put(f"/api/controller/tenants/{tenant_id}", json=update_data)
         assert response.status_code == 200
         
         updated_tenant = response.json()
@@ -266,7 +266,7 @@ class TestAdminControllerIntegration:
         session.close()
         
         # Delete via API
-        response = admin_session.delete(f"/controller/tenants/{tenant_id}")
+        response = admin_session.delete(f"/api/controller/tenants/{tenant_id}")
         assert response.status_code == 200
         
         data = response.json()
@@ -284,7 +284,7 @@ class TestAdminControllerIntegration:
         """Test listing channels for a tenant."""
         tenant_id = test_tenant_data["tenant_id"]
         
-        response = admin_session.get(f"/controller/tenants/{tenant_id}/channels")
+        response = admin_session.get(f"/api/controller/tenants/{tenant_id}/channels")
         assert response.status_code == 200
         
         channels = response.json()
@@ -307,7 +307,7 @@ class TestAdminControllerIntegration:
             "extra": {"test_channel": True}
         }
         
-        response = admin_session.post(f"/controller/tenants/{tenant_id}/channels", json=channel_data)
+        response = admin_session.post(f"/api/controller/tenants/{tenant_id}/channels", json=channel_data)
         assert response.status_code == 200
         
         created_channel = response.json()
@@ -319,7 +319,7 @@ class TestAdminControllerIntegration:
         """Test listing flows for a tenant."""
         tenant_id = test_tenant_data["tenant_id"]
         
-        response = admin_session.get(f"/controller/tenants/{tenant_id}/flows")
+        response = admin_session.get(f"/api/controller/tenants/{tenant_id}/flows")
         assert response.status_code == 200
         
         flows = response.json()
@@ -356,7 +356,7 @@ class TestAdminControllerIntegration:
             ]
         }
         
-        response = admin_session.put(f"/controller/flows/{flow_id}", json={"definition": updated_definition})
+        response = admin_session.put(f"/api/controller/flows/{flow_id}", json={"definition": updated_definition})
         assert response.status_code == 200
         
         updated_flow = response.json()
@@ -366,14 +366,14 @@ class TestAdminControllerIntegration:
 
     def test_admin_logout(self, admin_session: TestClient) -> None:
         """Test admin logout functionality."""
-        response = admin_session.post("/controller/logout")
+        response = admin_session.post("/api/controller/logout")
         assert response.status_code == 200
         
         data = response.json()
         assert "Logged out successfully" in data["message"]
         
         # Verify session is invalidated
-        response = admin_session.get("/controller/tenants")
+        response = admin_session.get("/api/controller/tenants")
         assert response.status_code == 401
 
     def test_nonexistent_tenant_operations(self, admin_session: TestClient) -> None:
@@ -381,15 +381,15 @@ class TestAdminControllerIntegration:
         fake_uuid = "00000000-0000-0000-0000-000000000000"
         
         # Try to update non-existent tenant
-        response = admin_session.put(f"/controller/tenants/{fake_uuid}", json={"owner_first_name": "Test"})
+        response = admin_session.put(f"/api/controller/tenants/{fake_uuid}", json={"owner_first_name": "Test"})
         assert response.status_code == 404
         
         # Try to delete non-existent tenant
-        response = admin_session.delete(f"/controller/tenants/{fake_uuid}")
+        response = admin_session.delete(f"/api/controller/tenants/{fake_uuid}")
         assert response.status_code == 404
         
         # Try to list channels for non-existent tenant
-        response = admin_session.get(f"/controller/tenants/{fake_uuid}/channels")
+        response = admin_session.get(f"/api/controller/tenants/{fake_uuid}/channels")
         assert response.status_code == 200  # Should return empty list
         assert response.json() == []
 
@@ -397,7 +397,7 @@ class TestAdminControllerIntegration:
         """Test operations on non-existent flows."""
         fake_uuid = "00000000-0000-0000-0000-000000000000"
         
-        response = admin_session.put(f"/controller/flows/{fake_uuid}", json={"definition": {"test": "data"}})
+        response = admin_session.put(f"/api/controller/flows/{fake_uuid}", json={"definition": {"test": "data"}})
         assert response.status_code == 404
 
     def test_invalid_json_flow_update(self, admin_session: TestClient, test_tenant_data: dict) -> None:
@@ -410,7 +410,7 @@ class TestAdminControllerIntegration:
             # Missing id, entry, nodes, etc.
         }
         
-        response = admin_session.put(f"/controller/flows/{flow_id}", json={"definition": invalid_definition})
+        response = admin_session.put(f"/api/controller/flows/{flow_id}", json={"definition": invalid_definition})
         # Should accept any JSON (validation happens at flow execution time)
         assert response.status_code == 200
 
@@ -422,12 +422,12 @@ class TestAdminControllerIntegration:
             "owner_email": "invalid-email"  # Invalid email format
         }
         
-        response = admin_session.post("/controller/tenants", json=invalid_data)
+        response = admin_session.post("/api/controller/tenants", json=invalid_data)
         assert response.status_code == 422  # Validation error
 
     def test_gdpr_data_encryption(self, admin_session: TestClient, test_tenant_data: dict) -> None:
         """Test that PII data is properly encrypted in responses."""
-        response = admin_session.get("/controller/tenants")
+        response = admin_session.get("/api/controller/tenants")
         assert response.status_code == 200
         
         tenants = response.json()
@@ -498,7 +498,7 @@ class TestAdminControllerIntegration:
         session.close()
         
         # Delete tenant via API
-        response = admin_session.delete(f"/controller/tenants/{tenant_id}")
+        response = admin_session.delete(f"/api/controller/tenants/{tenant_id}")
         assert response.status_code == 200
         
         # Verify all related data is deleted
@@ -526,19 +526,19 @@ class TestAdminControllerIntegration:
         os.environ["ADMIN_PASSWORD"] = "test_admin_123"
         
         # Login
-        login_response = client.post("/controller/auth", json={"password": "test_admin_123"})
+        login_response = client.post("/api/controller/auth", json={"password": "test_admin_123"})
         assert login_response.status_code == 200
         
         # Should be able to access tenants
-        response = client.get("/controller/tenants")
+        response = client.get("/api/controller/tenants")
         assert response.status_code == 200
         
         # Logout
-        logout_response = client.post("/controller/logout")
+        logout_response = client.post("/api/controller/logout")
         assert logout_response.status_code == 200
         
         # Should no longer be able to access tenants
-        response = client.get("/controller/tenants")
+        response = client.get("/api/controller/tenants")
         assert response.status_code == 401
 
     def test_concurrent_admin_sessions(self, client: TestClient) -> None:
@@ -548,15 +548,15 @@ class TestAdminControllerIntegration:
         # Create two separate clients to simulate different browser sessions
         with TestClient(app) as client1, TestClient(app) as client2:
             # Both should be able to login independently
-            login1 = client1.post("/controller/auth", json={"password": "test_admin_123"})
-            login2 = client2.post("/controller/auth", json={"password": "test_admin_123"})
+            login1 = client1.post("/api/controller/auth", json={"password": "test_admin_123"})
+            login2 = client2.post("/api/controller/auth", json={"password": "test_admin_123"})
             
             assert login1.status_code == 200
             assert login2.status_code == 200
             
             # Both should be able to access tenants
-            response1 = client1.get("/controller/tenants")
-            response2 = client2.get("/controller/tenants")
+            response1 = client1.get("/api/controller/tenants")
+            response2 = client2.get("/api/controller/tenants")
             
             assert response1.status_code == 200
             assert response2.status_code == 200
