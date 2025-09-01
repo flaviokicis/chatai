@@ -392,6 +392,7 @@ Recent Conversation:
             UnknownAnswer,
             ProvideInformation,
             RequestHumanHandoff,
+            RestartConversation,  # Always available for conversation restart
         ]
 
         # Add contextual tools
@@ -402,6 +403,11 @@ Recent Conversation:
                 basic_tools.append(PathCorrection)
 
         if ctx.available_paths:  # Multi-path flow
+            basic_tools.append(SelectFlowPath)
+        
+        # Always add SelectFlowPath for flows with decision nodes (even if paths aren't populated yet)
+        # This ensures the LLM can make path decisions from the first interaction
+        if not any(tool.__name__ == "SelectFlowPath" for tool in basic_tools):
             basic_tools.append(SelectFlowPath)
 
         if ctx.clarification_count > 2:  # User struggling

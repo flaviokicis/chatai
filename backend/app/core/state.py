@@ -64,10 +64,13 @@ class RedisStore:
         self._events_ttl = int(events_ttl.total_seconds()) if events_ttl else None
 
     def _state_key(self, user_id: str, agent_type: str) -> str:
-        return f"{self._ns}:state:{user_id}:{agent_type}"
+        # Use centralized key builder for consistency with our namespace
+        from app.core.redis_keys import RedisKeyBuilder
+        key_builder = RedisKeyBuilder(namespace=self._ns)
+        return key_builder.conversation_state_key(user_id, agent_type)
 
     def _events_key(self, user_id: str) -> str:
-        return f"{self._ns}:events:{user_id}"
+        return f"{self._ns}:events:{user_id}"  # Events use simple pattern
 
     def load(self, user_id: str, agent_type: str) -> AgentState | None:  # type: ignore[name-defined]
         raw = self._r.get(self._state_key(user_id, agent_type))

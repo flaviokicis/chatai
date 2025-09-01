@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 # REMOVED: dev_config import - Use DEVELOPMENT_MODE environment variable instead
-from app.core.naturalize import naturalize_prompt
+
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
@@ -740,22 +740,9 @@ class LLMFlowEngine:
         if ctx.turn_count > 0 and self._should_add_context(node, ctx):
             base_prompt = self._add_conversational_context(base_prompt, ctx)
 
-        # Naturalize the prompt to make it sound more conversational and Brazilian
-        try:
-            # Get recent conversation history for context (10 messages for rich context)
-            recent_history = ctx.get_recent_history(10)
-            conversation_context = [{"role": h.get("role", ""), "content": h.get("content", "")} for h in recent_history]
-
-            naturalized = naturalize_prompt(
-                self._llm,
-                base_prompt,
-                conversation_context=conversation_context,
-                project_context=project_context
-            )
-            return naturalized
-        except Exception:
-            # Fall back to original prompt if naturalization fails
-            return base_prompt
+        # Return the base prompt directly - let the rewriter handle naturalization
+        # The rewriter has better context and rules for preserving questions
+        return base_prompt
 
 
 
@@ -964,14 +951,7 @@ class LLMFlowEngine:
                         last_user_message = getattr(turn, "content", "")
                         break
 
-                naturalized = naturalize_prompt(
-                    self._llm,
-                    base_prompt,
-                    project_context=project_context,
-                    user_message=last_user_message,
-                    conversation_context=conversation_context
-                )
-                return naturalized
+                return base_prompt
             except Exception:
                 return base_prompt
 
@@ -989,13 +969,7 @@ class LLMFlowEngine:
                         last_user_message = getattr(turn, "content", "")
                         break
 
-                return naturalize_prompt(
-                    self._llm,
-                    base,
-                    project_context=project_context,
-                    user_message=last_user_message,
-                    conversation_context=conversation_context
-                )
+                return base
             except Exception:
                 return base
         if len(labels) == 1:
@@ -1014,13 +988,7 @@ class LLMFlowEngine:
                     last_user_message = getattr(turn, "content", "")
                     break
 
-            return naturalize_prompt(
-                self._llm,
-                full_prompt,
-                project_context=project_context,
-                user_message=last_user_message,
-                conversation_context=conversation_context
-            )
+            return full_prompt
         except Exception:
             return full_prompt
 
@@ -1220,12 +1188,7 @@ class LLMFlowEngine:
                     last_user_message = getattr(turn, "content", "")
                     break
 
-            return naturalize_prompt(
-                self._llm,
-                base_prompt,
-                user_message=last_user_message,
-                conversation_context=conversation_context
-            )
+            return base_prompt
         except Exception:
             return base_prompt
 

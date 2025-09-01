@@ -17,6 +17,7 @@ from app.core.thought_tracer import DatabaseThoughtTracer
 from .engine import LLMFlowEngine
 from .llm_responder import LLMFlowResponder
 from .state import FlowContext
+from .ir import QuestionNode
 
 # Type alias for tool event callbacks
 ToolEventCallback = Callable[[str, dict[str, Any]], bool]

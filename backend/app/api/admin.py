@@ -39,6 +39,7 @@ from app.db.repository import (
 )
 from app.db.session import db_session
 from app.settings import get_settings
+from app.core.redis_keys import redis_keys
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/controller", tags=["controller"])
@@ -125,13 +126,14 @@ class FlowResponse(BaseModel):
 
 class ConversationInfo(BaseModel):
     user_id: str
-    agent_type: str
+    agent_type: str  # Proper agent type: "flow", "chat", etc.
     session_id: str
     last_activity: datetime | None = None
     message_count: int = 0
     is_active: bool = False
     tenant_id: str | None = None
     is_historical: bool = False  # True if from database (completed), False if from Redis (active)
+    flow_name: str | None = None  # Flow identifier for display (e.g., "flow.atendimento_luminarias")
 
 
 class ConversationsResponse(BaseModel):
@@ -773,12 +775,12 @@ async def list_conversations(
                         channel, phone = user_parts
                         # Construct the session_id format: flow:{full_user_id}:{flow_id}
                         session_id = f"flow:{trace.user_id}:{trace.agent_type}"
-                        # Redis key uses channel as user_id and session_id as agent_type
-                        state_key = f"{namespace}:state:{channel}:{session_id}"
+                        # Use key builder for consistent key generation
+                        state_key = redis_keys.conversation_state_key(channel, session_id)
                         is_active = redis_client.exists(state_key)
                     else:
                         # Fallback to direct format
-                        state_key = f"{namespace}:state:{trace.user_id}:{trace.agent_type}"
+                        state_key = redis_keys.conversation_state_key(trace.user_id, trace.agent_type)
                         is_active = redis_client.exists(state_key)
                 
                 # Skip inactive if active_only is True
@@ -841,66 +843,60 @@ async def reset_conversation_context(
 
     try:
         redis_client = app_context.store._r
-        namespace = app_context.store._ns
         deleted_keys = 0
 
+        # Use the centralized key builder for consistent patterns
         if reset_req.agent_type:
-            # Reset specific agent type for user
-            patterns_to_delete = [
-                f"{namespace}:events:{reset_req.user_id}",
-            ]
-
-            # Handle flow format agent_type (e.g., "flow:flow_id")
-            if reset_req.agent_type.startswith("flow:"):
+            # Extract flow_id from agent_type if it's a flow
+            flow_id = None
+            if reset_req.agent_type.startswith("flow."):
+                flow_id = reset_req.agent_type  # e.g., "flow.atendimento_luminarias"
+            elif reset_req.agent_type.startswith("flow:"):
+                # Handle the malformed agent_type we've been dealing with
                 flow_id = reset_req.agent_type[5:]  # Remove "flow:" prefix
-                patterns_to_delete.extend([
-                    f"{namespace}:state:{reset_req.user_id}:flow:{flow_id}",
-                    f"{namespace}:state:{reset_req.user_id}:meta:flow",
-                    f"{namespace}:state:{reset_req.user_id}:meta:{flow_id}",
-                    f"{namespace}:history:*{reset_req.user_id}*flow*{flow_id}*",
-                    f"{namespace}:history:whatsapp:{reset_req.user_id}:flow:{flow_id}"
-                ])
-            else:
-                # Handle legacy format
-                patterns_to_delete.extend([
-                    f"{namespace}:state:{reset_req.user_id}:{reset_req.agent_type}",
-                    f"{namespace}:state:{reset_req.user_id}:meta:{reset_req.agent_type}",
-                    f"{namespace}:history:*{reset_req.user_id}*{reset_req.agent_type}*",
-                    f"{namespace}:history:whatsapp:{reset_req.user_id}:{reset_req.agent_type}"
-                ])
+            
+            patterns_to_delete = redis_keys.get_conversation_patterns(
+                user_id=reset_req.user_id,
+                flow_id=flow_id
+            )
         else:
-            # Reset all agent types for user
-            patterns_to_delete = [
-                f"{namespace}:state:{reset_req.user_id}:*",
-                f"{namespace}:events:{reset_req.user_id}",
-                f"{namespace}:history:*{reset_req.user_id}*"
-            ]
+            # Reset all conversations for user
+            patterns_to_delete = redis_keys.get_conversation_patterns(
+                user_id=reset_req.user_id,
+                flow_id=None
+            )
 
+        # Delete keys using patterns
         for pattern in patterns_to_delete:
             if "*" in pattern:
                 # Use pattern matching for wildcard patterns
                 keys = redis_client.keys(pattern)
                 if keys:
-                    deleted_keys += redis_client.delete(*keys)
-            # Direct key deletion
-            elif redis_client.exists(pattern):
-                deleted_keys += redis_client.delete(pattern)
+                    deleted_count = redis_client.delete(*keys)
+                    deleted_keys += deleted_count
+                    logger.info(f"Deleted {deleted_count} keys matching pattern: {pattern}")
+            else:
+                # Direct key deletion
+                if redis_client.exists(pattern):
+                    redis_client.delete(pattern)
+                    deleted_keys += 1
+                    logger.info(f"Deleted direct key: {pattern}")
 
         # NOTE: We do NOT delete database records (ChatThreads, Messages, or Traces)
         # Those are valuable for debugging and customer support.
         # Reset only clears Redis context to allow conversation restart.
         
-        agent_info = f" for agent type '{reset_req.agent_type}'" if reset_req.agent_type else " for all agent types"
+        flow_info = f" for flow '{reset_req.agent_type}'" if reset_req.agent_type else " for all flows"
         return {
-            "message": f"Successfully reset conversation context for user '{reset_req.user_id}'{agent_info} (Redis only - debugging data preserved)",
+            "message": f"Successfully reset Redis context for user '{reset_req.user_id}'{flow_info}",
             "deleted_keys": str(deleted_keys)
         }
-
+        
     except Exception as e:
+        logger.exception("Failed to reset conversation context")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to reset conversation: {e!s}"
-
         )
 
 

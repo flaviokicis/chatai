@@ -25,7 +25,7 @@ from app.services.message_logging_service import message_logging_service
 from app.services.session_manager import RedisSessionManager
 from app.settings import get_settings
 from app.whatsapp.thread_status_updater import WhatsAppThreadStatusUpdater
-from app.whatsapp.training_handler import WhatsAppTrainingHandler
+
 from app.whatsapp.webhook_db_handler import WebhookDatabaseHandler
 
 if TYPE_CHECKING:
@@ -165,7 +165,7 @@ class WhatsAppMessageProcessor:
             hasattr(self.adapter, "send_typing_indicator")):
 
             try:
-                await asyncio.sleep(1.0)  # WhatsApp Cloud API requirement
+                await asyncio.sleep(1.0)
 
                 clean_to = message_data["sender_number"].replace("whatsapp:", "")
                 clean_from = message_data["receiver_number"].replace("whatsapp:", "")
@@ -214,14 +214,13 @@ class WhatsAppMessageProcessor:
         
         # Create dependencies with dependency injection
         session_manager = RedisSessionManager(app_context.store)
-        training_handler = WhatsAppTrainingHandler()
         thread_updater = WhatsAppThreadStatusUpdater()
         
         # Create flow processor with injected dependencies
         flow_processor = FlowProcessor(
             llm=app_context.llm,
             session_manager=session_manager,
-            training_handler=training_handler,
+            training_handler=None,
             thread_updater=thread_updater,
         )
 
@@ -243,10 +242,6 @@ class WhatsAppMessageProcessor:
             return self.adapter.build_sync_response(
                 "Desculpe, erro interno do sistema. Tente novamente."
             )
-
-        # Handle training mode responses
-        if flow_response.result == FlowProcessingResult.TRAINING_MODE:
-            return self.adapter.build_sync_response(flow_response.message or "")
 
         # Determine reply text
         if flow_response.result == FlowProcessingResult.ESCALATE:
@@ -367,8 +362,11 @@ class WhatsAppMessageProcessor:
             from uuid import uuid4
             reply_id = str(uuid4())
 
-            current_reply_key = f"current_reply:{message_data['sender_number']}"
-            app_context.store.save("system", current_reply_key, {
+            from app.core.redis_keys import redis_keys
+            current_reply_key = redis_keys.current_reply_key(message_data['sender_number'])
+            # Extract the key part after "chatai:state:system:" for the store.save call
+            key_suffix = current_reply_key.replace("chatai:state:system:", "")
+            app_context.store.save("system", key_suffix, {
                 "reply_id": reply_id,
                 "timestamp": int(datetime.now().timestamp())
             })

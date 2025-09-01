@@ -203,8 +203,10 @@ class WhatsAppApiAdapter:
                     # Check if this reply is still current (user hasn't sent a new message)
                     if reply_id and store:
                         try:
-                            current_reply_key = f"current_reply:{to_number}"
-                            current_data = store.load("system", current_reply_key)
+                            from app.core.redis_keys import redis_keys
+                            current_reply_key = redis_keys.current_reply_key(to_number)
+                            key_suffix = current_reply_key.replace("chatai:state:system:", "")
+                            current_data = store.load("system", key_suffix)
                             if current_data and isinstance(current_data, dict):
                                 current_reply_id = current_data.get("reply_id")
                                 if current_reply_id != reply_id:

@@ -31,8 +31,10 @@ class RedisSessionManager(SessionManager):
         # Update current reply ID for interruption handling
         from uuid import uuid4
         reply_id = str(uuid4())
-        current_reply_key = f"current_reply:{user_id}"
-        self._store.save("system", current_reply_key, {
+        from app.core.redis_keys import redis_keys
+        current_reply_key = redis_keys.current_reply_key(user_id)
+        key_suffix = current_reply_key.replace("chatai:state:system:", "")
+        self._store.save("system", key_suffix, {
             "reply_id": reply_id,
             "timestamp": int(time.time())
         })

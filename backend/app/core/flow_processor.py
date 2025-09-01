@@ -42,7 +42,6 @@ class FlowProcessingResult(Enum):
     CONTINUE = "continue"
     TERMINAL = "terminal"
     ESCALATE = "escalate"
-    TRAINING_MODE = "training_mode"
     ERROR = "error"
 
 
@@ -108,17 +107,7 @@ class SessionManager(Protocol):
         ...
 
 
-class TrainingModeHandler(Protocol):
-    """Interface for handling training mode operations."""
 
-    async def handle_training_request(
-        self,
-        request: FlowRequest,
-        session_id: str,
-        app_context: Any,
-    ) -> FlowResponse | None:
-        """Handle training mode if active, return None if not in training mode."""
-        ...
 
 
 class ThreadStatusUpdater(Protocol):
@@ -162,7 +151,7 @@ class FlowProcessor:
         self,
         llm: LLMClient,
         session_manager: SessionManager,
-        training_handler: TrainingModeHandler | None = None,
+        training_handler: None = None,  # Deprecated, kept for compatibility
         thread_updater: ThreadStatusUpdater | None = None,
     ) -> None:
         """
@@ -171,12 +160,11 @@ class FlowProcessor:
         Args:
             llm: LLM client for flow processing
             session_manager: Session and context management
-            training_handler: Optional training mode handler
+            training_handler: Deprecated parameter (ignored)
             thread_updater: Optional thread status updater
         """
         self._llm = llm
         self._session_manager = session_manager
-        self._training_handler = training_handler
         self._thread_updater = thread_updater
 
     def _check_admin_status(self, request: FlowRequest) -> bool:
@@ -194,9 +182,9 @@ class FlowProcessor:
             user_phone = request.user_id
             
             # Get tenant ID from project context
-            tenant_id = request.project_context.get("tenant_id") if request.project_context else None
-            if not tenant_id:
+            if not request.project_context:
                 return False
+            tenant_id = request.project_context.tenant_id
                 
             # Check admin status
             with create_session() as session:
@@ -238,18 +226,10 @@ class FlowProcessor:
                 logger.warning("Failed to acquire lock for session %s", session_id)
 
             try:
-                # Step 2: Check training mode
-                if self._training_handler:
-                    training_response = await self._training_handler.handle_training_request(
-                        request, session_id, app_context
-                    )
-                    if training_response:
-                        return training_response
-
-                # Step 3: Process through flow engine
+                # Step 2: Process through flow engine
                 flow_response = await self._execute_flow(request, session_id, app_context)
 
-                # Step 4: Update thread status if needed
+                # Step 3: Update thread status if needed
                 if (self._thread_updater and
                     flow_response.result in [FlowProcessingResult.TERMINAL, FlowProcessingResult.ESCALATE]):
 
