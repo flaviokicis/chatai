@@ -48,23 +48,24 @@ def update_admin_phones(
 ) -> AdminPhonesResponse:
     """Update admin phone numbers for a tenant."""
     try:
-        from app.db.models import Tenant
         from sqlalchemy.orm.attributes import flag_modified
-        
+
+        from app.db.models import Tenant
+
         # Get tenant
         tenant = session.get(Tenant, tenant_id)
         if not tenant:
             raise HTTPException(status_code=404, detail="Tenant not found")
-        
+
         # Update admin phone numbers
         tenant.admin_phone_numbers = request.admin_phone_numbers
-        flag_modified(tenant, 'admin_phone_numbers')
+        flag_modified(tenant, "admin_phone_numbers")
         session.commit()
-        
+
         logger.info(f"Updated admin phones for tenant {tenant_id}: {request.admin_phone_numbers}")
-        
+
         return AdminPhonesResponse(admin_phone_numbers=request.admin_phone_numbers)
-        
+
     except HTTPException:
         raise
     except Exception as e:

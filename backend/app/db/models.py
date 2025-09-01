@@ -154,7 +154,7 @@ class Tenant(Base, TimestampMixin):
     owner_first_name: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     owner_last_name: Mapped[str] = mapped_column(EncryptedString, nullable=False)
     owner_email: Mapped[str] = mapped_column(EncryptedString, nullable=False)
-    
+
     # Admin phone numbers that can modify flows during conversations (GDPR/LGPD: Phone numbers are PII)
     # Stored as list of encrypted phone numbers, e.g., ["+5511999999999", "+5511888888888"]
     admin_phone_numbers: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)

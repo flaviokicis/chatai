@@ -12,9 +12,7 @@ from app.core.flow_processor import (
     FlowResponse,
     ThreadStatusUpdater,
 )
-
 from app.db.models import ThreadStatus
-
 from app.db.session import create_session
 
 if TYPE_CHECKING:
@@ -38,7 +36,7 @@ class WhatsAppThreadStatusUpdater(ThreadStatusUpdater):
 
         # Import ChatThread model here to avoid circular imports
         from app.db.models import ChatThread
-        
+
         update_session = create_session()
         try:
 

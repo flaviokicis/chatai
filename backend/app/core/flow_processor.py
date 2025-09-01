@@ -25,10 +25,9 @@ from app.flow_core.ir import Flow
 from app.flow_core.runner import FlowTurnRunner
 from app.services.admin_phone_service import AdminPhoneService
 
-
 if TYPE_CHECKING:
     from uuid import UUID
-    
+
     from app.core.llm import LLMClient
     from app.flow_core.state import FlowContext
     from app.services.tenant_config_service import ProjectContext
@@ -180,17 +179,17 @@ class FlowProcessor:
         try:
             # Extract phone number from user_id (e.g., "whatsapp:+5511999999999")
             user_phone = request.user_id
-            
+
             # Get tenant ID from project context
             if not request.project_context:
                 return False
             tenant_id = request.project_context.tenant_id
-                
+
             # Check admin status
             with create_session() as session:
                 admin_service = AdminPhoneService(session)
                 return admin_service.is_admin_phone(user_phone, tenant_id)
-                
+
         except Exception as e:
             logger.exception(f"Error checking admin status: {e}")
             return False
@@ -272,12 +271,12 @@ class FlowProcessor:
             # Check for empty flow before compilation
             flow_def = request.flow_definition
             is_empty_flow = (
-                not flow_def.get("nodes") or 
-                not flow_def.get("entry") or 
+                not flow_def.get("nodes") or
+                not flow_def.get("entry") or
                 flow_def.get("entry") == "" or
                 len(flow_def.get("nodes", [])) == 0
             )
-            
+
             if is_empty_flow:
                 logger.info("Detected empty flow, showing flow building message")
                 return FlowResponse(
@@ -286,7 +285,7 @@ class FlowProcessor:
                     context=None,
                     metadata={"empty_flow": True, "flow_building_mode": True},
                 )
-            
+
             # Compile flow
             flow = Flow.model_validate(request.flow_definition)
             compiled_flow = compile_flow(flow)
@@ -301,11 +300,11 @@ class FlowProcessor:
                 # Check if user is admin for live flow modification
                 extra_tools = []
                 instruction_prefix = ""
-                
+
                 # Check admin status
                 is_admin = self._check_admin_status(request)
                 if is_admin:
-                    from app.flow_core.tool_schemas import ModifyFlowLive  # noqa: F401
+                    from app.flow_core.tool_schemas import ModifyFlowLive
                     extra_tools.append(ModifyFlowLive)
                     instruction_prefix = (
                         "ADMIN MODE: You have access to live flow modification.\n"
@@ -317,29 +316,115 @@ class FlowProcessor:
 
                 # Create tool event handler for live flow modification and restart
                 def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
-                    if tool_name == "ModifyFlowLive" and is_admin:
+                    if tool_name == "ModifyFlowLive":
+                        print(f"[DEBUG PROCESSOR] ModifyFlowLive requested by user: {request.user_id}")
+                        print(f"[DEBUG PROCESSOR] User is admin: {is_admin}")
+
+                        if not is_admin:
+                            logger.warning(f"Non-admin user {request.user_id} attempted flow modification")
+                            return False  # Don't intercept - let normal flow handle it
+
                         # Handle live flow modification
                         instruction = metadata.get("instruction", "")
+                        print(f"[DEBUG PROCESSOR] Admin instruction: {instruction}")
                         if instruction:
                             try:
-                                from app.flow_core.live_flow_modification_tool import live_flow_modification_tool_func  # noqa: F401
-                                from uuid import UUID  # noqa: F401
-                                
-                                flow_id = UUID(request.flow_metadata.get("selected_flow_id", ""))
-                                with create_session() as mod_session:
-                                    result_message = live_flow_modification_tool_func(
-                                        instruction=instruction,
-                                        flow_id=flow_id,
-                                        session=mod_session,
-                                        llm=self._llm,
-                                        project_context=request.project_context
-                                    )
-                                    setattr(app_context, "_modification_result", result_message)
-                                    return True
+                                import asyncio
+                                from uuid import UUID
+
+                                # Handle both string and UUID types
+                                flow_id_raw = request.flow_metadata.get("selected_flow_id", "")
+                                if isinstance(flow_id_raw, UUID):
+                                    flow_id = flow_id_raw
+                                else:
+                                    flow_id = UUID(flow_id_raw)
+
+                                # Use the existing FlowChatService in a thread pool to avoid event loop conflicts
+                                import concurrent.futures
+
+                                from app.agents.flow_chat_agent import FlowChatAgent, ToolSpec
+                                from app.agents.flow_modification_tools import (
+                                    FLOW_MODIFICATION_TOOLS,
+                                )
+                                from app.services.flow_chat_service import (
+                                    FlowChatService,
+                                    FlowChatServiceResponse,
+                                )
+
+                                def run_flow_chat_modification() -> FlowChatServiceResponse:
+                                    """Run the flow modification using the existing FlowChatService in a separate thread."""
+                                    # Create a new event loop for this thread
+                                    new_loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(new_loop)
+                                    try:
+                                        # Build the same agent the frontend uses
+                                        tools = []
+                                        for tool_config in FLOW_MODIFICATION_TOOLS:
+                                            tools.append(ToolSpec(
+                                                name=tool_config["name"],
+                                                description=tool_config["description"],
+                                                args_schema=tool_config["args_schema"],
+                                                func=tool_config["func"]
+                                            ))
+                                        agent = FlowChatAgent(llm=self._llm, tools=tools)
+
+                                        with create_session() as mod_session:
+                                            service = FlowChatService(mod_session, agent=agent)
+
+                                            # Enhance the instruction with flow safety guidelines
+                                            enhanced_instruction = f"""
+{instruction}
+
+CRITICAL FLOW SAFETY RULES:
+1. NEVER delete nodes that break user flow paths - always preserve connectivity
+2. When removing/skipping a question, redirect edges to maintain flow continuity
+3. If deleting node X that connects A→X→B, ensure A connects to B directly
+4. Before any deletion, check if it breaks decision paths (e.g., "campo de futebol" route)
+5. When user says "remove question", they mean "skip it" not "break the flow path"
+6. ALWAYS validate flow connectivity after modifications
+"""
+
+                                            # Run the async operation in this thread's event loop
+                                            return new_loop.run_until_complete(
+                                                service.send_user_message(flow_id, enhanced_instruction)
+                                            )
+                                    finally:
+                                        new_loop.close()
+
+                                # Run in thread pool with timeout and wait for completion
+                                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                                    future = executor.submit(run_flow_chat_modification)
+                                    try:
+                                        result = future.result(timeout=180.0)  # 3 minute timeout for complex modifications
+                                        
+                                        # Determine success message based on actual results
+                                        if result.flow_was_modified:
+                                            success_msg = "✅ Modificação aplicada com sucesso! As alterações já estão ativas no fluxo."
+                                            if result.modification_summary:
+                                                success_msg += f"\n\nResumo: {result.modification_summary}"
+                                        else:
+                                            success_msg = "ℹ️ Instrução processada, mas nenhuma modificação foi necessária no fluxo."
+                                            
+                                        logger.info(f"Live flow modification completed via FlowChatService: modified={result.flow_was_modified}")
+                                        logger.info(f"Success message: {success_msg}")
+                                        print(f"[DEBUG PROCESSOR] Flow chat modification completed: {result.flow_was_modified}")
+                                        
+                                        # TODO: Send follow-up message to user with success_msg
+                                        # For now, we'll just return True and the user will see the processing message
+                                        return True
+                                        
+                                    except concurrent.futures.TimeoutError:
+                                        logger.error("Live flow modification timed out")
+                                        print("[DEBUG PROCESSOR] Modification timed out")
+                                        # TODO: Send follow-up message: "❌ Modificação expirou. Tente novamente com uma instrução mais simples."
+                                        return True
                             except Exception as e:
                                 logger.exception(f"Live flow modification failed: {e}")
-                                setattr(app_context, "_modification_result", "Desculpe, ocorreu um erro ao processar sua instrução.")
-                                return True
+                                print(f"[DEBUG PROCESSOR] Modification failed: {e}")
+                                # Log specific error for admin feedback
+                                logger.error(f"Live flow modification failed for admin {request.user_id}: {e}")
+                                # Return False to let normal tool processing handle the error
+                                return False
 
                     return False
 
@@ -372,14 +457,17 @@ class FlowProcessor:
 
                 # Handle live flow modification tool event
                 if result.tool_name == "ModifyFlowLive":
-                    modification_message = getattr(app_context, "_modification_result", "Instrução processada.")
-                    if hasattr(app_context, "_modification_result"):
-                        delattr(app_context, "_modification_result")
+                    # The modification success/failure is determined by the on_tool_event callback
+                    # If we reach here, the callback intercepted and handled the modification
+                    # We should not assume success - the callback should have handled the response
+                    # This code path should not be reached if the callback works properly
+                    logger.warning("ModifyFlowLive tool reached post-processing - this should be handled by on_tool_event callback")
+
                     return FlowResponse(
                         result=FlowProcessingResult.CONTINUE,
-                        message=modification_message,
+                        message="🔧 Processando sua solicitação de modificação do fluxo... Aguarde um momento enquanto aplico as alterações com segurança.",
                         context=result.ctx,
-                        metadata={"tool_name": result.tool_name, "flow_modified": True},
+                        metadata={"tool_name": result.tool_name, "flow_modified": False},
                     )
 
 

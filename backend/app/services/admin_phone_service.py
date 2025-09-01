@@ -6,8 +6,9 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
     from uuid import UUID
+
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -31,23 +32,23 @@ class AdminPhoneService:
         """
         try:
             from app.db.models import Tenant
-            
+
             # Normalize phone number - remove whatsapp: prefix if present
             normalized_phone = phone_number.replace("whatsapp:", "").strip()
-            
+
             # Ensure + prefix for comparison (admin phones are stored with +)
             if not normalized_phone.startswith("+"):
                 normalized_phone = "+" + normalized_phone
-            
+
             # Get tenant with admin phone numbers
             tenant = self.session.get(Tenant, tenant_id)
             if not tenant or not tenant.admin_phone_numbers:
                 return False
-            
+
             # Check if normalized phone is in the admin list
             admin_phones = tenant.admin_phone_numbers or []
             return normalized_phone in admin_phones
-            
+
         except Exception as e:
             logger.error(f"Error checking admin phone {phone_number} for tenant {tenant_id}: {e}")
             return False
@@ -65,30 +66,30 @@ class AdminPhoneService:
         """
         try:
             from app.db.models import Tenant
-            
+
             # Normalize phone number
             normalized_phone = phone_number.replace("whatsapp:", "").strip()
-            
+
             # Get tenant
             tenant = self.session.get(Tenant, tenant_id)
             if not tenant:
                 return False
-            
+
             # Initialize admin_phone_numbers if None
             if tenant.admin_phone_numbers is None:
                 tenant.admin_phone_numbers = []
-            
+
             # Add phone if not already present
             if normalized_phone not in tenant.admin_phone_numbers:
                 tenant.admin_phone_numbers.append(normalized_phone)
                 # Mark the field as modified for SQLAlchemy to detect the change
                 from sqlalchemy.orm.attributes import flag_modified
-                flag_modified(tenant, 'admin_phone_numbers')
+                flag_modified(tenant, "admin_phone_numbers")
                 self.session.commit()
                 logger.info(f"Added admin phone {normalized_phone} to tenant {tenant_id}")
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error adding admin phone {phone_number} to tenant {tenant_id}: {e}")
             self.session.rollback()
@@ -107,26 +108,26 @@ class AdminPhoneService:
         """
         try:
             from app.db.models import Tenant
-            
+
             # Normalize phone number
             normalized_phone = phone_number.replace("whatsapp:", "").strip()
-            
+
             # Get tenant
             tenant = self.session.get(Tenant, tenant_id)
             if not tenant or not tenant.admin_phone_numbers:
                 return False
-            
+
             # Remove phone if present
             if normalized_phone in tenant.admin_phone_numbers:
                 tenant.admin_phone_numbers.remove(normalized_phone)
                 # Mark the field as modified for SQLAlchemy to detect the change
                 from sqlalchemy.orm.attributes import flag_modified
-                flag_modified(tenant, 'admin_phone_numbers')
+                flag_modified(tenant, "admin_phone_numbers")
                 self.session.commit()
                 logger.info(f"Removed admin phone {normalized_phone} from tenant {tenant_id}")
-            
+
             return True
-            
+
         except Exception as e:
             logger.error(f"Error removing admin phone {phone_number} from tenant {tenant_id}: {e}")
             self.session.rollback()
@@ -144,13 +145,13 @@ class AdminPhoneService:
         """
         try:
             from app.db.models import Tenant
-            
+
             tenant = self.session.get(Tenant, tenant_id)
             if not tenant or not tenant.admin_phone_numbers:
                 return []
-            
+
             return tenant.admin_phone_numbers.copy()
-            
+
         except Exception as e:
             logger.error(f"Error listing admin phones for tenant {tenant_id}: {e}")
             return []

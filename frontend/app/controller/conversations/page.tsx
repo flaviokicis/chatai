@@ -402,6 +402,19 @@ export default function ConversationsPage(): React.JSX.Element {
                         <Button
                           size="sm"
                           variant="outline"
+                          onClick={() => {
+                            // Navigate to actual chat thread to see all messages
+                            const threadId = conversation.session_id.replace('thread:', '');
+                            router.push(`/chats/${threadId}`);
+                          }}
+                          className="text-green-600 hover:text-green-700"
+                          title="View actual conversation messages"
+                        >
+                          <MessageSquare className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={() => handleViewTrace(conversation)}
                           disabled={traceLoading === `${conversation.user_id}:${conversation.agent_type}`}
                           className="text-blue-600 hover:text-blue-700"

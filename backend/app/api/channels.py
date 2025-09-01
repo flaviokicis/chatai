@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db.models import ChannelInstance
 from app.db.repository import get_channel_instances_by_tenant, get_flows_by_channel_instance
 from app.db.session import get_db_session
 
@@ -41,7 +40,7 @@ async def list_tenant_channels(
     """List channels for a tenant (user-accessible, no admin auth required)."""
     try:
         channels = get_channel_instances_by_tenant(session, tenant_id)
-        
+
         result = []
         for channel in channels:
             # Get flows for this channel
@@ -56,7 +55,7 @@ async def list_tenant_channels(
                 )
                 for flow in flows
             ]
-            
+
             result.append(ChannelResponse(
                 id=str(channel.id),
                 channel_type=channel.channel_type.value,
@@ -64,9 +63,9 @@ async def list_tenant_channels(
                 phone_number=channel.phone_number,
                 flows=flows_data
             ))
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Error listing channels for tenant {tenant_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to list channels")

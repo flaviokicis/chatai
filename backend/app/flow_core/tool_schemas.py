@@ -28,8 +28,8 @@ class UpdateAnswersFlow(FlowResponse):
     """Update one or more answers in the flow state."""
 
     updates: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Key-value updates for the answers map",
+        ...,
+        description="Key-value updates for the answers map - REQUIRED field that must contain at least one update",
     )
     validated: bool = Field(
         default=True,

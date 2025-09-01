@@ -45,7 +45,7 @@ async def handle_twilio_whatsapp_webhook(
         # Process message through the complete pipeline
         processor = WhatsAppMessageProcessor(adapter)
         return await processor.process_message(request, x_twilio_signature)
-    
+
     except HTTPException as e:
         # Log webhook validation failures but return "ok" to prevent retries
         client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
@@ -54,12 +54,12 @@ async def handle_twilio_whatsapp_webhook(
         elif e.status_code == 403:
             logger.warning("WhatsApp webhook invalid signature from IP %s", client_ip)
         else:
-            logger.warning("WhatsApp webhook validation error %d from IP %s: %s", 
+            logger.warning("WhatsApp webhook validation error %d from IP %s: %s",
                           e.status_code, client_ip, e.detail)
-        
+
         # Return "ok" to prevent webhook retries while logging the issue
         return PlainTextResponse("ok")
-    
+
     except Exception as e:
         # Log unexpected errors but still return "ok" to prevent webhook retries
         client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")

@@ -150,7 +150,15 @@ class LLMFlowEngine:
         if event and isinstance(event, dict) and event.get("tool_name"):
             handled = self._handle_tool_event(ctx, node, event, project_context)
             if handled:
+                # Debug: Log that we're returning the handled response
+                from app.settings import is_development_mode
+                if is_development_mode():
+                    print(f"[DEBUG ENGINE] Returning handled response: kind={handled.kind}, message='{handled.message[:100] if handled.message else None}...'")
                 return handled
+            # Debug: Log that handler returned None
+            from app.settings import is_development_mode
+            if is_development_mode():
+                print(f"[DEBUG ENGINE] _handle_tool_event returned None for tool: {event.get('tool_name')}")
 
 
 
@@ -186,6 +194,45 @@ class LLMFlowEngine:
         from app.settings import is_development_mode
         if is_development_mode():
             print(f"[DEBUG ENGINE] _handle_tool_event called with tool_name='{tool_name}', event={event}")
+
+        # Handle failed tool responses
+        if tool_name.endswith("_FAILED"):
+            print(f"[DEBUG ENGINE] Processing FAILED tool: {tool_name}")
+            # Error can be in event directly or under metadata
+            error_type = event.get("error") or event.get("metadata", {}).get("error", "UNKNOWN_ERROR")
+            logger.error(f"Tool execution failed: {tool_name}, error: {error_type}")
+            print(f"[DEBUG ENGINE] Error type: {error_type}")
+
+            # For model compliance failures, return an error prompt that explains the issue
+            if error_type == "LLM_MODEL_COMPLIANCE_FAILURE":
+                error_response = EngineResponse(
+                    kind="prompt",  # Use "prompt" instead of "error" since "error" is not valid
+                    message="I'm having trouble processing your request due to a technical issue. Let me try again.",
+                    node_id=node.id,
+                    metadata={
+                        "error_type": error_type,
+                        "failed_tool": tool_name,
+                        "technical_details": event.get("metadata", {}),
+                        "is_error_response": True
+                    }
+                )
+                print(f"[DEBUG ENGINE] Returning error response: {error_response}")
+                return error_response
+
+            # For other failures, return a generic error
+            error_response = EngineResponse(
+                kind="prompt",
+                message="I encountered an error processing your message. Could you please try rephrasing?",
+                node_id=node.id,
+                metadata={
+                    "error_type": error_type,
+                    "failed_tool": tool_name,
+                    "is_error_response": True
+                }
+            )
+            print(f"[DEBUG ENGINE] Returning generic error response: {error_response}")
+            return error_response
+
         # The runner no longer forwards LLM-generated text; all user-facing phrasing is done by the rewrite model.
         # Keep ack_text empty to avoid mixing tool LLM text with final outbound.
         ack_text = ""
@@ -403,17 +450,27 @@ class LLMFlowEngine:
             selected_path = event.get("selected_path") or event.get("path")
             navigate_to_decision = event.get("navigate_to_decision", False)
 
+            print(f"[DEBUG ENGINE] SelectFlowPath: path='{selected_path}', navigate={navigate_to_decision}")
+
             if selected_path and navigate_to_decision:
+                print(f"[DEBUG ENGINE] Attempting to find decision node for path: '{selected_path}'")
                 # Try to find the decision node that should handle this path
-                decision_node_id = self._find_decision_node_for_path(ctx)
+                decision_node_id = self._find_decision_node_for_path(ctx, selected_path)
+                print(f"[DEBUG ENGINE] Found decision node: {decision_node_id}")
 
                 if decision_node_id:
+                    print(f"[DEBUG ENGINE] Navigating from {ctx.current_node_id} to {decision_node_id}")
                     # Navigate to the decision node to re-evaluate path selection
                     ctx.current_node_id = decision_node_id
+                    print(f"[DEBUG ENGINE] Processing decision node with selected_path: {selected_path}")
                     # Process the decision node with the selected path
-                    return self.process(ctx, None, {"selected_path": selected_path}, project_context)
+                    result = self.process(ctx, None, {"selected_path": selected_path}, project_context)
+                    print(f"[DEBUG ENGINE] Decision node processing result: kind={result.kind}, node={result.node_id}")
+                    return result
+                print(f"[DEBUG ENGINE] No decision node found for path '{selected_path}' - staying on current node")
 
             # If no navigation needed or decision node not found, stay on current node
+            print(f"[DEBUG ENGINE] SelectFlowPath fallback - staying on node {node.id}")
             return EngineResponse(
                 kind="prompt",
                 message=self._generate_contextual_prompt(node, ctx, project_context),
@@ -425,21 +482,30 @@ class LLMFlowEngine:
             # Use normalized path for matching, not the original user input
             corrected_path = event.get("normalized_path") or event.get("corrected_path")
 
+            print(f"[DEBUG ENGINE] PathCorrection: corrected_path='{corrected_path}'")
+
             if corrected_path:
+                print(f"[DEBUG ENGINE] Updating selected path to: {corrected_path}")
                 # Update the selected path
                 ctx.answers["selected_path"] = corrected_path
                 ctx.active_path = corrected_path
 
+                print(f"[DEBUG ENGINE] Finding decision node for corrected path: '{corrected_path}'")
                 # Try to find the decision node that led to this path
-                decision_node_id = self._find_decision_node_for_path(ctx)
+                decision_node_id = self._find_decision_node_for_path(ctx, corrected_path)
+                print(f"[DEBUG ENGINE] PathCorrection found decision node: {decision_node_id}")
 
                 if decision_node_id:
                     # Navigate to the target of the corrected path
                     edges = self._flow.edges_from.get(decision_node_id, [])
+                    print(f"[DEBUG ENGINE] Checking {len(edges)} edges from decision node {decision_node_id}")
 
                     for edge in edges:
                         # Check if this edge matches the corrected path
-                        if self._edge_matches_path(edge, corrected_path):
+                        matches = self._edge_matches_path(edge, corrected_path)
+                        print(f"[DEBUG ENGINE] Edge '{getattr(edge, 'condition_description', 'no_desc')}' -> {edge.target}: matches={matches}")
+                        if matches:
+                            print(f"[DEBUG ENGINE] PathCorrection navigating to: {edge.target}")
                             ctx.current_node_id = edge.target
                             # Process the new node to get its actual question
                             # Add acknowledgment as context for the rewriter
@@ -448,9 +514,13 @@ class LLMFlowEngine:
                                 # Prepend acknowledgment to the actual question
                                 ack_message = f"Certo, entendi! {corrected_path}."
                                 next_response.message = f"{ack_message}\n\n{next_response.message}"
+                            print(f"[DEBUG ENGINE] PathCorrection final response: kind={next_response.kind}, node={next_response.node_id}")
                             return next_response
+                else:
+                    print(f"[DEBUG ENGINE] PathCorrection: No decision node found for '{corrected_path}'")
 
             # If we can't find the right path, stay on current node
+            print(f"[DEBUG ENGINE] PathCorrection fallback - staying on node {node.id}")
             return EngineResponse(
                 kind="prompt",
                 message=self._generate_contextual_prompt(node, ctx, project_context),
@@ -526,14 +596,37 @@ class LLMFlowEngine:
 
         # Handle llm_assisted vs user_choice differently
         if decision_type == "llm_assisted":
+            print(f"[DEBUG ENGINE] Processing LLM-assisted decision node: {node.id}")
+            print(f"[DEBUG ENGINE] Available edges: {[getattr(e, 'condition_description', e.target) for e in edges]}")
+            print(f"[DEBUG ENGINE] Event context: {event}")
+
+            # CRITICAL FIX: If we already have a selected_path from path correction, use it directly
+            if event and event.get("selected_path"):
+                selected_path = event["selected_path"]
+                print(f"[DEBUG ENGINE] Using pre-selected path from event: {selected_path}")
+
+                # Find the edge that matches this path
+                for edge in edges:
+                    if hasattr(edge, "condition_description") and self._edge_matches_path(edge, selected_path):
+                        print(f"[DEBUG ENGINE] Found matching edge: {edge.condition_description} -> {edge.target}")
+                        ctx.current_node_id = edge.target
+                        return self.process(ctx, None, None, project_context)
+
+                print(f"[DEBUG ENGINE] No edge found for pre-selected path: {selected_path}")
+
             # LLM-assisted should be processed internally, never shown to user
             selected_edge = self._select_edge_with_llm_decision(node, edges, ctx, event, project_context)
+            print(f"[DEBUG ENGINE] LLM selected edge: {getattr(selected_edge, 'condition_description', 'unknown') if selected_edge else None} -> {selected_edge.target if selected_edge else None}")
+
             if selected_edge:
+                print(f"[DEBUG ENGINE] Decision routing to: {selected_edge.target}")
                 ctx.current_node_id = selected_edge.target
                 return self.process(ctx, None, None, project_context)
             # If LLM can't decide, fall back to first valid edge or error
             valid_edges = [e for e in edges if self._evaluate_guard(e, ctx, event)]
+            print(f"[DEBUG ENGINE] No LLM decision, fallback edges: {len(valid_edges)}")
             if valid_edges:
+                print(f"[DEBUG ENGINE] Using fallback edge: {valid_edges[0].target}")
                 ctx.current_node_id = valid_edges[0].target
                 return self.process(ctx, None, None, project_context)
             return self._handle_no_valid_transition(ctx, node, project_context)
@@ -1124,7 +1217,7 @@ class LLMFlowEngine:
                 node_id=None,
                 metadata={"empty_flow": True, "flow_building_mode": True},
             )
-        
+
         return EngineResponse(
             kind="escalate",
             message="Perdi o contexto de onde estamos. Vou chamar alguém para ajudar.",
@@ -1223,17 +1316,29 @@ class LLMFlowEngine:
         except Exception:
             return prompt
 
-    def _find_decision_node_for_path(self, ctx: FlowContext) -> str | None:
+    def _find_decision_node_for_path(self, ctx: FlowContext, path: str | None = None) -> str | None:
         """Find the decision node that controls path selection."""
-        # Look for decision nodes in the flow
-        for node_id, node in self._flow.nodes.items():
-            if isinstance(node, DecisionNode):
-                # Check if this decision node has edges to paths
-                edges = self._flow.edges_from.get(node_id, [])
-                for edge in edges:
-                    if hasattr(edge, "condition_description"):
-                        # This looks like a path decision node
-                        return node_id
+        # If we have a specific path, find the decision node that has that path
+        if path and path.strip():  # Only search for non-empty paths
+            for node_id, node in self._flow.nodes.items():
+                if isinstance(node, DecisionNode):
+                    edges = self._flow.edges_from.get(node_id, [])
+                    for edge in edges:
+                        if hasattr(edge, "condition_description") and self._edge_matches_path(edge, path):
+                            return node_id
+            # If specific path not found, return None (don't fallback for specific searches)
+            return None
+
+        # Fallback: Look for any decision node with path edges (only when path is None)
+        if path is None:
+            for node_id, node in self._flow.nodes.items():
+                if isinstance(node, DecisionNode):
+                    # Check if this decision node has edges to paths
+                    edges = self._flow.edges_from.get(node_id, [])
+                    for edge in edges:
+                        if hasattr(edge, "condition_description") and edge.condition_description:
+                            # This looks like a path decision node
+                            return node_id
         return None
 
     def _edge_matches_path(self, edge: Any, path: str) -> bool:
@@ -1248,13 +1353,14 @@ class LLMFlowEngine:
             desc = str(edge.condition_description).lower()
             # Remove "caminho: " prefix if present
             desc = desc.replace("caminho:", "").strip()
-            if path_lower == desc or path_lower in desc or desc in path_lower:
+            # Exact match or path is a substring of description (but not vice versa for specificity)
+            if path_lower == desc or path_lower in desc:
                 return True
 
         # Check label
         if hasattr(edge, "label"):
             label = str(edge.label).lower()
-            if path_lower == label or path_lower in label or label in path_lower:
+            if path_lower == label or path_lower in label:
                 return True
 
         # Check guard args for path hints

@@ -110,14 +110,14 @@ function MessageBubble({ message }: { message: Message }) {
       <div className={`max-w-[70%] min-w-[120px] rounded-2xl px-4 py-3 shadow-sm ${
         isInbound 
           ? 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-tl-none text-gray-900 dark:text-gray-100' 
-          : 'bg-gradient-to-br from-brand-500 to-brand-600 text-white rounded-tr-none'
+          : 'bg-blue-500 text-white rounded-tr-none'
       }`}>
         <div className="text-sm leading-relaxed whitespace-pre-wrap mb-2">
           {message.text}
         </div>
         
         <div className={`flex items-center justify-between text-xs ${
-          isInbound ? 'text-gray-500 dark:text-gray-400' : 'text-brand-100'
+          isInbound ? 'text-gray-500 dark:text-gray-400' : 'text-blue-100'
         }`}>
           <span>{formatDateTime(message.created_at)}</span>
           {getDeliveryIcon()}

@@ -94,13 +94,17 @@ def rewrite_whatsapp_multi(
     # the exact question wording and ensures a single question bubble.
 
     history_lines: list[str] = []
-    for turn in chat_window or []:
+    for i, turn in enumerate(chat_window or []):
         role = (turn.get("role") or "").strip()
         content = (turn.get("content") or "").strip()
         if role and content:
-            history_lines.append(f"{role}: {content}")
+            # Add sequence number and role for clarity
+            sequence = i + 1
+            history_lines.append(f"[{sequence}] {role}: {content}")
 
-    history_block = "\n".join(history_lines[-200:])  # cap to keep prompt bounded
+    # Take last 10 turns and ensure chronological order (oldest first)
+    recent_history = history_lines[-10:] if history_lines else []
+    history_block = "\n".join(recent_history) if recent_history else "No previous conversation"
 
     # Use custom style instruction if communication style is provided
     if project_context and project_context.communication_style:
@@ -129,7 +133,9 @@ def rewrite_whatsapp_multi(
             "- JAMAIS adicione assuntos que não estão na mensagem original\n"
             "- Se a mensagem original fala sobre PLANO DE SAÚDE → fale APENAS sobre plano de saúde\n"
             "- Se a mensagem original fala sobre DISPONIBILIDADE → fale APENAS sobre disponibilidade\n"
-            "- Use o histórico apenas para entender contexto, JAMAIS para copiar conteúdo\n\n"
+            "- Use o histórico apenas para entender contexto, JAMAIS para copiar conteúdo\n"
+            "- IGNORE completamente o Business Context - ele NÃO é parte da conversa\n"
+            "- Business Context é apenas para você entender que empresa representa\n\n"
             "ANÁLISE CONTEXTUAL (FAÇA ISSO PRIMEIRO):\n"
             "Antes de responder, analise profundamente:\n"
             "1. O tom emocional da última mensagem do usuário (animado? confuso? neutro? frustrado? curioso?)\n"
@@ -176,8 +182,13 @@ def rewrite_whatsapp_multi(
             "REGRAS DE SAUDAÇÃO (CRÍTICO):\n"
             "- Se o texto original contém saudação (Olá, Oi), preserve-a naturalmente\n"
             "- NUNCA substitua saudações por 'Entendido', 'Certo', 'Ok' - mantenha o tom acolhedor\n"
-            "- Se já há saudação no histórico, evite repetir, mas preserve o tom da mensagem original\n"
-            "- Foque em naturalizar o estilo, não em remover saudações válidas\n\n"
+            "- Se já há saudação no histórico, evite repetir, mas preserve o tom da mensagem original\n\n"
+            "MANTER CONTEXTO DE NEGÓCIO (CRÍTICO):"
+            "- SEMPRE mantenha o foco no propósito do negócio (ex: iluminação, saúde, etc.)\n"
+            "- Se o usuário faz perguntas fora do escopo (admin, sistema, meta), responda brevemente mas SEMPRE redirecione para o negócio\n"
+            "- Exemplo: pergunta sobre admin → 'Sou assistente de vendas. Em que posso ajudá-lo com nossos produtos?'\n"
+            "- NUNCA entre em discussões técnicas sobre sistemas, permissões ou funcionalidades internas.\n"
+            "- A ÚLTIMA mensagem deve SEMPRE puxar de volta para o foco principal do negócio\n"
             "ADAPTAÇÃO INTELIGENTE:\n"
             "Observe padrões do usuário e adapte adequadamente:\n"
             "- Usuário formal → mantenha mais profissional\n"
@@ -211,10 +222,26 @@ def rewrite_whatsapp_multi(
 
     history_block = "\n".join(history_lines[-200:])  # cap to keep prompt bounded
 
-    payload = (
-        f"Original assistant reply:\n{original_text}\n\n"
-        f"Conversation history (for tone context only):\n{history_block}"
-    )
+    payload = f"""=== ORIGINAL MESSAGE TO REWRITE ===
+{original_text}
+
+=== CONVERSATION HISTORY (for tone reference only) ===
+{history_block}
+
+=== BUSINESS CONTEXT (for company understanding only) ===
+Business: {project_context.project_description if project_context else 'Customer service'}
+
+=== INSTRUÇÕES CRÍTICAS ===
+1. Reescreva APENAS a seção "Original message to rewrite" acima
+2. O contexto de negócio é só para você saber que empresa representa
+3. NÃO adicione detalhes de negócio que não estão na mensagem original
+4. NÃO trate o contexto de negócio como parte da conversa
+5. Preserve o conteúdo central e significado da mensagem original
+6. Apenas ajuste o tom e estilo para ser mais conversacional
+
+=== SUA TAREFA ===
+Pegue a mensagem original e torne-a mais natural e conversacional preservando exatamente seu significado e conteúdo.
+"""
 
     try:
         raw = llm.rewrite(instruction, payload)

@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 def _engine():
     settings = get_settings()
     url = settings.sqlalchemy_database_url
-    
+
     # Optimized connection pool settings for remote database
     return create_engine(
         url,
@@ -32,10 +32,8 @@ def _engine():
         echo=False,  # Disable SQL logging in production
         connect_args={
             "connect_timeout": 10,  # 10s connection timeout
-            "server_settings": {
-                "application_name": "chatai_backend",
-                "jit": "off",  # Disable JIT for faster simple queries
-            }
+            "application_name": "chatai_backend",
+            "options": "-c jit=off",  # Disable JIT for faster simple queries
         }
     )
 

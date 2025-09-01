@@ -17,7 +17,6 @@ from app.core.thought_tracer import DatabaseThoughtTracer
 from .engine import LLMFlowEngine
 from .llm_responder import LLMFlowResponder
 from .state import FlowContext
-from .ir import QuestionNode
 
 # Type alias for tool event callbacks
 ToolEventCallback = Callable[[str, dict[str, Any]], bool]
@@ -232,7 +231,9 @@ class FlowTurnRunner:
             engine_event["revisit_updated"] = True
 
         # Process the tool event with engine
+        print(f"[DEBUG RUNNER] Calling engine.process with event: {engine_event}")
         final_response = self._engine.process(ctx, None, engine_event)
+        print(f"[DEBUG RUNNER] Engine returned: kind={final_response.kind}, message='{final_response.message[:100] if final_response.message else None}...'")
 
         # Record assistant message in history (will be updated with rewritten version by channel adapter)
         if final_response.message:
@@ -244,7 +245,7 @@ class FlowTurnRunner:
             if k not in initial_answers or initial_answers[k] != v:
                 answers_diff[k] = v
 
-        return TurnResult(
+        result = TurnResult(
             assistant_message=final_response.message,
             answers_diff=answers_diff,
             tool_name=responder_result.tool_name,
@@ -252,6 +253,8 @@ class FlowTurnRunner:
             terminal=final_response.kind == "terminal",
             ctx=ctx,
         )
+        print(f"[DEBUG RUNNER] Final TurnResult: message='{result.assistant_message[:100] if result.assistant_message else None}...', tool={result.tool_name}")
+        return result
 
     def _get_allowed_values(self, ctx: FlowContext) -> list[str] | None:
         """Extract allowed values from current node."""

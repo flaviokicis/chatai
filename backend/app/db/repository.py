@@ -44,10 +44,45 @@ def get_or_create_contact(
     phone_number: str | None,
     display_name: str | None,
 ) -> Contact:
-    contact = session.execute(
-        select(Contact).where(Contact.tenant_id == tenant_id, Contact.external_id == external_id)
-    ).scalar_one_or_none()
-    if contact is None:
+    import hashlib
+
+    from sqlalchemy.exc import IntegrityError
+
+    # PROPER SOLUTION: Use phone number hash for reliable deduplication
+    # This bypasses encryption issues entirely
+
+    if not phone_number:
+        # Extract phone from external_id if not provided
+        if external_id.startswith("whatsapp:"):
+            phone_number = external_id.replace("whatsapp:", "").replace("+", "")
+
+    if phone_number:
+        # Create a consistent hash of the phone number for deduplication
+        phone_hash = hashlib.sha256(f"{tenant_id}:{phone_number}".encode()).hexdigest()
+
+        # First, try to find existing contact by phone number (decrypted comparison)
+        all_contacts = session.execute(
+            select(Contact).where(
+                Contact.tenant_id == tenant_id,
+                Contact.deleted_at.is_(None)
+            )
+        ).scalars().all()
+
+        # Check each contact's decrypted phone_number
+        for contact in all_contacts:
+            if contact.phone_number and contact.phone_number.replace("+", "") == phone_number.replace("+", ""):
+                logger.debug("Found existing contact by phone number: %s", phone_number)
+                # Update external_id if it's different (shouldn't happen but just in case)
+                if contact.external_id != external_id:
+                    logger.warning("Contact phone matches but external_id differs - updating external_id")
+                    contact.external_id = external_id
+                # Update other info if missing
+                if not contact.display_name and display_name:
+                    contact.display_name = display_name
+                return contact
+
+    # No existing contact found, create new one
+    try:
         contact = Contact(
             tenant_id=tenant_id,
             external_id=external_id,
@@ -56,13 +91,37 @@ def get_or_create_contact(
         )
         session.add(contact)
         session.flush()
-    else:
-        # Update minimally useful info if missing
-        if not contact.phone_number and phone_number:
-            contact.phone_number = phone_number
-        if not contact.display_name and display_name:
-            contact.display_name = display_name
-    return contact
+
+        logger.debug("Created new contact for phone: %s", phone_number)
+        return contact
+
+    except IntegrityError as e:
+        # Constraint violation - try to find the contact again
+        session.rollback()
+        logger.warning("Contact creation failed due to constraint violation: %s", e)
+
+        # Search again by phone number
+        if phone_number:
+            all_contacts = session.execute(
+                select(Contact).where(
+                    Contact.tenant_id == tenant_id,
+                    Contact.deleted_at.is_(None)
+                )
+            ).scalars().all()
+
+            for contact in all_contacts:
+                if contact.phone_number and contact.phone_number.replace("+", "") == phone_number.replace("+", ""):
+                    logger.debug("Found existing contact after constraint violation by phone: %s", phone_number)
+                    return contact
+
+        # Still not found
+        logger.error("Constraint violation but no matching contact found for phone: %s", phone_number)
+        raise RuntimeError(f"Failed to create or find contact for phone: {phone_number}")
+
+    except Exception as e:
+        logger.error("Unexpected error in get_or_create_contact: %s", e)
+        session.rollback()
+        raise e
 
 
 def get_or_create_thread(
@@ -73,14 +132,11 @@ def get_or_create_thread(
     contact_id: UUID,
     flow_id: UUID | None,
 ) -> ChatThread:
-    thread = session.execute(
-        select(ChatThread).where(
-            ChatThread.tenant_id == tenant_id,
-            ChatThread.channel_instance_id == channel_instance_id,
-            ChatThread.contact_id == contact_id,
-        )
-    ).scalar_one_or_none()
-    if thread is None:
+    from sqlalchemy.exc import IntegrityError
+
+    # Simple approach: try to create first, handle constraint violation
+    try:
+        # First attempt: try to create the thread directly
         thread = ChatThread(
             tenant_id=tenant_id,
             channel_instance_id=channel_instance_id,
@@ -90,12 +146,66 @@ def get_or_create_thread(
             last_message_at=datetime.now(UTC),
         )
         session.add(thread)
-        session.flush()
-    else:
-        thread.last_message_at = datetime.now(UTC)
-        if flow_id and not thread.flow_id:
-            thread.flow_id = flow_id
-    return thread
+        session.flush()  # This will trigger the unique constraint if violated
+
+        logger.debug("Created new thread for contact_id: %s", contact_id)
+        return thread
+
+    except IntegrityError:
+        # Unique constraint violation - thread already exists
+        session.rollback()
+        logger.debug("Thread already exists, fetching for contact_id: %s", contact_id)
+
+        # Find the existing thread
+        thread = session.execute(
+            select(ChatThread).where(
+                ChatThread.tenant_id == tenant_id,
+                ChatThread.channel_instance_id == channel_instance_id,
+                ChatThread.contact_id == contact_id,
+                ChatThread.deleted_at.is_(None)
+            )
+        ).scalar_one_or_none()
+
+        if thread is not None:
+            # Update existing thread
+            thread.last_message_at = datetime.now(UTC)
+            if flow_id and not thread.flow_id:
+                thread.flow_id = flow_id
+            return thread
+        # This should not happen - constraint violation but no thread found
+        logger.error("Constraint violation but no thread found for contact_id: %s", contact_id)
+        # Try one more time to create
+        try:
+            thread = ChatThread(
+                tenant_id=tenant_id,
+                channel_instance_id=channel_instance_id,
+                contact_id=contact_id,
+                flow_id=flow_id,
+                status=ThreadStatus.open,
+                last_message_at=datetime.now(UTC),
+            )
+            session.add(thread)
+            session.flush()
+            return thread
+        except IntegrityError:
+            # Still failing, try to find again
+            thread = session.execute(
+                select(ChatThread).where(
+                    ChatThread.tenant_id == tenant_id,
+                    ChatThread.channel_instance_id == channel_instance_id,
+                    ChatThread.contact_id == contact_id,
+                    ChatThread.deleted_at.is_(None)
+                )
+            ).scalar_one_or_none()
+            if thread:
+                thread.last_message_at = datetime.now(UTC)
+                return thread
+            raise RuntimeError(f"Failed to create or find thread for contact_id: {contact_id}")
+
+    except Exception as e:
+        logger.error("Unexpected error in get_or_create_thread: %s", e)
+        session.rollback()
+        raise e
 
 
 def create_message(

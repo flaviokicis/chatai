@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
 
-
 from app.core.app_context import get_app_context
 from app.core.channel_adapter import ConversationalRewriter
 from app.core.flow_processor import FlowProcessingResult, FlowProcessor, FlowRequest
@@ -25,7 +24,6 @@ from app.services.message_logging_service import message_logging_service
 from app.services.session_manager import RedisSessionManager
 from app.settings import get_settings
 from app.whatsapp.thread_status_updater import WhatsAppThreadStatusUpdater
-
 from app.whatsapp.webhook_db_handler import WebhookDatabaseHandler
 
 if TYPE_CHECKING:
@@ -71,7 +69,7 @@ class WhatsAppMessageProcessor:
 
         # Step 2: Extract WhatsApp message data
         message_data = self._extract_whatsapp_message_data(params, request)
-        
+
         # Skip processing if no meaningful message content (delivery receipts, status updates, etc.)
         if not message_data.get("sender_number") or not message_data.get("receiver_number"):
             logger.info("WhatsApp webhook received but no sender/receiver - likely delivery receipt or status update")
@@ -79,7 +77,7 @@ class WhatsAppMessageProcessor:
 
         # Step 3: Check WhatsApp-specific duplicates
         if self._is_duplicate_whatsapp_message(message_data, app_context):
-            logger.debug("WhatsApp message %s from %s is duplicate - already processed", 
+            logger.debug("WhatsApp message %s from %s is duplicate - already processed",
                         message_data.get("message_id", "unknown"), message_data.get("sender_number", "unknown"))
             return PlainTextResponse("ok")
 
@@ -211,11 +209,11 @@ class WhatsAppMessageProcessor:
             project_context=conversation_setup.project_context,
             channel_id=message_data["receiver_number"],  # WhatsApp business number for customer traceability
         )
-        
+
         # Create dependencies with dependency injection
         session_manager = RedisSessionManager(app_context.store)
         thread_updater = WhatsAppThreadStatusUpdater()
-        
+
         # Create flow processor with injected dependencies
         flow_processor = FlowProcessor(
             llm=app_context.llm,
@@ -291,13 +289,34 @@ class WhatsAppMessageProcessor:
             latest_user_input=message_data["message_text"]
         )
 
-        messages = rewriter.rewrite_message(
-            reply_text,
-            chat_history,
-            enable_rewrite=True,
-            project_context=conversation_setup.project_context,
-            is_completion=(flow_response.result == FlowProcessingResult.TERMINAL)
+        print(f"[DEBUG WHATSAPP] About to rewrite message: '{reply_text[:100]}...'")
+        print(f"[DEBUG WHATSAPP] Flow response metadata: {getattr(flow_response, 'metadata', {})}")
+
+        # Check if this is an admin operation that shouldn't be rewritten
+        metadata = getattr(flow_response, "metadata", {})
+        is_admin_operation = (
+            metadata.get("tool_name") == "ModifyFlowLive" or
+            metadata.get("flow_modified") == True or
+            "admin" in reply_text.lower() or
+            "instrução" in reply_text.lower()
         )
+
+        print(f"[DEBUG WHATSAPP] Is admin operation: {is_admin_operation}")
+
+        # Skip rewriting for admin operations to preserve the technical message
+        if is_admin_operation:
+            print("[DEBUG WHATSAPP] Skipping rewrite for admin operation")
+            messages = [{"text": reply_text, "delay_ms": 0}]
+        else:
+            messages = rewriter.rewrite_message(
+                reply_text,
+                chat_history,
+                enable_rewrite=True,
+                project_context=conversation_setup.project_context,
+                is_completion=(flow_response.result == FlowProcessingResult.TERMINAL)
+            )
+
+        print(f"[DEBUG WHATSAPP] Rewriter returned {len(messages or [])} messages")
 
         # Log WhatsApp message plan
         try:
@@ -363,7 +382,7 @@ class WhatsAppMessageProcessor:
             reply_id = str(uuid4())
 
             from app.core.redis_keys import redis_keys
-            current_reply_key = redis_keys.current_reply_key(message_data['sender_number'])
+            current_reply_key = redis_keys.current_reply_key(message_data["sender_number"])
             # Extract the key part after "chatai:state:system:" for the store.save call
             key_suffix = current_reply_key.replace("chatai:state:system:", "")
             app_context.store.save("system", key_suffix, {

@@ -5,10 +5,9 @@ These are for user-facing pages that need to display tenant/flow information.
 
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 

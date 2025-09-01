@@ -135,10 +135,10 @@ class LLMFlowResponder:
             user_id = getattr(ctx, "user_id", "unknown")
             tenant_id = getattr(ctx, "tenant_id", None)
             channel_id = getattr(ctx, "channel_id", None)
-            
+
             # Use the specific flow ID as agent_type for proper traceability
             # This allows debugging specific flows rather than generic "flow_responder"
-            agent_type = ctx.flow_id if hasattr(ctx, 'flow_id') else "flow_responder"
+            agent_type = ctx.flow_id if hasattr(ctx, "flow_id") else "flow_responder"
 
             # Only trace if we have tenant_id (required for database storage)
             if tenant_id:
@@ -312,9 +312,28 @@ Recent Conversation:
 
         instruction += f"""
 
+        CRITICAL TOOL PRIORITY RULES:
+        1. ALWAYS prefer standard user tools (RestartConversation, UpdateAnswersFlow, etc.) over admin tools
+        2. ONLY use ModifyFlowLive if the message is 100% unambiguously an admin instruction AND no other tool fits
+        3. If a message could be interpreted as both a user action AND an admin instruction, choose the USER action
+        4. Examples:
+           - "Resetar conversa" → RestartConversation (user wants to restart)
+           - "Can we restart?" → RestartConversation (user wants to restart)  
+           - "Remove this node from the flow" → ModifyFlowLive (clear admin instruction)
+           - "Skip this question" → SkipQuestion (user wants to skip, NOT flow modification)
+
         Choose the most appropriate tool based on the user's intent:
         - UpdateAnswersFlow: use when you can extract an answer for the CURRENT pending field.
-          CRITICAL: You MUST populate the "updates" field with the extracted value: {{"updates": {{"{pending_field}": "extracted_value"}}}}
+          
+          MANDATORY ARGUMENTS FOR UpdateAnswersFlow:
+          1. "updates": {{"{pending_field}": "extracted_value"}} ← THIS IS REQUIRED, DO NOT OMIT
+          2. "validated": true/false
+          3. "reasoning": "brief explanation"
+          
+          EXAMPLE FOR CURRENT FIELD "{pending_field}":
+          If user says "campo de futebol", you MUST call UpdateAnswersFlow with:
+          {{"updates": {{"{pending_field}": "campo de futebol"}}, "validated": true, "reasoning": "User provided interest"}}
+          
           Guidance for extraction: ignore greetings and filler words; use the meaningful noun phrase or value the user provided.
           CRITICAL: Preserve qualifiers, comparators and units from the user's wording.
           - Do NOT remove words like: "até"/"up to", "no máximo"/"at most", "pelo menos"/"at least",
@@ -322,26 +341,33 @@ Recent Conversation:
             ranges like "entre X e Y", tildes "~", and currency/measurement units (ex.: "reais", "R$", "m", "lux").
           - Prefer capturing the exact span the user said (e.g., "até 1000 reais") over a normalized value ("1000 reais").
           - When in doubt, include more of the original phrase to preserve meaning rather than shortening it.
-          Example: If pending field is "budget" and user says "até 1000 reais", return: {{"updates": {{"budget": "até 1000 reais"}}, "validated": true}}
+          Example: If pending field is "budget" and user says "até 1000 reais", call UpdateAnswersFlow with: {{"updates": {{"budget": "até 1000 reais"}}, "validated": true, "reasoning": "User provided budget amount"}}
         - ProvideInformation: use for meta-level acknowledgments or brief information that does NOT change state
           (e.g., reassuring the user that their case is fine, answering "is that a problem?", or offering a quick tip).
 
         - SkipQuestion: use if the user explicitly wants to skip (and skipping is allowed by policy).
-        - RevisitQuestion: use when the user is correcting or changing any PREVIOUS answer (not the current question).
+        - RevisitQuestion: use ONLY when the user is correcting a SPECIFIC PREVIOUS ANSWER, not changing context/path.
+          Examples: "My budget is 2000, not 1000", "My name is João, not José", "The size is 50m, not 30m"
+          DO NOT use for context changes like "actually I have a football field" - that's SelectFlowPath.
           Provide:
-          * question_key: choose from previously answered fields (prefer the most recent) if the message suggests a correction.
-          * revisit_value: extract the new value from the user's message when possible.
-          If you cannot extract a clear new value, set revisit_value to null.
-          IMPORTANT: If the user is correcting a PATH SELECTION (e.g., "actually it's football" after choosing "outros"),
-          use PathCorrection tool instead (if available) or SelectFlowPath with the corrected path.
+          * question_key: choose from previously answered fields if the message corrects a specific value.
+          * revisit_value: extract the corrected value from the user's message.
+          
+        - SelectFlowPath: use when the user is changing their CONTEXT, SITUATION, or BUSINESS TYPE.
+          Examples: "actually I have a football field", "na verdade é campo de futebol", "I meant gas station"
+          This changes the entire path/direction of the conversation.
+          IMPORTANT: If user is correcting an answer that determines the flow path (like initial interest), use SelectFlowPath, NOT RevisitQuestion.
         - PathCorrection: use when the user is correcting a path selection they made earlier.
           Common signals: "actually it's...", "I meant...", "no, it's...", "sorry, it's...", "na verdade é...", "quer dizer...".
-          IMPORTANT: For corrected_path, choose EXACTLY from the available flow paths list above. 
-          Map the user's correction to the correct path name (e.g., "quadra de tenis" → "quadra/tênis").
         - RequestHumanHandoff: use when the user is genuinely stuck, frustrated, or needs complex help.
           Watch for signs of confusion, repeated clarification requests on the same topic, expressions of frustration,
           or when the user's needs are too complex/specific for the current flow.
         - RestartConversation: STRICTLY use only if the user explicitly and unequivocally requests to "restart from scratch", "start over from the beginning", or equivalent explicit phrases. Do NOT use for vague restart-like language.
+          IMPORTANT: "Resetar conversa", "reset conversation", "restart", "recomeçar" should use RestartConversation, NOT ModifyFlowLive.
+        
+        - ModifyFlowLive: ONLY use if the user gives EXPLICIT instructions about changing flow structure/behavior.
+          Examples that should use ModifyFlowLive: "remove this node", "skip this step in the flow", "change this question"
+          Examples that should NOT use ModifyFlowLive: "restart", "reset", "skip this question" (use SkipQuestion instead)
 
         CRITICAL DECISION RULES:
         - If the user's message includes correction signals like "meant", "actually", "sorry", "not ...", "change", "switch", "update":
@@ -404,7 +430,7 @@ Recent Conversation:
 
         if ctx.available_paths:  # Multi-path flow
             basic_tools.append(SelectFlowPath)
-        
+
         # Always add SelectFlowPath for flows with decision nodes (even if paths aren't populated yet)
         # This ensures the LLM can make path decisions from the first interaction
         if not any(tool.__name__ == "SelectFlowPath" for tool in basic_tools):
@@ -443,8 +469,40 @@ Recent Conversation:
 
         # Handle each tool type
         if tool_name == "UpdateAnswersFlow" or tool_name == "UpdateAnswers":
+            print("[DEBUG RESPONDER] Processing UpdateAnswersFlow tool")
+            print(f"[DEBUG RESPONDER] Raw result: {result}")
+            print(f"[DEBUG RESPONDER] Pending field: {pending_field}")
+
             updates = self._normalize_updates(result.get("updates", {}), pending_field)
             validated = result.get("validated", True)
+
+            print(f"[DEBUG RESPONDER] Normalized updates: {updates}")
+            print(f"[DEBUG RESPONDER] Validated: {validated}")
+
+            # CRITICAL: If LLM chose UpdateAnswersFlow but provided no updates, this is a model compliance error
+            if not updates and pending_field:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(
+                    f"CRITICAL: LLM chose UpdateAnswersFlow but provided no updates for field '{pending_field}'. "
+                    f"This is a model compliance failure. Raw result: {result}"
+                )
+                print("[DEBUG RESPONDER] CREATING FAILED RESPONSE")
+                # Return an error response instead of trying to fix it
+                failed_response = FlowResponse(
+                    updates={},
+                    message="",
+                    tool_name="UpdateAnswersFlow_FAILED",
+                    confidence=0.0,
+                    metadata={
+                        "error": "LLM_MODEL_COMPLIANCE_FAILURE",
+                        "expected_field": pending_field,
+                        "raw_result": result,
+                        "reasoning": "LLM chose UpdateAnswersFlow but omitted required updates field"
+                    },
+                )
+                print(f"[DEBUG RESPONDER] Returning failed response: {failed_response}")
+                return failed_response
 
             # Apply validation if needed
             if pending_field and pending_field in updates and not validated:

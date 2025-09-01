@@ -261,7 +261,7 @@ class DatabaseThoughtTracer:
     def get_conversation_trace(self, tenant_id: UUID, user_id: str, agent_type: str) -> ConversationTraceData | None:
         """Retrieve the complete conversation trace for a specific user and agent type."""
         return self.get_user_conversation_traces(tenant_id, user_id, agent_type)
-    
+
     def get_user_conversation_traces(self, tenant_id: UUID, user_id: str, agent_type: str) -> ConversationTraceData | None:
         """Retrieve ALL conversation traces for a user and aggregate them into a single view."""
         try:
@@ -269,7 +269,7 @@ class DatabaseThoughtTracer:
             import logging
             logger = logging.getLogger(__name__)
             logger.info(f"Searching for all traces: tenant_id={tenant_id}, user_id='{user_id}', agent_type='{agent_type}'")
-            
+
             # Due to encrypted user_id field, we can't query it directly in SQL WHERE clause
             # Get all traces for tenant+agent_type and filter in Python after decryption
             candidate_traces = self.session.query(AgentConversationTrace).filter(
@@ -280,15 +280,15 @@ class DatabaseThoughtTracer:
             ).order_by(AgentConversationTrace.started_at).all()
 
             logger.info(f"Found {len(candidate_traces)} candidate traces for tenant+agent_type")
-            
+
             # Filter by user_id in Python (after decryption) - get ALL traces for this user
             user_traces = []
             for candidate in candidate_traces:
                 if candidate.user_id == user_id:
                     user_traces.append(candidate)
-            
+
             logger.info(f"Found {len(user_traces)} traces for user after filtering")
-            
+
             if not user_traces:
                 return None
 
@@ -297,25 +297,25 @@ class DatabaseThoughtTracer:
             earliest_start = None
             latest_activity = None
             total_thoughts = 0
-            
+
             for trace in user_traces:
                 thoughts = self.session.query(AgentThought).filter(
                     AgentThought.conversation_trace_id == trace.id
                 ).order_by(AgentThought.created_at).all()
-                
+
                 for thought in thoughts:
                     all_thoughts.append(thought)
-                
+
                 total_thoughts += len(thoughts)
-                
+
                 if earliest_start is None or trace.started_at < earliest_start:
                     earliest_start = trace.started_at
                 if latest_activity is None or trace.last_activity_at > latest_activity:
                     latest_activity = trace.last_activity_at
-            
+
             # Sort all thoughts by creation time
             all_thoughts.sort(key=lambda t: t.created_at)
-            
+
             # Use the first trace for basic info, but aggregate the thoughts
             primary_trace = user_traces[0]
 

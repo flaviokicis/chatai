@@ -20,14 +20,14 @@ def add_tenant_observation_to_node(node: dict[str, Any], observation: str) -> di
     """Add a tenant observation to a node's metadata."""
     if "metadata" not in node:
         node["metadata"] = {}
-    
+
     if "tenant_observations" not in node["metadata"]:
         node["metadata"]["tenant_observations"] = []
-    
+
     # Add the observation if it's not already there
     if observation not in node["metadata"]["tenant_observations"]:
         node["metadata"]["tenant_observations"].append(observation)
-    
+
     return node
 
 
