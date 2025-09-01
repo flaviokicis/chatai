@@ -6,7 +6,7 @@ interface PageProps {
 
 
 
-export default async function FlowManagementPage({ params }: PageProps): Promise<JSX.Element> {
+export default async function FlowManagementPage({ params }: PageProps): Promise<React.JSX.Element> {
   const { id } = await params;
   
   return <FlowManagementClient tenantId={id} />;

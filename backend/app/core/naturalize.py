@@ -174,12 +174,10 @@ def rewrite_whatsapp_multi(
             "- Mantenha tom profissional mas caloroso\n"
             "- Adapte-se ao estilo sem repetir sempre as mesmas expressões\n\n"
             "REGRAS DE SAUDAÇÃO (CRÍTICO):\n"
-            "- ANALISE O HISTÓRICO: se há saudações anteriores (como 'Olá!', 'Oi!', 'Que bom ter você por aqui'), NUNCA adicione nova saudação\n"
-            "- No MESMO TURNO, use no máximo UMA saudação (de preferência na primeira mensagem)\n"
-            "- Se já houve saudação neste turno, NÃO repita nas mensagens seguintes\n"
-            "- Se não for primeira interação e o usuário não saudou, vá direto ao ponto (sem saudação)\n"
-            "- A mensagem final de pergunta NÃO deve conter saudação se já houve saudação no turno\n"
-            "- JAMAIS comece mensagens com 'Olá!' se já houve cumprimento na conversa\n\n"
+            "- Se o texto original contém saudação (Olá, Oi), preserve-a naturalmente\n"
+            "- NUNCA substitua saudações por 'Entendido', 'Certo', 'Ok' - mantenha o tom acolhedor\n"
+            "- Se já há saudação no histórico, evite repetir, mas preserve o tom da mensagem original\n"
+            "- Foque em naturalizar o estilo, não em remover saudações válidas\n\n"
             "ADAPTAÇÃO INTELIGENTE:\n"
             "Observe padrões do usuário e adapte adequadamente:\n"
             "- Usuário formal → mantenha mais profissional\n"
@@ -201,10 +199,12 @@ def rewrite_whatsapp_multi(
         )
 
         # Add minimal project context if available but no communication style
+        # Only inject business context for substantive content, not simple greetings
         if (
             project_context
             and project_context.has_rewriter_context()
             and not project_context.communication_style
+            and len(original_text.strip()) > 50  # Avoid injecting for short/simple messages
         ):
             context_prompt = project_context.get_rewriter_context_prompt()
             instruction = f"{instruction}\n{context_prompt}"

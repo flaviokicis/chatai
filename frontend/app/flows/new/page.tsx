@@ -65,7 +65,7 @@ export default function NewFlowPage() {
     createFlow.mutate({
       name: formData.name,
       flow_id: formData.flow_id,
-      channel_instance_id: Number(formData.channel_instance_id),
+      channel_instance_id: formData.channel_instance_id,
       definition,
     }, {
       onSuccess: (flow) => {
@@ -207,7 +207,7 @@ export default function NewFlowPage() {
                   <p>Começar com um fluxo de exemplo pré-configurado para qualificação de vendas.</p>
                   {exampleFlow && (
                     <p className="mt-1">
-                      <strong>Template:</strong> {exampleFlow.id} - {exampleFlow.nodes?.length || 0} nós configurados
+                      <strong>Template:</strong> {(exampleFlow as any).id} - {(exampleFlow as any).nodes?.length || 0} nós configurados
                     </p>
                   )}
                 </div>

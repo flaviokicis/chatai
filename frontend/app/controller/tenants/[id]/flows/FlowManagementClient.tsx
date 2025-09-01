@@ -88,7 +88,7 @@ interface FlowManagementClientProps {
   tenantId: string;
 }
 
-export default function FlowManagementClient({ tenantId }: FlowManagementClientProps): JSX.Element {
+export default function FlowManagementClient({ tenantId }: FlowManagementClientProps): React.JSX.Element {
   const router = useRouter();
 
   // State management

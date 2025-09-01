@@ -627,6 +627,20 @@ Recent Conversation:
                 },
             )
 
+        if tool_name == "ModifyFlowLive":
+            # Handle live flow modification - pass instruction in metadata for tool event handler
+            instruction = result.get("instruction", "")
+            return FlowResponse(
+                updates={},
+                message="",
+                tool_name=tool_name,
+                metadata={
+                    "instruction": instruction,
+                    "reason": result.get("reason", "admin_instruction"),
+                    "reasoning": result.get("reasoning")
+                },
+            )
+
         # Unknown tool or no tool selected
         # Try to extract updates if present (backward compatibility)
         updates = self._normalize_updates(result.get("updates", {}), pending_field)

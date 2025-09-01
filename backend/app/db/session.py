@@ -17,7 +17,27 @@ logger = logging.getLogger(__name__)
 def _engine():
     settings = get_settings()
     url = settings.sqlalchemy_database_url
-    return create_engine(url, pool_pre_ping=True, future=True)
+    
+    # Optimized connection pool settings for remote database
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        future=True,
+        # Connection pool optimization for remote DB
+        pool_size=20,  # Increased from default 5
+        max_overflow=30,  # Allow burst connections
+        pool_recycle=3600,  # Recycle connections every hour
+        pool_timeout=30,  # Wait up to 30s for connection
+        # Performance optimizations
+        echo=False,  # Disable SQL logging in production
+        connect_args={
+            "connect_timeout": 10,  # 10s connection timeout
+            "server_settings": {
+                "application_name": "chatai_backend",
+                "jit": "off",  # Disable JIT for faster simple queries
+            }
+        }
+    )
 
 
 @lru_cache(maxsize=1)
@@ -34,15 +54,17 @@ def get_db_session() -> Generator[Session, None, None]:
 
 
 def create_session() -> Session:
-    """Create a SQLAlchemy session outside FastAPI dependency injection.
-
-    Useful for background tasks and framework code paths where DI is not available.
+    """
+    Create a new database session.
+    
+    Use this when you need a session outside of FastAPI dependency injection.
+    Remember to close the session when done.
     """
     return _session_factory()()
 
 
 def get_engine():
-    """Expose the shared engine for metadata operations (e.g., create_all)."""
+    """Get the SQLAlchemy engine instance."""
     return _engine()
 
 

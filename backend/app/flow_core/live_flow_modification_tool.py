@@ -85,9 +85,35 @@ async def modify_flow_live(
         
         agent = FlowChatAgent(llm=llm, tools=tools)
         
-        # Create a conversation history with the instruction
+        # Create a conversation history with the instruction and context about storing observations
+        enhanced_instruction = f"""
+{instruction}
+
+IMPORTANT: Use your discretion to decide if this tenant feedback should be remembered for future reference.
+
+Only add tenant observations to node metadata when:
+- Tenant corrects or criticizes current behavior ("não responda assim", "isso está errado")
+- Tenant provides specific phrasing preferences ("use esta frase exata")
+- Tenant gives important context about their business ("somos uma barbearia premium")
+- Tenant explains why something should work differently ("clientes ficam confusos com isso")
+
+Do NOT add observations for:
+- Simple additions or new features
+- Technical flow structure changes
+- General improvements without specific feedback
+
+When you decide an observation should be stored, add it to the affected node's metadata:
+```
+"metadata": {{
+    "tenant_observations": ["Brief summary of the correction/feedback"]
+}}
+```
+
+Focus on capturing the tenant's intent and reasoning, not just the technical change.
+"""
+        
         history = [
-            {"role": "user", "content": instruction}
+            {"role": "user", "content": enhanced_instruction}
         ]
         
         # Process the instruction using the flow chat agent

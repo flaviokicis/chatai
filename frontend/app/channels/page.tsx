@@ -6,15 +6,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api } from "@/lib/api-client";
+import { AdminPhoneManager } from "@/components/ui/admin-phone-manager";
+import { api, getOrInitDefaultTenantId } from "@/lib/api-client";
 import { toast } from "sonner";
 import Link from "next/link";
 
 interface Channel {
   id: string;
-  channel_type: "whatsapp";
+  channel_type: string;  // Allow any channel type, not just "whatsapp"
   identifier: string;
-  phone_number: string | null;
+  phone_number?: string; // Match ChannelWithFlows type
   flows: Flow[];
 }
 
@@ -144,29 +145,17 @@ function ChannelCard({ channel, onFlowChange }: { channel: Channel; onFlowChange
 export default function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tenantId, setTenantId] = useState<string>("");
 
   const loadChannels = async () => {
     try {
       setLoading(true);
-      // Get channels first
-      const channelInstances = await api.admin.listChannels();
+      // Get tenant ID and channels
+      const currentTenantId = await getOrInitDefaultTenantId();
+      setTenantId(currentTenantId);
       
-      // Load flows for each channel
-      const channelsWithFlows = await Promise.all(
-        channelInstances.map(async (channel) => {
-          try {
-            const channelDetails = await api.admin.getChannelWithFlows(channel.id);
-            return channelDetails;
-          } catch (error) {
-            console.error(`Failed to load flows for channel ${channel.id}:`, error);
-            // Return channel without flows if we can't load them
-            return {
-              ...channel,
-              flows: []
-            };
-          }
-        })
-      );
+      // Get channels using user-accessible endpoint  
+      const channelsWithFlows = await api.channels.list(currentTenantId);
       
       setChannels(channelsWithFlows);
     } catch (error) {
@@ -179,7 +168,10 @@ export default function ChannelsPage() {
 
   const handleFlowChange = async (channelId: string, flowId: string) => {
     try {
-      await api.admin.setChannelActiveFlow(channelId, { flow_id: flowId });
+      // TODO: Create user-accessible endpoint for setting active flow
+      // For now, show message that this requires admin access
+      toast.error("Alteração de fluxo ativo requer acesso administrativo");
+      return;
       
       // Update local state to reflect the change
       setChannels(prevChannels =>
@@ -273,14 +265,26 @@ export default function ChannelsPage() {
             <div className="w-8 h-8 border-2 border-emerald-200 border-t-emerald-600 rounded-full animate-spin" />
           </div>
         ) : channels.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {channels.map(channel => (
-              <ChannelCard 
-                key={channel.id} 
-                channel={channel} 
-                onFlowChange={handleFlowChange}
+          <div className="space-y-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {channels.map(channel => (
+                <ChannelCard 
+                  key={channel.id} 
+                  channel={channel} 
+                  onFlowChange={handleFlowChange}
+                />
+              ))}
+            </div>
+            
+            {/* Admin Phone Management */}
+            {tenantId && (
+              <AdminPhoneManager 
+                tenantId={tenantId}
+                onAdminPhonesChanged={(phones) => {
+                  console.log("Admin phones updated:", phones);
+                }}
               />
-            ))}
+            )}
           </div>
         ) : (
           <div className="text-center py-12">

@@ -1116,6 +1116,15 @@ class LLMFlowEngine:
 
     def _handle_no_node(self, ctx: FlowContext) -> EngineResponse:
         """Handle case when there's no current node."""
+        # Check if this is an empty flow (no nodes or no entry)
+        if not self._flow.nodes or not self._flow.entry or self._flow.entry not in self._flow.nodes:
+            return EngineResponse(
+                kind="prompt",
+                message="Ola! O fluxo está vazio. Vamos começar a construir juntos! Como você gostaria que eu cumprimente seus clientes?",
+                node_id=None,
+                metadata={"empty_flow": True, "flow_building_mode": True},
+            )
+        
         return EngineResponse(
             kind="escalate",
             message="Perdi o contexto de onde estamos. Vou chamar alguém para ajudar.",

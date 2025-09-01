@@ -35,6 +35,10 @@ class AdminPhoneService:
             # Normalize phone number - remove whatsapp: prefix if present
             normalized_phone = phone_number.replace("whatsapp:", "").strip()
             
+            # Ensure + prefix for comparison (admin phones are stored with +)
+            if not normalized_phone.startswith("+"):
+                normalized_phone = "+" + normalized_phone
+            
             # Get tenant with admin phone numbers
             tenant = self.session.get(Tenant, tenant_id)
             if not tenant or not tenant.admin_phone_numbers:

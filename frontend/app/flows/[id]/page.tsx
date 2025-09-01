@@ -42,8 +42,8 @@ export default function FlowDetailPage() {
   // Simplified view state (moved from FlowExperience)
   const [showOnlyCurrentPath, setShowOnlyCurrentPath] = useState(true);
   const [selection, setSelection] = useState<Record<string, string>>({});
-
-    const { data: flow, isLoading, isError, refetch } = useQuery({
+  
+  const { data: flow, isLoading, isError, refetch } = useQuery({
     queryKey: ["compiledFlow", id],
     queryFn: async () => {
       const result = await api.flows.getCompiled(id);
@@ -53,6 +53,8 @@ export default function FlowDetailPage() {
     refetchOnWindowFocus: false, // Prevent unnecessary refetches
     refetchOnMount: true, // Always refetch when component mounts
   });
+
+
 
   // Compute simplified view values (moved from FlowExperience)
   const firstDecision = useMemo(() => flow ? findFirstBranchDecision(flow as unknown as CompiledFlow) : null, [flow]);

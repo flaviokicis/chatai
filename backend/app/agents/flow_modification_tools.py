@@ -16,6 +16,21 @@ from app.flow_core.ir import Flow as FlowIR
 logger = logging.getLogger(__name__)
 
 
+def add_tenant_observation_to_node(node: dict[str, Any], observation: str) -> dict[str, Any]:
+    """Add a tenant observation to a node's metadata."""
+    if "metadata" not in node:
+        node["metadata"] = {}
+    
+    if "tenant_observations" not in node["metadata"]:
+        node["metadata"]["tenant_observations"] = []
+    
+    # Add the observation if it's not already there
+    if observation not in node["metadata"]["tenant_observations"]:
+        node["metadata"]["tenant_observations"].append(observation)
+    
+    return node
+
+
 class ToolResult(BaseModel):
     """Structured result from tool execution."""
 

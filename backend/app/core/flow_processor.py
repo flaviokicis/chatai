@@ -269,6 +269,24 @@ class FlowProcessor:
     ) -> FlowResponse:
         """Execute the flow with the engine."""
         try:
+            # Check for empty flow before compilation
+            flow_def = request.flow_definition
+            is_empty_flow = (
+                not flow_def.get("nodes") or 
+                not flow_def.get("entry") or 
+                flow_def.get("entry") == "" or
+                len(flow_def.get("nodes", [])) == 0
+            )
+            
+            if is_empty_flow:
+                logger.info("Detected empty flow, showing flow building message")
+                return FlowResponse(
+                    result=FlowProcessingResult.CONTINUE,
+                    message="Ola! O fluxo está vazio. Vamos começar a construir juntos! Como você gostaria que eu cumprimente seus clientes?",
+                    context=None,
+                    metadata={"empty_flow": True, "flow_building_mode": True},
+                )
+            
             # Compile flow
             flow = Flow.model_validate(request.flow_definition)
             compiled_flow = compile_flow(flow)

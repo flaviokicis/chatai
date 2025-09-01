@@ -185,7 +185,7 @@ if (!DEFAULT_TENANT_ID && typeof window !== 'undefined') {
 
 async function getOrInitDefaultTenantId(): Promise<string> {
   if (DEFAULT_TENANT_ID) return DEFAULT_TENANT_ID;
-  const tenants = await apiRequest<Tenant[]>(`/admin/tenants`);
+  const tenants = await apiRequest<Tenant[]>(`/api/tenants`);
   if (Array.isArray(tenants) && tenants.length > 0) {
     DEFAULT_TENANT_ID = tenants[0].id;
     if (typeof window !== 'undefined') {
@@ -194,7 +194,7 @@ async function getOrInitDefaultTenantId(): Promise<string> {
     return DEFAULT_TENANT_ID;
   }
   // Create a demo tenant if none exists (dev convenience)
-  const demo = await apiRequest<Tenant>(`/admin/tenants`, {
+  const demo = await apiRequest<Tenant>(`/api/tenants`, {
     method: 'POST',
     body: JSON.stringify({
       first_name: 'Demo',
@@ -213,17 +213,17 @@ export const api = {
   // Tenant endpoints
   tenants: {
     list: (): Promise<Tenant[]> => 
-      apiRequest('/admin/tenants'),
+      apiRequest('/api/controller/tenants'),
     
     create: (tenant: CreateTenantRequest): Promise<Tenant> => 
-      apiRequest('/admin/tenants', {
+      apiRequest('/api/controller/tenants', {
         method: 'POST',
         body: JSON.stringify(tenant),
       }),
     
     get: async (tenantId?: string): Promise<TenantWithConfig> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}`);
+      return apiRequest(`/api/controller/tenants/${id}`);
     },
     
     updateConfig: async (
@@ -231,39 +231,31 @@ export const api = {
       config: UpdateTenantConfigRequest
     ): Promise<TenantWithConfig> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/config`, {
+      return apiRequest(`/api/controller/tenants/${id}/config`, {
         method: 'PATCH',
         body: JSON.stringify(config),
       });
     },
   },
 
-  // Channel endpoints
+  // Channel endpoints (user-accessible, no admin auth required)
   channels: {
     list: async (tenantId?: string): Promise<ChannelInstance[]> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/channels`);
-    },
-    
-    create: async (tenantId: string | undefined, channel: CreateChannelRequest): Promise<ChannelInstance> => {
-      const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/channels`, {
-        method: 'POST',
-        body: JSON.stringify(channel),
-      });
+      return apiRequest(`/api/channels/tenant/${id}`);
     },
   },
 
-  // Flow endpoints
+  // Flow endpoints (public, no auth required)
   flows: {
     list: async (tenantId?: string): Promise<Flow[]> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/flows`);
+      return apiRequest(`/api/tenants/${id}/flows`);
     },
     
     create: async (tenantId: string | undefined, flow: CreateFlowRequest): Promise<Flow> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/flows`, {
+      return apiRequest(`/api/tenants/${id}/flows`, {
         method: 'POST',
         body: JSON.stringify(flow),
       });
@@ -271,7 +263,7 @@ export const api = {
     
     update: async (tenantId: string | undefined, flowId: string, flow: UpdateFlowRequest): Promise<Flow> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/flows/${flowId}`, {
+      return apiRequest(`/api/tenants/${id}/flows/${flowId}`, {
         method: 'PUT',
         body: JSON.stringify(flow),
       });
@@ -371,17 +363,17 @@ export const api = {
   admin: {
     listChannels: async (tenantId?: string): Promise<ChannelInstance[]> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/channels`);
+      return apiRequest(`/api/controller/tenants/${id}/channels`);
     },
     
     getChannelWithFlows: async (channelId: string, tenantId?: string): Promise<ChannelWithFlows> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/channels/${channelId}`);
+      return apiRequest(`/api/controller/tenants/${id}/channels/${channelId}`);
     },
     
     setChannelActiveFlow: async (channelId: string, request: UpdateChannelFlowRequest, tenantId?: string): Promise<{ message: string }> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/channels/${channelId}/active-flow`, {
+      return apiRequest(`/api/controller/tenants/${id}/channels/${channelId}/active-flow`, {
         method: 'PATCH',
         body: JSON.stringify(request),
       });
@@ -389,7 +381,21 @@ export const api = {
     
     listFlows: async (tenantId?: string): Promise<Flow[]> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
-      return apiRequest(`/admin/tenants/${id}/flows`);
+      return apiRequest(`/api/controller/tenants/${id}/flows`);
+    },
+
+    // Admin phone management
+    getAdminPhones: async (tenantId?: string): Promise<{ admin_phone_numbers: string[] }> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/api/tenants/${id}/admin-phones`);
+    },
+
+    updateAdminPhones: async (adminPhones: string[], tenantId?: string): Promise<{ admin_phone_numbers: string[] }> => {
+      const id = tenantId || (await getOrInitDefaultTenantId());
+      return apiRequest(`/api/tenants/${id}/admin-phones`, {
+        method: 'PUT',
+        body: JSON.stringify({ admin_phone_numbers: adminPhones }),
+      });
     },
   },
 };

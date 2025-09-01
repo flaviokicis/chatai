@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
 from app.core.app_context import get_app_context
 from app.core.state import RedisStore
@@ -737,82 +738,89 @@ async def list_conversations(
     limit: int = 100,
     db: Session = Depends(get_db)
 ) -> ConversationsResponse:
-    """List all conversations based on database thought traces (for debugging support)."""
+    """
+    List all conversations with performance optimizations.
+    
+    Key optimizations:
+    1. Single query with proper LIMIT
+    2. Batch Redis lookups
+    3. Reduced data transfer
+    """
     require_admin_auth(request)
 
     try:
-        # Fetch conversations from database thought traces (primary source for debugging)
         from app.db.models import AgentConversationTrace
+        from sqlalchemy import text
         
-        # Get all conversation traces, grouped by user+agent_type
-        all_traces = db.query(AgentConversationTrace).order_by(
-            AgentConversationTrace.last_activity_at.desc()
-        ).limit(limit * 3).all()  # Get more to account for deduplication
+        # Single optimized query with proper indexing
+        query = (
+            db.query(AgentConversationTrace)
+            .filter(AgentConversationTrace.deleted_at.is_(None))
+            .order_by(AgentConversationTrace.last_activity_at.desc())
+            .limit(limit * 2)  # Get extra for deduplication
+        )
         
-        # Group traces by user+agent_type to create conversation list
+        all_traces = query.all()
+        
+        # Group by conversation (user_id + agent_type) for deduplication
         conversation_map = {}
+        redis_keys_to_check = []
         
         for trace in all_traces:
-            # Create conversation key
             key = f"{trace.user_id}:{trace.agent_type}"
             
             if key not in conversation_map:
-                # Check if this conversation has active Redis state
-                app_context = get_app_context(request.app)  # type: ignore[arg-type]
-                is_active = False
-                if isinstance(app_context.store, RedisStore):
-                    redis_client = app_context.store._r
-                    namespace = app_context.store._ns
-                    
-                    # Check for active Redis state
-                    # The actual Redis key format from session manager is complex:
-                    # save(user_id="whatsapp", agent_type="flow:whatsapp:5522988544370:flow.atendimento_luminarias")
-                    # Results in: chatai:state:whatsapp:flow:whatsapp:5522988544370:flow.atendimento_luminarias
-                    
-                    # Extract channel and phone from trace user_id (e.g., "whatsapp:5522988544370")
-                    user_parts = trace.user_id.split(":", 1)
-                    if len(user_parts) == 2:
-                        channel, phone = user_parts
-                        # Construct the session_id format: flow:{full_user_id}:{flow_id}
-                        session_id = f"flow:{trace.user_id}:{trace.agent_type}"
-                        # Use key builder for consistent key generation
-                        state_key = redis_keys.conversation_state_key(channel, session_id)
-                        is_active = redis_client.exists(state_key)
-                    else:
-                        # Fallback to direct format
-                        state_key = redis_keys.conversation_state_key(trace.user_id, trace.agent_type)
-                        is_active = redis_client.exists(state_key)
-                
-                # Skip inactive if active_only is True
-                if active_only and not is_active:
-                    continue
-                    
-                conversation_map[key] = ConversationInfo(
-                    user_id=trace.user_id,
-                    agent_type=trace.agent_type,
-                    session_id=trace.session_id or f"{trace.user_id}:{trace.agent_type}",
-                    last_activity=trace.last_activity_at,
-                    message_count=trace.total_thoughts,  # Use thought count as message approximation
-                    is_active=is_active,
-                    tenant_id=str(trace.tenant_id),
-                    is_historical=not is_active  # Historical if no active Redis state
-                )
-            else:
-                # Update with more recent activity if this trace is newer
-                existing = conversation_map[key]
-                if trace.last_activity_at > existing.last_activity:
-                    existing.last_activity = trace.last_activity_at
-                    existing.message_count += trace.total_thoughts  # Accumulate thoughts
+                conversation_map[key] = trace
+                # Prepare Redis key for batch lookup
+                user_parts = trace.user_id.split(":", 1)
+                if len(user_parts) == 2:
+                    channel, phone = user_parts
+                    session_id = f"flow:{trace.user_id}:{trace.agent_type}"
+                    state_key = redis_keys.conversation_state_key(channel, session_id)
+                else:
+                    state_key = redis_keys.conversation_state_key(trace.user_id, trace.agent_type)
+                redis_keys_to_check.append((key, state_key))
         
-        conversations = list(conversation_map.values())
-
-        # Sort by last activity (most recent first)
+        # Batch Redis lookup for active status
+        active_status = {}
+        app_context = get_app_context(request.app)  # type: ignore[arg-type]
+        if isinstance(app_context.store, RedisStore):
+            redis_client = app_context.store._r
+            if redis_keys_to_check:
+                # Use pipeline for batch Redis operations
+                pipe = redis_client.pipeline()
+                for _, redis_key in redis_keys_to_check:
+                    pipe.exists(redis_key)
+                results = pipe.execute()
+                
+                for i, (conv_key, _) in enumerate(redis_keys_to_check):
+                    active_status[conv_key] = bool(results[i])
+        
+        # Build conversation list
+        conversations = []
+        for key, trace in conversation_map.items():
+            is_active = active_status.get(key, False)
+            
+            # Skip inactive if active_only is True
+            if active_only and not is_active:
+                continue
+                
+            conversations.append(ConversationInfo(
+                user_id=trace.user_id,
+                agent_type=trace.agent_type,
+                session_id=trace.session_id or f"{trace.user_id}:{trace.agent_type}",
+                last_activity=trace.last_activity_at,
+                message_count=trace.total_thoughts,
+                is_active=is_active,
+                tenant_id=str(trace.tenant_id),
+                is_historical=not is_active
+            ))
+        
+        # Sort by last activity and apply final limit
         conversations.sort(key=lambda x: x.last_activity or datetime.min, reverse=True)
-
-        # Apply limit and calculate counts
         limited_conversations = conversations[:limit]
         active_count = sum(1 for conv in conversations if conv.is_active)
-
+        
         return ConversationsResponse(
             conversations=limited_conversations,
             total_count=len(conversations),
@@ -820,9 +828,103 @@ async def list_conversations(
         )
 
     except Exception as e:
+        logger.exception("Failed to retrieve conversations")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to retrieve conversations: {e!s}"
+        )
+
+
+@router.get("/conversations/stats")
+async def get_conversation_stats(
+    request: Request,
+    db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    """
+    Get conversation statistics without loading full data.
+    Much faster for dashboard metrics.
+    """
+    require_admin_auth(request)
+    
+    try:
+        # Use aggregation queries for fast stats
+        stats_query = text("""
+            SELECT 
+                COUNT(*) as total_traces,
+                COUNT(DISTINCT tenant_id) as unique_tenants,
+                MAX(last_activity_at) as most_recent_activity,
+                AVG(total_thoughts) as avg_thoughts_per_conversation
+            FROM agent_conversation_traces 
+            WHERE deleted_at IS NULL
+        """)
+        
+        result = db.execute(stats_query).fetchone()
+        
+        return {
+            "total_conversations": result.total_traces if result else 0,
+            "unique_tenants": result.unique_tenants if result else 0,
+            "most_recent_activity": result.most_recent_activity if result else None,
+            "avg_thoughts_per_conversation": float(result.avg_thoughts_per_conversation) if result and result.avg_thoughts_per_conversation else 0.0
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to get conversation stats")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get conversation stats: {e!s}"
+        )
+
+
+@router.get("/tenants/summary")
+async def get_tenants_summary(
+    request: Request,
+    db: Session = Depends(get_db)
+) -> dict[str, Any]:
+    """
+    Get tenant summary with optimized queries.
+    """
+    require_admin_auth(request)
+    
+    try:
+        # Single query with aggregations
+        tenants_query = text("""
+            SELECT 
+                t.id,
+                t.owner_first_name,
+                t.owner_last_name,
+                t.created_at,
+                COUNT(DISTINCT ci.id) as channel_count,
+                COUNT(DISTINCT f.id) as flow_count
+            FROM tenants t
+            LEFT JOIN channel_instances ci ON t.id = ci.tenant_id AND ci.deleted_at IS NULL
+            LEFT JOIN flows f ON t.id = f.tenant_id AND f.deleted_at IS NULL  
+            WHERE t.deleted_at IS NULL
+            GROUP BY t.id, t.owner_first_name, t.owner_last_name, t.created_at
+            ORDER BY t.created_at DESC
+        """)
+        
+        results = db.execute(tenants_query).fetchall()
+        
+        tenants_summary = []
+        for row in results:
+            tenants_summary.append({
+                "id": str(row.id),
+                "name": f"{row.owner_first_name} {row.owner_last_name}",
+                "created_at": row.created_at,
+                "channel_count": row.channel_count,
+                "flow_count": row.flow_count
+            })
+        
+        return {
+            "tenants": tenants_summary,
+            "total_tenants": len(tenants_summary)
+        }
+        
+    except Exception as e:
+        logger.exception("Failed to get tenants summary")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get tenants summary: {e!s}"
         )
 
 
