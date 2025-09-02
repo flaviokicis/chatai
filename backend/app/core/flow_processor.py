@@ -310,8 +310,7 @@ class FlowProcessor:
                         "ADMIN MODE: You have access to live flow modification.\n"
                         "Use ModifyFlowLive ONLY when the user gives clear instructions about changing flow behavior.\n"
                         "Examples: 'você deveria perguntar sobre tipo de unha', 'next time ask about X first'\n"
-                        "You also have access to RestartConversation to restart after modifications.\n"
-                        "Do NOT use these tools for regular conversation or questions about the flow.\n"
+                        "Do NOT use this tool for regular conversation or questions about the flow.\n"
                     )
 
                 # Create tool event handler for live flow modification and restart
