@@ -31,6 +31,7 @@ from app.db.repository import (
     create_tenant_with_config,
     delete_tenant_cascade,
     get_active_tenants,
+    get_active_tenants_with_counts,
     get_channel_instances_by_tenant,
     get_flow_by_id,
     get_flows_by_tenant,
@@ -425,13 +426,11 @@ async def list_tenants(
     """List all tenants with summary information."""
     require_admin_auth(request)
 
-    tenants = get_active_tenants(db)
+    # Use optimized query that gets counts in a single database round trip
+    tenant_data = get_active_tenants_with_counts(db)
     result = []
 
-    for tenant in tenants:
-        channels = get_channel_instances_by_tenant(db, tenant.id)
-        flows = get_flows_by_tenant(db, tenant.id)
-
+    for tenant, channel_count, flow_count in tenant_data:
         result.append(TenantResponse(
             id=tenant.id,
             owner_first_name=tenant.owner_first_name,
@@ -442,8 +441,8 @@ async def list_tenants(
             project_description=tenant.project_config.project_description if tenant.project_config else None,
             target_audience=tenant.project_config.target_audience if tenant.project_config else None,
             communication_style=tenant.project_config.communication_style if tenant.project_config else None,
-            channel_count=len(channels),
-            flow_count=len(flows)
+            channel_count=channel_count,
+            flow_count=flow_count
         ))
 
     return result
