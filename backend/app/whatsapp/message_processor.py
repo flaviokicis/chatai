@@ -308,12 +308,26 @@ class WhatsAppMessageProcessor:
             print("[DEBUG WHATSAPP] Skipping rewrite for admin operation")
             messages = [{"text": reply_text, "delay_ms": 0}]
         else:
+            # Build tool context for better naturalization
+            tool_context = None
+            if metadata.get("tool_name"):
+                tool_context = {
+                    "tool_name": metadata.get("tool_name", ""),
+                    "description": metadata.get("tool_description", "")
+                }
+            
+            # Get current time in same format as conversation timestamps
+            import datetime
+            current_time = datetime.datetime.now().strftime("%H:%M")
+            
             messages = rewriter.rewrite_message(
                 reply_text,
                 chat_history,
                 enable_rewrite=True,
                 project_context=conversation_setup.project_context,
-                is_completion=(flow_response.result == FlowProcessingResult.TERMINAL)
+                is_completion=(flow_response.result == FlowProcessingResult.TERMINAL),
+                tool_context=tool_context,
+                current_time=current_time
             )
 
         print(f"[DEBUG WHATSAPP] Rewriter returned {len(messages or [])} messages")

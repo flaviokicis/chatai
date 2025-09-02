@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import TYPE_CHECKING
 
-from .langfuse_client import get_langfuse_client, trace_llm_call
+from langfuse import get_client
 from .prompt_logger import prompt_logger
 
 if TYPE_CHECKING:  # avoid hard import at runtime
@@ -69,6 +70,36 @@ DEFAULT_INSTRUCTION = (
     "- NAO USE MAIS DE UMA SAUDACAO, POR EXEMPLO E AÍ, POR CONVERSA.\n\n"
 )
 
+def _get_tool_description_pt(tool_name: str) -> str:
+    """Extrai a descrição da ferramenta diretamente dos schemas definidos."""
+    try:
+        # Import the tool schemas to get the actual docstrings
+        from app.flow_core.tool_schemas import FLOW_TOOLS, UnknownAnswer, ModifyFlowLive
+        
+        # Add additional tools to the search list
+        all_tools = FLOW_TOOLS + [UnknownAnswer, ModifyFlowLive]
+        
+        # Find the tool class by name
+        for tool_class in all_tools:
+            if tool_class.__name__ == tool_name:
+                # Get the docstring and clean it up
+                docstring = tool_class.__doc__
+                if docstring:
+                    # Take the first meaningful line of the docstring as the description
+                    lines = [line.strip() for line in docstring.strip().split('\n')]
+                    # Find the first non-empty line that's not just quotes
+                    for line in lines:
+                        clean_line = line.strip('"""').strip()
+                        if clean_line:
+                            return clean_line
+                    return ""
+        
+        # Fallback: return empty string if tool not found
+        return ""
+    except Exception:
+        # Fallback: return empty string if import fails
+        return ""
+
 def rewrite_whatsapp_multi(
     llm: LLMClient,  # type: ignore[name-defined]
     original_text: str,
@@ -77,6 +108,8 @@ def rewrite_whatsapp_multi(
     max_followups: int = 2,
     project_context: ProjectContext | None = None,  # type: ignore[name-defined]
     is_completion: bool = False,
+    tool_context: dict[str, str] | None = None,
+    current_time: str | None = None,
 ) -> list[dict[str, int | str]]:
     """Rewrite an assistant reply into human-like WhatsApp-style messages.
 
@@ -85,6 +118,8 @@ def rewrite_whatsapp_multi(
 
     Args:
         is_completion: Whether this is the final message/completion of the conversation flow
+        tool_context: Optional context about the tool/action that was executed, with keys like 'tool_name' and 'description'
+        current_time: Current time in HH:MM format to match conversation timestamps
 
     If rewriting fails, returns a single message with original_text.
     """
@@ -98,10 +133,15 @@ def rewrite_whatsapp_multi(
     for i, turn in enumerate(chat_window or []):
         role = (turn.get("role") or "").strip()
         content = (turn.get("content") or "").strip()
+        timestamp = turn.get("timestamp", "")
+        
         if role and content:
-            # Add sequence number and role for clarity
+            # Add timestamp and role for better context  
             sequence = i + 1
-            history_lines.append(f"[{sequence}] {role}: {content}")
+            if timestamp:
+                history_lines.append(f"[{timestamp}] {role}: {content}")
+            else:
+                history_lines.append(f"[{sequence}] {role}: {content}")
 
     # Take last 10 turns and ensure chronological order (oldest first)
     recent_history = history_lines[-10:] if history_lines else []
@@ -221,13 +261,42 @@ def rewrite_whatsapp_multi(
             instruction = f"{instruction}\n{context_prompt}"
 
     history_block = "\n".join(history_lines[-200:])  # cap to keep prompt bounded
+    
+    # Build tool context section if provided
+    tool_context_section = ""
+    if tool_context and tool_context.get("tool_name"):
+        tool_name = tool_context.get("tool_name", "")
+        tool_description = _get_tool_description_pt(tool_name)
+        if tool_description:
+            tool_context_section = f"""
+=== AÇÃO EXECUTADA (para contexto da comunicação) ===
+Ferramenta utilizada: {tool_name}
+Descrição técnica: {tool_description}
+
+IMPORTANTE: Esta informação é apenas para você entender o CONTEXTO da ação que acabou de acontecer.
+Use isso para comunicar de forma mais natural e contextual, mas SEMPRE preserve o conteúdo da mensagem original.
+A descrição pode estar em inglês, mas sua resposta deve sempre ser no estilo do cliente.
+
+"""
+    
+    # Add current time context if provided
+    time_context_section = ""
+    if current_time:
+        time_context_section = f"""
+=== CONTEXTO TEMPORAL ===
+Horário atual: {current_time}
+
+IMPORTANTE: Use esta informação para adaptar saudações e referências temporais de forma natural.
+Exemplo: se for manhã use "bom dia", se for tarde use "boa tarde", etc.
+
+"""
 
     payload = f"""=== ORIGINAL MESSAGE TO REWRITE ===
 {original_text}
 
-=== CONVERSATION HISTORY (for tone reference only) ===
+=== CONVERSATION HISTORY SO FAR ===
 {history_block}
-
+{tool_context_section}{time_context_section}
 === BUSINESS CONTEXT (for company understanding only) ===
 Business: {project_context.project_description if project_context else 'Customer service'}
 
@@ -243,47 +312,32 @@ Business: {project_context.project_description if project_context else 'Customer
 Pegue a mensagem original e torne-a mais natural e conversacional preservando exatamente seu significado e conteúdo.
 """
 
-    # Create Langfuse trace for naturalization
-    langfuse_client = get_langfuse_client()
-    trace = None
-    if langfuse_client.is_enabled():
-        # Extract user context from chat window if available
-        user_id = None
-        session_id = None
-        if chat_window:
-            # Try to extract user/session from chat context
-            for turn in chat_window[-3:]:  # Check last 3 turns for context
-                if turn.get("role") == "user" and "user_id" in str(turn):
-                    # This would need actual user context extraction logic
-                    pass
-
-        trace = langfuse_client.create_trace(
-            name="whatsapp_naturalization",
-            user_id=user_id,
-            session_id=session_id,
-            metadata={
-                "operation": "text_naturalization",
-                "style": "whatsapp_multi",
-                "has_project_context": project_context is not None,
-                "has_custom_style": project_context.communication_style if project_context else False,
-                "is_completion": is_completion,
-                "max_followups": max_followups,
-                "history_messages": len(history_lines),
-                "original_text_length": len(original_text),
-                "instruction_length": len(instruction),
-                "payload_length": len(payload),
-            },
-            tags=[
-                "naturalization", 
-                "whatsapp", 
-                "multi_message",
-                "completion" if is_completion else "conversation",
-                getattr(llm, "model_name", "unknown"),
-            ],
-        )
+    # Start Langfuse generation with cost tracking
+    langfuse_client = get_client()
+    generation = langfuse_client.start_observation(
+        name="whatsapp_naturalization",
+        as_type="generation",
+        model=getattr(llm, "model_name", "unknown"),
+        input=payload,
+        metadata={
+            "operation": "text_naturalization",
+            "style": "whatsapp_multi",
+            "has_project_context": project_context is not None,
+            "is_completion": is_completion,
+            "max_followups": max_followups,
+            "original_text_length": len(original_text),
+            "instruction_length": len(instruction),
+        }
+    )
 
     try:
-        raw = llm.rewrite(instruction, payload)
+        # Use a dedicated lightweight model for naturalization/rewriting
+        from langchain.chat_models import init_chat_model
+        rewrite_chat = init_chat_model("gemini-2.5-flash-lite", model_provider="google_genai")
+        
+        full_prompt = f"{instruction}\n\n{payload}"
+        result = rewrite_chat.invoke(full_prompt)
+        raw = getattr(result, "content", original_text) or original_text
 
         # Log the prompt and response
         prompt_logger.log_prompt(
@@ -343,68 +397,32 @@ Pegue a mensagem original e torne-a mais natural e conversacional preservando ex
                 elif d > MAX_FOLLOWUP_DELAY_MS:
                     d = MAX_FOLLOWUP_DELAY_MS
                 out[idx]["delay_ms"] = d
-            # Trace successful naturalization
-            if trace:
-                trace.generation(
-                    name="naturalization_llm_call",
-                    model=getattr(llm, "model_name", "unknown"),
-                    input=payload,
-                    output=raw if isinstance(raw, str) else str(raw),
-                    metadata={
-                        "messages_generated": len(out),
-                        "total_characters": sum(len(str(msg.get("text", ""))) for msg in out),
-                        "avg_delay_ms": sum(int(msg.get("delay_ms", 0)) for msg in out[1:]) / max(len(out) - 1, 1),
-                        "has_markdown_cleanup": clean_raw != raw,
-                        "json_parsed_successfully": True,
-                        "style_applied": "custom" if project_context and project_context.communication_style else "default",
-                    },
-                    tags=["successful_naturalization", "multi_message"],
-                )
-
-                # Trace individual messages
-                for i, msg in enumerate(out):
-                    trace.event(
-                        name=f"message_{i+1}",
-                        input={"position": i+1, "is_first": i == 0},
-                        output={"text": msg.get("text"), "delay_ms": msg.get("delay_ms")},
-                        metadata={
-                            "message_length": len(str(msg.get("text", ""))),
-                            "delay_category": "immediate" if msg.get("delay_ms", 0) == 0 else "delayed",
-                        },
-                    )
-
+            
+            # Update generation with successful result
+            generation.update(
+                output=json.dumps(out),
+                metadata={
+                    "messages_generated": len(out),
+                    "total_characters": sum(len(str(msg.get("text", ""))) for msg in out),
+                    "json_parsed_successfully": True,
+                }
+            )
+            generation.end()
             return out
     except Exception as e:
-        # Trace the error
-        if trace:
-            trace.event(
-                name="naturalization_error",
-                input={"original_text": original_text, "instruction_length": len(instruction)},
-                output={"error": str(e), "fallback_used": True},
-                metadata={
-                    "error_type": type(e).__name__,
-                    "parsing_stage": "json_parsing" if "json" in str(e).lower() else "llm_call",
-                },
-            )
-        # Fall through to deterministic fallback below
-        pass
+        # Update generation with error
+        generation.update(
+            output=json.dumps([{"text": original_text, "delay_ms": 0}]),
+            metadata={
+                "error": str(e),
+                "fallback_used": True,
+                "error_type": type(e).__name__,
+            }
+        )
+        generation.end()
 
     # Simple fallback: if LLM fails, return original text as-is
-    fallback_result = [{"text": original_text, "delay_ms": 0}]
-    
-    # Trace fallback usage
-    if trace:
-        trace.event(
-            name="naturalization_fallback",
-            input={"original_text": original_text},
-            output={"fallback_result": fallback_result},
-            metadata={
-                "fallback_reason": "llm_failure_or_parsing_error",
-                "preserved_original": True,
-            },
-        )
-    
-    return fallback_result
+    return [{"text": original_text, "delay_ms": 0}]
 
 
 def _build_custom_style_instruction(
@@ -476,10 +494,8 @@ def _build_custom_style_instruction(
         "• Varie as expressões - não copie frases específicas literalmente\n"
         "REGRAS DE SAUDAÇÃO:\n"
         "• CRÍTICO: Analise o histórico da conversa - se há saudações anteriores, NUNCA adicione novas\n"
-        "• Evite saudar novamente a cada turno; cumprimente só quando fizer sentido (ex.: início)\n"
-        "• Se já houve saudação recente, vá direto ao ponto sem repetir 'oi', 'e aí', 'olá', etc.\n"
+        "• Se já houve saudação por sua parte recentemente, vá direto ao ponto sem repetir as saudacoes 'oi', 'e aí', 'olá', etc.\n"
         "• Em múltiplas mensagens do mesmo turno, use saudação no máximo uma vez (de preferência na primeira)\n"
-        "• JAMAIS repita frases como 'Olá! Que bom ter você por aqui!' se já foram usadas\n"
         "REGRA FUNDAMENTAL:\n"
         "• O ASSUNTO da mensagem original é sagrado - nunca misture outros tópicos\n"
         "• Se a mensagem é sobre plano de saúde → fale apenas sobre plano de saúde\n"

@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from app.core.llm import LLMClient
 
 # REMOVED: dev_config import - Use DEVELOPMENT_MODE environment variable instead
-from app.core.langfuse_clean import trace_tool_calling
+from langfuse import get_client
 from app.core.prompt_logger import prompt_logger
 from app.core.thought_tracer import DatabaseThoughtTracer
 
@@ -68,6 +68,7 @@ class LLMFlowResponder:
         self._llm = llm
         self._use_all_tools = use_all_tools
         self._thought_tracer = thought_tracer
+        self._langfuse = get_client()
 
     def respond(
         self,
@@ -155,66 +156,47 @@ class LLMFlowResponder:
                     channel_id=channel_id
                 )
 
-        # Trace the tool calling operation with clean context manager
-        with trace_tool_calling(
-            ctx=ctx, 
-            pending_field=pending_field,
-            tools_available=[t.__name__ if hasattr(t, "__name__") else str(t) for t in tools],
-            user_message_length=len(user_message),
-            instruction_length=len(instruction),
-        ) as trace_ctx:
-            try:
-                result = self._llm.extract(instruction, tools)
+        # Call LLM with tools
+        try:
+            result = self._llm.extract(instruction, tools)
 
-                # Log the tool calling prompt and response
-                prompt_logger.log_prompt(
-                    prompt_type="tool_calling",
-                    instruction=instruction,
-                    input_text=user_message or "",
-                    response=json.dumps(result, ensure_ascii=False) if result else "None",
-                    model=getattr(self._llm, "model_name", "unknown"),
-                    metadata={
-                        "pending_field": pending_field,
-                        "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools],
-                        "allowed_values": allowed_values
-                    }
-                )
+            # Log the tool calling prompt and response
+            prompt_logger.log_prompt(
+                prompt_type="tool_calling",
+                instruction=instruction,
+                input_text=user_message or "",
+                response=json.dumps(result, ensure_ascii=False) if result else "None",
+                model=getattr(self._llm, "model_name", "unknown"),
+                metadata={
+                    "pending_field": pending_field,
+                    "tools": [t.__name__ if hasattr(t, "__name__") else str(t) for t in tools],
+                    "allowed_values": allowed_values
+                }
+            )
 
-                # Auto-trace the LLM call (handled by context manager)
-                trace_ctx.log_llm_call(
-                    input_text=instruction,
-                    output_text=json.dumps(result, ensure_ascii=False) if result else "None",
-                    selected_tool=result.get("__tool_name__") if isinstance(result, dict) else None,
-                    has_reasoning=bool(result.get("reasoning") if isinstance(result, dict) else False),
-                    has_updates=bool(result.get("updates") if isinstance(result, dict) else False),
-                )
-
-                if is_development_mode():
-                    print(f"[DEBUG] LLM result: {result}")
+            if is_development_mode():
+                print(f"[DEBUG] LLM result: {result}")
                     
-            except Exception as e:
-                # Auto-trace the error (handled by context manager)
-                trace_ctx.log_error(e, {"pending_field": pending_field, "user_message": user_message[:100]})
+        except Exception as e:
+            # Log the error
+            prompt_logger.log_prompt(
+                prompt_type="tool_calling_error",
+                instruction=instruction,
+                input_text=user_message or "",
+                response=f"ERROR: {e}",
+                model=getattr(self._llm, "model_name", "unknown"),
+                metadata={"error": str(e), "pending_field": pending_field}
+            )
 
-                # Log the error
-                prompt_logger.log_prompt(
-                    prompt_type="tool_calling_error",
-                    instruction=instruction,
-                    input_text=user_message or "",
-                    response=f"ERROR: {e}",
-                    model=getattr(self._llm, "model_name", "unknown"),
-                    metadata={"error": str(e), "pending_field": pending_field}
-                )
-
-                if is_development_mode():
-                    print(f"[DEBUG] LLM extraction failed: {e}")
-                # Fallback response on error
-                return FlowResponse(
-                    updates={},
-                    message="I'm having trouble understanding. Could you rephrase that?",
-                    tool_name=None,
-                    metadata={"error": str(e)},
-                )
+            if is_development_mode():
+                print(f"[DEBUG] LLM extraction failed: {e}")
+            # Fallback response on error
+            return FlowResponse(
+                updates={},
+                message="I'm having trouble understanding. Could you rephrase that?",
+                tool_name=None,
+                metadata={"error": str(e)},
+            )
 
         # Ensure a short reasoning is always present for observability
         if isinstance(result, dict):
@@ -229,16 +211,8 @@ class LLMFlowResponder:
                 except Exception:
                     pass
 
-            # Process the tool response
-            flow_response = self._process_tool_response(result, pending_field, ctx)
-
-            # Auto-trace the final result (handled by context manager)
-            trace_ctx.log_result(
-                flow_response,
-                tool_executed=flow_response.tool_name,
-                has_updates=bool(flow_response.updates),
-                escalation_triggered=flow_response.escalate,
-            )
+        # Process the tool response
+        flow_response = self._process_tool_response(result, pending_field, ctx)
 
         # Complete thought tracing if available
         if self._thought_tracer and thought_id and start_time:
@@ -478,8 +452,7 @@ Recent Conversation:
         if ctx.clarification_count > 2:  # User struggling
             basic_tools.append(SkipQuestion)
 
-        # The restart tool is always available but MUST be explicitly triggered by the LLM per strict rules
-        basic_tools.append(RestartConversation)
+        # RestartConversation already added above, no need to add again
 
         return basic_tools
 

@@ -91,14 +91,23 @@ def run_cli() -> None:
         print("[error] LLM mode is required. Use --llm flag.")
         return
 
-    # Ensure .env is loaded so GOOGLE_API_KEY is available for Gemini
+    # Ensure .env is loaded for API keys
     load_dotenv()
-    if not os.environ.get("GOOGLE_API_KEY"):
-        print("[error] GOOGLE_API_KEY not set. LLM is required for operation.")
-        return
+    
+    # Determine provider based on model name
+    if args.model.startswith(("gpt-", "o1-")):
+        provider = "openai"
+        if not os.environ.get("OPENAI_API_KEY"):
+            print("[error] OPENAI_API_KEY not set. Required for GPT models.")
+            return
+    else:
+        provider = "google_genai"
+        if not os.environ.get("GOOGLE_API_KEY"):
+            print("[error] GOOGLE_API_KEY not set. Required for Gemini models.")
+            return
 
-    # Initialize Gemini via LangChain init_chat_model to reuse existing adapter
-    chat = init_chat_model(args.model, model_provider="google_genai")
+    # Initialize chat model with appropriate provider
+    chat = init_chat_model(args.model, model_provider=provider)
     llm_client = LangChainToolsLLM(chat)
     runner = FlowTurnRunner(compiled, llm_client, strict_mode=False)
     rewrite_status = "on" if (not args.no_rewrite) else "off"
@@ -141,13 +150,27 @@ def run_cli() -> None:
                 flow_context_history=getattr(ctx, "history", None)
             )
 
+            # Build tool context for better naturalization
+            tool_context = None
+            if hasattr(result, 'metadata') and result.metadata.get("tool_name"):
+                tool_context = {
+                    "tool_name": result.metadata.get("tool_name", ""),
+                    "description": result.metadata.get("tool_description", "")
+                }
+            
+            # Get current time in same format as conversation timestamps
+            import datetime
+            current_time = datetime.datetime.now().strftime("%H:%M")
+            
             # Rewrite into multi-message format with tenant context
             # This ensures ALL messages (including first prompt) get tenant styling
             messages = rewriter.rewrite_message(
                 display_text,
                 chat_history,
                 enable_rewrite=not args.no_rewrite,
-                project_context=project_context
+                project_context=project_context,
+                tool_context=tool_context,
+                current_time=current_time
             )
 
             # Update conversation history with the rewritten version for future context

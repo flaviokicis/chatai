@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain.chat_models import init_chat_model
 
-from .langfuse_clean import trace_llm_method
+from langfuse import get_client, observe
 from .llm import LLMClient
 
 if TYPE_CHECKING:
@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 class LangChainToolsLLM(LLMClient):
     def __init__(self, chat_model: BaseChatModel) -> None:
         self._chat = chat_model
-        self._rewrite_chat = None  # lazy-inited lightweight model for rewrite
+
+        self._langfuse = get_client()
 
     @property
     def model_name(self) -> str:
@@ -35,68 +36,87 @@ class LangChainToolsLLM(LLMClient):
             return "gpt-4"
         return class_name
 
-    @trace_llm_method("langchain_extract")
     def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
-        with_tools = self._chat.bind_tools(tools)
-        result = with_tools.invoke(prompt)
+        # Start Langfuse generation with proper cost tracking
+        generation = self._langfuse.start_observation(
+            name="langchain_extract",
+            as_type="generation",
+            model=self.model_name,
+            input=prompt,
+            metadata={
+                "operation": "tool_calling",
+                "tools_available": [getattr(t, "__name__", str(t)) for t in tools],
+                "tools_count": len(tools),
+            }
+        )
 
-        content = getattr(result, "content", None)
-        raw_calls: list[dict[str, Any]] = getattr(result, "tool_calls", [])
-
-        calls: list[dict[str, Any]] = []
-        for tc in raw_calls:
-            name = tc.get("name")
-            args_raw = tc.get("args", {}) or {}
-            args: dict[str, Any] | None
-            if isinstance(args_raw, str):
-                try:
-                    parsed = json.loads(args_raw)
-                    args = parsed if isinstance(parsed, dict) else {}
-                except Exception:
-                    args = {}
-            elif isinstance(args_raw, dict):
-                args = args_raw
-            else:
-                args = {}
-            calls.append({"name": name, "arguments": args})
-
-        out: dict[str, Any] = {"content": content, "tool_calls": calls}
-
-        # Backwards compatibility: expose first tool call's args at top level
-        if calls:
-            chosen = None
-            for name in ("UpdateAnswersFlow", "RequestHumanHandoff"):
-                chosen = next((c for c in calls if c.get("name") == name), None)
-                if chosen:
-                    break
-            if chosen is None:
-                chosen = calls[0]
-            flat_args = dict(chosen.get("arguments") or {})
-            if "__tool_name__" not in flat_args:
-                flat_args["__tool_name__"] = str(chosen.get("name", ""))
-            out.update(flat_args)
-
-        return out
-
-    @trace_llm_method("langchain_rewrite")
-    def rewrite(self, instruction: str, text: str) -> str:  # type: ignore[override]
         try:
-            # Use a cheaper model for style rewriting
-            if self._rewrite_chat is None:
-                self._rewrite_chat = init_chat_model(
-                    "gemini-2.5-flash-lite", model_provider="google_genai"
-                )
+            with_tools = self._chat.bind_tools(tools)
+            result = with_tools.invoke(prompt)
 
-            prompt = (
-                f"Instruction: {instruction}\n"
-                f"Original: {text}\n"
-                "Rewrite naturally as a friendly human attendant. Keep the meaning, vary wording slightly, and avoid repetition."
-            )
-
-            result = self._rewrite_chat.invoke(prompt)
             content = getattr(result, "content", None)
+            raw_calls: list[dict[str, Any]] = getattr(result, "tool_calls", [])
+
+            # Extract token usage if available
+            usage = getattr(result, "usage_metadata", None) or getattr(result, "response_metadata", {}).get("usage", {})
             
-            output_text = content.strip() if isinstance(content, str) and content.strip() else text
-            return output_text
-        except Exception:
-            return text
+            calls: list[dict[str, Any]] = []
+            for tc in raw_calls:
+                name = tc.get("name")
+                args_raw = tc.get("args", {}) or {}
+                args: dict[str, Any] | None
+                if isinstance(args_raw, str):
+                    try:
+                        parsed = json.loads(args_raw)
+                        args = parsed if isinstance(parsed, dict) else {}
+                    except Exception:
+                        args = {}
+                elif isinstance(args_raw, dict):
+                    args = args_raw
+                else:
+                    args = {}
+                calls.append({"name": name, "arguments": args})
+
+            out: dict[str, Any] = {"content": content, "tool_calls": calls}
+
+            # Backwards compatibility: expose first tool call's args at top level
+            if calls:
+                chosen = None
+                for name in ("UpdateAnswersFlow", "RequestHumanHandoff"):
+                    chosen = next((c for c in calls if c.get("name") == name), None)
+                    if chosen:
+                        break
+                if chosen is None:
+                    chosen = calls[0]
+                flat_args = dict(chosen.get("arguments") or {})
+                if "__tool_name__" not in flat_args:
+                    flat_args["__tool_name__"] = str(chosen.get("name", ""))
+                out.update(flat_args)
+
+            # Update generation with output and usage data
+            generation.update(
+                output=content or json.dumps(out),
+                usage={
+                    "input_tokens": usage.get("input_tokens") or usage.get("prompt_tokens", 0),
+                    "output_tokens": usage.get("output_tokens") or usage.get("completion_tokens", 0),
+                    "total_tokens": usage.get("total_tokens", 0),
+                } if usage else None,
+                metadata={
+                    "selected_tool": flat_args.get("__tool_name__") if calls else None,
+                    "tools_called": len(calls),
+                    "has_content": bool(content),
+                }
+            )
+            generation.end()
+
+            return out
+            
+        except Exception as e:
+            generation.update(
+                output=f"ERROR: {e}",
+                metadata={"error": str(e), "error_type": type(e).__name__}
+            )
+            generation.end()
+            raise
+
+

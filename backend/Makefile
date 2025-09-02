@@ -67,19 +67,19 @@ setup-db: reset-db seed-db
 flow:
 	. .venv/bin/activate && uv run python -m app.flow_core.cli ./playground/flow_example.json
 
-# Run the Flow Core CLI with LLM (Gemini) filling answers via tools
+# Run the Flow Core CLI with LLM (GPT-5) filling answers via tools
 .PHONY: flow-llm
 flow-llm:
-	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --model gemini-2.5-flash --tenant default
+	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --model gpt-5 --tenant default
 
 .PHONY: flow-llm-raw
 flow-llm-raw:
-	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --no-rewrite --model gemini-2.5-flash --tenant default
+	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --no-rewrite --model gpt-5 --tenant default
 
 # Run the Flow Core CLI with LLM using the JSON file (for testing without database)
 .PHONY: flow-llm-file
 flow-llm-file:
-	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --model gemini-2.5-flash ./playground/flow_example.json
+	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --model gpt-5 ./playground/flow_example.json
 
 # Render Mermaid HTML from a question graph JSON
 # Usage: make render-graph GRAPH=playground/some_graph.json

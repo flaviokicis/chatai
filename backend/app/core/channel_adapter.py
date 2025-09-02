@@ -54,6 +54,8 @@ class ConversationalRewriter:
         enable_rewrite: bool = True,
         project_context: ProjectContext | None = None,  # type: ignore[name-defined]
         is_completion: bool = False,
+        tool_context: dict[str, str] | None = None,
+        current_time: str | None = None,
     ) -> list[dict[str, Any]]:
         """Rewrite a message into conversational multi-message format.
 
@@ -78,6 +80,8 @@ class ConversationalRewriter:
                 max_followups=max_followups,
                 project_context=project_context,
                 is_completion=is_completion,
+                tool_context=tool_context,
+                current_time=current_time,
             )
         except Exception:
             # Fallback to single message
@@ -90,38 +94,80 @@ class ConversationalRewriter:
         latest_user_input: str | None = None,
     ) -> list[dict[str, str]]:
         """Build chat history from various sources."""
+        import datetime
+        
         chat_window: list[dict[str, str]] = []
 
-        # From LangChain history (Redis/memory)
+        # From LangChain history (Redis/memory) - EXCLUDE current message being processed
         try:
             if langchain_history and hasattr(langchain_history, "messages"):
                 messages = list(getattr(langchain_history, "messages", []))
+                # Skip the last message if it matches the current user input (avoid including current message)
+                if messages and latest_user_input:
+                    last_msg = messages[-1]
+                    last_content = getattr(last_msg, "content", "")
+                    if last_content == latest_user_input:
+                        messages = messages[:-1]  # Remove current message from history
+                
+                # CRITICAL: Also remove the last assistant message since that's what we're rewriting
+                # We don't want the message being rewritten to appear in its own context
+                if messages and len(messages) > 0:
+                    last_msg = messages[-1]
+                    last_role = getattr(last_msg, "type", None) or getattr(last_msg, "role", None)
+                    if last_role in ["assistant", "ai"]:
+                        messages = messages[:-1]  # Remove the assistant message being rewritten
+                
                 for m in messages:
                     role = getattr(m, "type", None) or getattr(m, "role", None) or "assistant"
                     content = getattr(m, "content", "")
                     if isinstance(content, list):
                         # Some models return list of content parts
                         content = " ".join(str(getattr(p, "text", p)) for p in content)
-                    chat_window.append({"role": str(role), "content": str(content)})
+                    
+                    # Add timestamp for better context
+                    timestamp = datetime.datetime.now().strftime("%H:%M")
+                    chat_window.append({
+                        "role": str(role), 
+                        "content": str(content),
+                        "timestamp": timestamp
+                    })
         except Exception:
             # ignore history extraction failures (non-fatal in adapters)
             pass
 
-        # From flow context history
+        # From flow context history - EXCLUDE current message AND last assistant message
         try:
             if flow_context_history:
-                for turn in flow_context_history:
+                # Convert to list to allow indexing
+                history_list = list(flow_context_history)
+                
+                # Remove the last assistant message since that's what we're rewriting
+                if history_list and len(history_list) > 0:
+                    last_turn = history_list[-1]
+                    last_role = getattr(last_turn, "role", "assistant")
+                    if last_role in ["assistant", "ai"]:
+                        history_list = history_list[:-1]  # Remove the assistant message being rewritten
+                
+                for turn in history_list:
                     role = getattr(turn, "role", "assistant")
                     content = getattr(turn, "content", "")
+                    
+                    # Skip if this matches the current user input
+                    if role == "user" and content == latest_user_input:
+                        continue
+                        
                     if role and content:
-                        chat_window.append({"role": str(role), "content": str(content)})
+                        timestamp = datetime.datetime.now().strftime("%H:%M")
+                        chat_window.append({
+                            "role": str(role), 
+                            "content": str(content),
+                            "timestamp": timestamp
+                        })
         except Exception:
             # ignore context extraction failures
             pass
 
-        # Add latest user input
-        if latest_user_input:
-            chat_window.append({"role": "user", "content": latest_user_input})
+        # DO NOT add latest_user_input to history - it's the current message being processed!
 
         return chat_window
 
