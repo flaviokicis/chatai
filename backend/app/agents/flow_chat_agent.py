@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.agents.flow_modification_tools import ToolResult
+from app.core.langfuse_client import get_langfuse_client
 from app.core.llm import LLMClient
 
 
@@ -35,6 +36,7 @@ class FlowChatAgent:
 
     def __init__(self, llm: LLMClient, tools: Sequence[ToolSpec] | None = None) -> None:
         self.llm = llm
+        self._langfuse = get_langfuse_client()
         self.tools = {t.name: t for t in tools or []}
 
     async def process(
@@ -51,6 +53,37 @@ class FlowChatAgent:
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"FlowChatAgent.process called with flow_id={flow_id}, history_len={len(history)}")
+
+        # Create Langfuse trace for flow chat session
+        trace = None
+        if self._langfuse.is_enabled():
+            # Extract user message from history
+            user_message = ""
+            if history:
+                last_message = history[-1]
+                if last_message.get("role") == "user":
+                    user_message = last_message.get("content", "")
+
+            trace = self._langfuse.create_trace(
+                name="flow_chat_session",
+                session_id=str(flow_id) if flow_id else None,
+                metadata={
+                    "operation": "flow_modification_chat",
+                    "flow_id": str(flow_id) if flow_id else None,
+                    "history_length": len(history),
+                    "simplified_view": simplified_view_enabled,
+                    "active_path": active_path,
+                    "available_tools": list(self.tools.keys()),
+                    "tools_count": len(self.tools),
+                    "user_message_length": len(user_message),
+                },
+                tags=[
+                    "flow_chat", 
+                    "flow_modification",
+                    getattr(self.llm, "model_name", "unknown"),
+                    "simplified" if simplified_view_enabled else "full_view",
+                ],
+            )
 
         messages = list(history)
         outputs: list[str] = []
@@ -108,11 +141,45 @@ class FlowChatAgent:
             else:
                 logger.debug(f"Agent iteration {iteration+1}: Prompt logging disabled in production mode")
 
+            # Trace the LLM call for this iteration
+            if trace:
+                iteration_span = trace.span(
+                    name=f"flow_chat_iteration_{iteration+1}",
+                    input={
+                        "iteration": iteration + 1,
+                        "prompt_length": len(prompt),
+                        "available_tools": len(tool_schemas),
+                        "messages_so_far": len(messages),
+                    },
+                    metadata={
+                        "iteration_number": iteration + 1,
+                        "flow_modified_so_far": flow_modified,
+                        "outputs_generated": len(outputs),
+                        "simplified_view": simplified_view_enabled,
+                    },
+                    tags=[f"iteration_{iteration+1}", "flow_chat_llm"],
+                )
+
             # Run LLM call in executor to avoid blocking event loop
             loop = asyncio.get_event_loop()
             result = await loop.run_in_executor(None, self.llm.extract, prompt, tool_schemas)
             content = result.get("content")
             tool_calls = result.get("tool_calls") or []
+
+            # Update iteration span with results
+            if trace and 'iteration_span' in locals():
+                iteration_span.update(
+                    output={
+                        "content": content,
+                        "tool_calls_count": len(tool_calls),
+                        "tool_calls": [tc.get("name") for tc in tool_calls],
+                    },
+                    metadata={
+                        "content_length": len(content) if content else 0,
+                        "tools_called": len(tool_calls),
+                        "has_content": bool(content),
+                    },
+                )
 
             # DEVELOPMENT MODE ONLY: Append the LLM response to debug file
             if is_development and "log_path" in locals():
@@ -413,6 +480,28 @@ class FlowChatAgent:
         logger.info(f"FlowChatAgent.process complete: returning {len(outputs)} outputs, flow_modified={flow_modified}")
         if flow_modified:
             logger.info(f"Flow modifications: {modification_summary}")
+
+        # Trace the final flow chat results
+        if trace:
+            trace.span(
+                name="flow_chat_completion",
+                input={
+                    "total_iterations": min(iteration + 1, 10),
+                    "flow_modified": flow_modified,
+                },
+                output={
+                    "messages": outputs,
+                    "modification_summary": modification_summary,
+                },
+                metadata={
+                    "messages_generated": len(outputs),
+                    "flow_was_modified": flow_modified,
+                    "modification_count": len(modification_details),
+                    "total_characters": sum(len(msg) for msg in outputs),
+                    "session_successful": True,
+                },
+                tags=["completion", "success" if outputs else "no_output"],
+            )
 
         return FlowChatResponse(
             messages=outputs,

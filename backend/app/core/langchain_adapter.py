@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain.chat_models import init_chat_model
 
+from .langfuse_clean import trace_llm_method
 from .llm import LLMClient
 
 if TYPE_CHECKING:
@@ -34,6 +35,7 @@ class LangChainToolsLLM(LLMClient):
             return "gpt-4"
         return class_name
 
+    @trace_llm_method("langchain_extract")
     def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
         with_tools = self._chat.bind_tools(tools)
         result = with_tools.invoke(prompt)
@@ -76,6 +78,7 @@ class LangChainToolsLLM(LLMClient):
 
         return out
 
+    @trace_llm_method("langchain_rewrite")
     def rewrite(self, instruction: str, text: str) -> str:  # type: ignore[override]
         try:
             # Use a cheaper model for style rewriting
@@ -89,11 +92,11 @@ class LangChainToolsLLM(LLMClient):
                 f"Original: {text}\n"
                 "Rewrite naturally as a friendly human attendant. Keep the meaning, vary wording slightly, and avoid repetition."
             )
+
             result = self._rewrite_chat.invoke(prompt)
             content = getattr(result, "content", None)
-            if isinstance(content, str) and content.strip():
-                return content.strip()
-            # Fallback to original if model returns nothing structured
-            return text
+            
+            output_text = content.strip() if isinstance(content, str) and content.strip() else text
+            return output_text
         except Exception:
             return text

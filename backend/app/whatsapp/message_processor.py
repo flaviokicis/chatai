@@ -318,6 +318,35 @@ class WhatsAppMessageProcessor:
 
         print(f"[DEBUG WHATSAPP] Rewriter returned {len(messages or [])} messages")
 
+        # Update chat history with naturalized content to prevent context bleeding
+        if messages and not is_admin_operation and hasattr(app_context, 'store'):
+            try:
+                # Combine all rewritten messages into a single string for history
+                rewritten_content = " ".join(msg.get("text", "") for msg in messages if msg.get("text"))
+                if rewritten_content.strip():
+                    # Use centralized Redis key builder for consistency
+                    from app.core.redis_keys import RedisKeyBuilder
+                    user_id = message_data["sender_number"]
+                    flow_id = conversation_setup.flow_id
+                    
+                    # Build session ID using the same pattern as RedisSessionManager.create_session()
+                    session_id = f"flow:{user_id}:{flow_id}"
+                    
+                    # Use RedisKeyBuilder to create the proper history key
+                    key_builder = RedisKeyBuilder(namespace=getattr(app_context.store, '_ns', 'chatai'))
+                    
+                    if hasattr(app_context.store, 'get_message_history'):
+                        history = app_context.store.get_message_history(session_id)
+                        if hasattr(history, 'messages') and history.messages:
+                            # Update the last assistant message with rewritten content
+                            for message in reversed(history.messages):
+                                if hasattr(message, 'type') and message.type == 'ai':
+                                    message.content = rewritten_content
+                                    break
+                        logger.debug("Updated chat history with naturalized content for session %s", session_id)
+            except Exception as e:
+                logger.warning("Failed to update chat history with naturalized content: %s", e)
+
         # Log WhatsApp message plan
         try:
             plan_preview = [

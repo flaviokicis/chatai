@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from .langfuse_client import get_langfuse_client, trace_llm_call
 from .prompt_logger import prompt_logger
 
 if TYPE_CHECKING:  # avoid hard import at runtime
@@ -181,7 +182,6 @@ def rewrite_whatsapp_multi(
             "- Adapte-se ao estilo sem repetir sempre as mesmas expressões\n\n"
             "REGRAS DE SAUDAÇÃO (CRÍTICO):\n"
             "- Se o texto original contém saudação (Olá, Oi), preserve-a naturalmente\n"
-            "- NUNCA substitua saudações por 'Entendido', 'Certo', 'Ok' - mantenha o tom acolhedor\n"
             "- Se já há saudação no histórico, evite repetir, mas preserve o tom da mensagem original\n\n"
             "MANTER CONTEXTO DE NEGÓCIO (CRÍTICO):"
             "- SEMPRE mantenha o foco no propósito do negócio (ex: iluminação, saúde, etc.)\n"
@@ -242,6 +242,45 @@ Business: {project_context.project_description if project_context else 'Customer
 === SUA TAREFA ===
 Pegue a mensagem original e torne-a mais natural e conversacional preservando exatamente seu significado e conteúdo.
 """
+
+    # Create Langfuse trace for naturalization
+    langfuse_client = get_langfuse_client()
+    trace = None
+    if langfuse_client.is_enabled():
+        # Extract user context from chat window if available
+        user_id = None
+        session_id = None
+        if chat_window:
+            # Try to extract user/session from chat context
+            for turn in chat_window[-3:]:  # Check last 3 turns for context
+                if turn.get("role") == "user" and "user_id" in str(turn):
+                    # This would need actual user context extraction logic
+                    pass
+
+        trace = langfuse_client.create_trace(
+            name="whatsapp_naturalization",
+            user_id=user_id,
+            session_id=session_id,
+            metadata={
+                "operation": "text_naturalization",
+                "style": "whatsapp_multi",
+                "has_project_context": project_context is not None,
+                "has_custom_style": project_context.communication_style if project_context else False,
+                "is_completion": is_completion,
+                "max_followups": max_followups,
+                "history_messages": len(history_lines),
+                "original_text_length": len(original_text),
+                "instruction_length": len(instruction),
+                "payload_length": len(payload),
+            },
+            tags=[
+                "naturalization", 
+                "whatsapp", 
+                "multi_message",
+                "completion" if is_completion else "conversation",
+                getattr(llm, "model_name", "unknown"),
+            ],
+        )
 
     try:
         raw = llm.rewrite(instruction, payload)
@@ -304,13 +343,68 @@ Pegue a mensagem original e torne-a mais natural e conversacional preservando ex
                 elif d > MAX_FOLLOWUP_DELAY_MS:
                     d = MAX_FOLLOWUP_DELAY_MS
                 out[idx]["delay_ms"] = d
+            # Trace successful naturalization
+            if trace:
+                trace.generation(
+                    name="naturalization_llm_call",
+                    model=getattr(llm, "model_name", "unknown"),
+                    input=payload,
+                    output=raw if isinstance(raw, str) else str(raw),
+                    metadata={
+                        "messages_generated": len(out),
+                        "total_characters": sum(len(str(msg.get("text", ""))) for msg in out),
+                        "avg_delay_ms": sum(int(msg.get("delay_ms", 0)) for msg in out[1:]) / max(len(out) - 1, 1),
+                        "has_markdown_cleanup": clean_raw != raw,
+                        "json_parsed_successfully": True,
+                        "style_applied": "custom" if project_context and project_context.communication_style else "default",
+                    },
+                    tags=["successful_naturalization", "multi_message"],
+                )
+
+                # Trace individual messages
+                for i, msg in enumerate(out):
+                    trace.event(
+                        name=f"message_{i+1}",
+                        input={"position": i+1, "is_first": i == 0},
+                        output={"text": msg.get("text"), "delay_ms": msg.get("delay_ms")},
+                        metadata={
+                            "message_length": len(str(msg.get("text", ""))),
+                            "delay_category": "immediate" if msg.get("delay_ms", 0) == 0 else "delayed",
+                        },
+                    )
+
             return out
-    except Exception:
+    except Exception as e:
+        # Trace the error
+        if trace:
+            trace.event(
+                name="naturalization_error",
+                input={"original_text": original_text, "instruction_length": len(instruction)},
+                output={"error": str(e), "fallback_used": True},
+                metadata={
+                    "error_type": type(e).__name__,
+                    "parsing_stage": "json_parsing" if "json" in str(e).lower() else "llm_call",
+                },
+            )
         # Fall through to deterministic fallback below
         pass
 
     # Simple fallback: if LLM fails, return original text as-is
-    return [{"text": original_text, "delay_ms": 0}]
+    fallback_result = [{"text": original_text, "delay_ms": 0}]
+    
+    # Trace fallback usage
+    if trace:
+        trace.event(
+            name="naturalization_fallback",
+            input={"original_text": original_text},
+            output={"fallback_result": fallback_result},
+            metadata={
+                "fallback_reason": "llm_failure_or_parsing_error",
+                "preserved_original": True,
+            },
+        )
+    
+    return fallback_result
 
 
 def _build_custom_style_instruction(

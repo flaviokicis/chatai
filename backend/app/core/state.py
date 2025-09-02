@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Protocol
+
+logger = logging.getLogger(__name__)
 
 try:
     from langchain_community.chat_message_histories import RedisChatMessageHistory
@@ -65,7 +68,7 @@ class RedisStore:
 
     def _state_key(self, user_id: str, agent_type: str) -> str:
         # Use centralized key builder for consistency with our namespace
-        from app.core.redis_keys import RedisKeyBuilder
+        from app.core.redis_keys import RedisKeyBuilder  # noqa: E402
         key_builder = RedisKeyBuilder(namespace=self._ns)
         return key_builder.conversation_state_key(user_id, agent_type)
 
@@ -121,3 +124,46 @@ class RedisStore:
             client=self._r,
             key_prefix=f"{self._ns}:history:",
         )
+
+    def clear_chat_history(self, user_id: str, agent_type: str | None = None) -> int:
+        """Clear chat history for a user and optionally specific agent type.
+
+        Args:
+            user_id: User identifier (e.g., "whatsapp:5522988544370")
+            agent_type: Optional agent type to clear specific flow history
+
+        Returns:
+            Number of keys deleted
+        """
+        deleted_keys = 0
+
+        try:
+            # Extract phone number for broader matching
+            phone_number = user_id.replace("whatsapp:", "").replace("+", "")
+
+            if agent_type and agent_type.startswith("flow."):
+                # Clear specific flow history
+                flow_id = agent_type
+                patterns = [
+                    f"{self._ns}:history:*{phone_number}*{flow_id}*",
+                    f"{self._ns}:history:*{user_id}*{flow_id}*",
+                ]
+            else:
+                # Clear all chat history for user
+                patterns = [
+                    f"{self._ns}:history:*{phone_number}*",
+                    f"{self._ns}:history:*{user_id}*",
+                ]
+
+            # Delete keys using patterns
+            for pattern in patterns:
+                keys = self._r.keys(pattern)
+                if keys:
+                    deleted_count = self._r.delete(*keys)
+                    deleted_keys += deleted_count
+
+        except Exception as e:
+            # Best-effort clearing; don't fail the handoff if clearing fails
+            logger.warning("Failed to clear chat history for user %s: %s", user_id, e)
+
+        return deleted_keys

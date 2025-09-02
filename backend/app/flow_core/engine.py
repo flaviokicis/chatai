@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from app.core.langfuse_client import get_langfuse_client
+
 # REMOVED: dev_config import - Use DEVELOPMENT_MODE environment variable instead
 
 
@@ -62,6 +64,75 @@ class LLMFlowEngine:
         self._flow = compiled
         self._llm = llm
         self._strict_mode = strict_mode
+        self._langfuse = get_langfuse_client()
+
+    def _traced_llm_extract(self, instruction: str, tools: list[type], operation_name: str, metadata: dict[str, Any] | None = None, tags: list[str] | None = None) -> dict[str, Any]:
+        """Wrapper for LLM extract calls with Langfuse tracing."""
+        if self._langfuse.is_enabled():
+            trace = self._langfuse.create_trace(
+                name=f"engine_{operation_name}",
+                metadata={
+                    "operation": operation_name,
+                    "instruction_length": len(instruction),
+                    "tools_count": len(tools),
+                    **(metadata or {}),
+                },
+                tags=["flow_engine", operation_name] + (tags or []),
+            )
+            
+            result = self._llm.extract(instruction, tools)
+            
+            if trace:
+                trace.generation(
+                    name=f"{operation_name}_llm_extract",
+                    model=getattr(self._llm, "model_name", "unknown"),
+                    input=instruction,
+                    output=str(result),
+                    metadata={
+                        "tools_available": [t.__name__ for t in tools],
+                        "selected_tool": result.get("__tool_name__") if isinstance(result, dict) else None,
+                        **(metadata or {}),
+                    },
+                    tags=["extract", operation_name],
+                )
+            
+            return result
+        else:
+            return self._llm.extract(instruction, tools)
+
+    def _traced_llm_rewrite(self, instruction: str, text: str, operation_name: str, metadata: dict[str, Any] | None = None, tags: list[str] | None = None) -> str:
+        """Wrapper for LLM rewrite calls with Langfuse tracing."""
+        if self._langfuse.is_enabled():
+            trace = self._langfuse.create_trace(
+                name=f"engine_{operation_name}",
+                metadata={
+                    "operation": operation_name,
+                    "instruction_length": len(instruction),
+                    "text_length": len(text),
+                    **(metadata or {}),
+                },
+                tags=["flow_engine", operation_name] + (tags or []),
+            )
+            
+            result = self._llm.rewrite(instruction, text)
+            
+            if trace:
+                trace.generation(
+                    name=f"{operation_name}_llm_rewrite",
+                    model=getattr(self._llm, "model_name", "unknown"),
+                    input=instruction,
+                    output=result,
+                    metadata={
+                        "original_text": text,
+                        "rewritten_length": len(result),
+                        **(metadata or {}),
+                    },
+                    tags=["rewrite", operation_name],
+                )
+            
+            return result
+        else:
+            return self._llm.rewrite(instruction, text)
 
     def initialize_context(self, existing_context: FlowContext | None = None) -> FlowContext:
         """Initialize or restore flow context."""
@@ -860,8 +931,38 @@ class LLMFlowEngine:
                 f"Generate a friendly message asking them to provide a valid answer. "
                 f"Be specific about what's expected."
             )
-            return self._llm.rewrite(instruction, "")
-        except Exception:
+            
+            return self._traced_llm_rewrite(
+                instruction, 
+                "", 
+                "validation_error_message",
+                metadata={
+                    "node_id": node.id,
+                    "invalid_answer": str(answer),
+                    "node_prompt": node.prompt,
+                },
+                tags=["validation_error", "user_feedback"]
+            )
+        except Exception as e:
+            # Trace validation error fallback
+            if self._langfuse.is_enabled():
+                trace = self._langfuse.create_trace(
+                    name="validation_error_fallback",
+                    metadata={
+                        "operation": "validation_error_fallback",
+                        "error": str(e),
+                        "node_id": node.id,
+                    },
+                    tags=["validation_error", "fallback", "error"],
+                )
+                if trace:
+                    trace.event(
+                        name="validation_rewrite_error",
+                        input={"answer": answer, "node_prompt": node.prompt},
+                        output={"error": str(e), "fallback_message": True},
+                        metadata={"error_type": type(e).__name__},
+                    )
+            
             return f"Não consegui processar '{answer}'. Você pode tentar novamente? {node.prompt}"
 
     def _evaluate_guard(self, edge: Any, ctx: FlowContext, event: dict[str, Any] | None) -> bool:
@@ -995,7 +1096,17 @@ class LLMFlowEngine:
                 context_prompt = project_context.get_decision_context_prompt()
                 instruction = f"{instruction}\n{context_prompt}"
 
-            result = self._llm.extract(instruction, [SelectFlowEdge])
+            result = self._traced_llm_extract(
+                instruction, 
+                [SelectFlowEdge], 
+                "select_flow_edge",
+                metadata={
+                    "decision_node_id": node.id,
+                    "edges_count": len(edges),
+                    "edges": [edge.label for edge in edges],
+                },
+                tags=["decision", "path_selection"]
+            )
             if result.get("__tool_name__") == "SelectFlowEdge":
                 selected_index = result.get("selected_edge_index")
                 if selected_index is not None and 0 <= selected_index < len(edges):
@@ -1182,7 +1293,17 @@ class LLMFlowEngine:
                 f"Reply with just the number of the best question to ask next."
             )
 
-            result = self._llm.extract(instruction, [SelectNextQuestion])
+            result = self._traced_llm_extract(
+                instruction,
+                [SelectNextQuestion],
+                "select_next_question",
+                metadata={
+                    "questions_count": len(questions),
+                    "questions": [q.id for q in questions],
+                    "context_answers": len(ctx.answers),
+                },
+                tags=["question_selection", "multi_question"]
+            )
             if result.get("__tool_name__") == "SelectNextQuestion":
                 selected_index = result.get("selected_question_index")
                 if selected_index is not None and 0 <= selected_index < len(questions):
@@ -1274,7 +1395,15 @@ class LLMFlowEngine:
         """Get the current node from context."""
         if not ctx.current_node_id:
             return None
-        return self._flow.nodes.get(ctx.current_node_id)
+        node = self._flow.nodes.get(ctx.current_node_id)
+        
+        # Ensure pending_field is synchronized with current question node
+        if node and hasattr(node, 'key') and hasattr(node, '__class__') and node.__class__.__name__ == 'QuestionNode':
+            if ctx.pending_field != node.key:
+                print(f"[DEBUG ENGINE] Synchronizing pending_field: {ctx.pending_field} -> {node.key}")
+                ctx.pending_field = node.key
+                
+        return node
 
     def _generate_revisit_prompt(self, node: QuestionNode, ctx: FlowContext) -> str:
         """Generate prompt for revisiting a question."""
@@ -1312,7 +1441,17 @@ class LLMFlowEngine:
                 f"Context: {context_str}\n"
                 f"Question: {prompt}"
             )
-            return self._llm.rewrite(instruction, "")
+            return self._traced_llm_rewrite(
+                instruction, 
+                "", 
+                "contextualize_prompt",
+                metadata={
+                    "original_prompt": prompt,
+                    "context_items": len(recent_context),
+                    "context_length": len(context_str),
+                },
+                tags=["prompt_contextualization"]
+            )
         except Exception:
             return prompt
 
@@ -1392,7 +1531,17 @@ Return EXACTLY one of the available paths, or 'none' if no good match.
             
 Respond with just the path name, nothing else."""
 
-            result = self._llm.rewrite(instruction, "")
+            result = self._traced_llm_rewrite(
+                instruction, 
+                "", 
+                "normalize_path_value",
+                metadata={
+                    "original_value": value,
+                    "available_paths": ctx.available_paths,
+                    "paths_count": len(ctx.available_paths),
+                },
+                tags=["path_normalization", "path_matching"]
+            )
             normalized = result.strip().strip("'\"")
 
             # Verify the result is actually one of the available paths
