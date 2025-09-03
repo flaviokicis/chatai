@@ -167,7 +167,17 @@ class ConversationalRewriter:
             # ignore context extraction failures
             pass
 
-        # DO NOT add latest_user_input to history - it's the current message being processed!
+        # Include the latest user input as the most recent turn for better rewrite context
+        try:
+            if latest_user_input and isinstance(latest_user_input, str) and latest_user_input.strip():
+                timestamp = datetime.datetime.now().strftime("%H:%M")
+                chat_window.append({
+                    "role": "user",
+                    "content": latest_user_input,
+                    "timestamp": timestamp
+                })
+        except Exception:
+            pass
 
         return chat_window
 

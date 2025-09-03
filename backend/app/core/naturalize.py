@@ -316,6 +316,10 @@ def rewrite_whatsapp_multi(
     
     # Build tool context section if provided
     tool_context_section = ""
+    # Extract ack message early for fallback usage
+    ack_message_txt = ""
+    if isinstance(tool_context, dict):
+        ack_message_txt = str(tool_context.get("ack_message", "") or "").strip()
     if tool_context and tool_context.get("tool_name"):
         tool_name = tool_context.get("tool_name", "")
         tool_description = _get_tool_description_pt(tool_name)
@@ -542,7 +546,18 @@ LEMBRE-SE: Após primeira mensagem, NUNCA comece com 'Claro!', 'Poxa!', 'Legal!'
         )
         generation.end()
 
-    # Simple fallback: if LLM fails, return original text as-is
+    # Fallback: if LLM fails, use ack_message (if provided) then the original text
+    if ack_message_txt:
+        fallback_msgs: list[dict[str, int | str]] = [
+            {"text": ack_message_txt, "delay_ms": 0}
+        ]
+        # Ensure a follow-up bubble with the question/content
+        safe_text = (original_text or "").strip()
+        if safe_text:
+            fallback_msgs.append({"text": safe_text, "delay_ms": MIN_FOLLOWUP_DELAY_MS})
+        return fallback_msgs
+
+    # Simple fallback: if no ack available, return original text as-is
     return [{"text": original_text, "delay_ms": 0}]
 
 
