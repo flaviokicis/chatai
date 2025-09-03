@@ -351,6 +351,12 @@ Recent Conversation:
           Example: If pending field is "budget" and user says "até 1000 reais", call UpdateAnswersFlow with: {{"updates": {{"budget": "até 1000 reais"}}, "validated": true, "reasoning": "User provided budget amount"}}
         - ProvideInformation: use for meta-level acknowledgments or brief information that does NOT change state
           (e.g., reassuring the user that their case is fine, answering "is that a problem?", or offering a quick tip).
+          You MAY include a concise 'ack_message' (<= 140 chars) to be shown before the next question. Keep it neutral
+          and avoid adding new business details not explicitly asked by the user.
+          OFF-TOPIC HANDLING (stay on track): If the user's message is clearly unrelated to the current question/flow
+          (e.g., random small talk or requests unrelated to the business/use case) and does not indicate a valid path
+          change, prefer ProvideInformation with a short 'ack_message' that politely redirects to the current question
+          (e.g., "Posso te ajudar com isso depois. Pra avançarmos aqui: <original question>"). Do NOT chase the off-topic thread.
 
         - SkipQuestion: use if the user explicitly wants to skip (and skipping is allowed by policy).
         - RevisitQuestion: use ONLY when the user is correcting a SPECIFIC PREVIOUS ANSWER, not changing context/path.
@@ -631,6 +637,8 @@ Recent Conversation:
             )
 
         if tool_name == "ProvideInformation":
+            # Allow the tool to attach a short acknowledgement/informative sentence
+            ack_message = result.get("ack_message")
             return FlowResponse(
                 updates={},
                 message="",
@@ -639,6 +647,7 @@ Recent Conversation:
                     "information_type": result.get("information_type"),
                     "related_to": result.get("related_to"),
                     "reasoning": result.get("reasoning"),
+                    "ack_message": ack_message,
                 },
             )
 

@@ -219,6 +219,9 @@ class FlowTurnRunner:
                 engine_event["reasoning"] = responder_result.metadata.get("reasoning")
             elif responder_result.metadata.get("reason"):
                 engine_event["reasoning"] = responder_result.metadata.get("reason")
+            # Forward optional short acknowledgement from tools like ProvideInformation
+            if responder_result.metadata.get("ack_message"):
+                engine_event["ack_message"] = responder_result.metadata.get("ack_message")
         # Do not pass any text from tool LLM; the rewrite layer will craft the user-facing message.
         # We only pass structured metadata to drive engine behavior.
         # Pass structured metadata

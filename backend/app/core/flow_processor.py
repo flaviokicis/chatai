@@ -401,6 +401,14 @@ CRITICAL FLOW SAFETY RULES:
                                             success_msg = "✅ Modificação aplicada com sucesso! As alterações já estão ativas no fluxo."
                                             if result.modification_summary:
                                                 success_msg += f"\n\nResumo: {result.modification_summary}"
+                                            success_msg += "\n\n🔄 O fluxo foi reiniciado. A conversa agora começa do início para que você possa testar as mudanças."
+                                            
+                                            # Clear session to restart conversation
+                                            try:
+                                                self._session_manager.clear_session(session_id)
+                                                logger.info(f"Cleared session {session_id} after flow modification")
+                                            except Exception as e:
+                                                logger.warning(f"Failed to clear session after flow modification: {e}")
                                         else:
                                             success_msg = "ℹ️ Instrução processada, mas nenhuma modificação foi necessária no fluxo."
                                             

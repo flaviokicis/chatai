@@ -236,9 +236,9 @@ class LLMFlowEngine:
             print(f"[DEBUG ENGINE] Returning generic error response: {error_response}")
             return error_response
 
-        # The runner no longer forwards LLM-generated text; all user-facing phrasing is done by the rewrite model.
-        # Keep ack_text empty to avoid mixing tool LLM text with final outbound.
-        ack_text = ""
+        # The runner no longer forwards LLM-generated long text; all user-facing phrasing is done by the rewrite model.
+        # Allow a short acknowledgement (ack_text) to be prepended when explicitly provided by the tool.
+        ack_text = str(event.get("ack_message") or "").strip()
 
         # Tool-provided messages are ignored at this layer to avoid double messaging.
         # The final outbound will be rewritten later with full context.
@@ -419,12 +419,16 @@ class LLMFlowEngine:
             )
 
         if tool_name == "ProvideInformation":
-            # Stay on the same node; simply regenerate the contextual prompt.
-            # The rewriter will handle adding a brief empathetic acknowledgement.
+            # Stay on the same node. Use the base prompt as the message, and pass any ack as metadata for rewriter context.
+            base = self._generate_contextual_prompt(node, ctx, project_context)
             return EngineResponse(
                 kind="prompt",
-                message=self._generate_contextual_prompt(node, ctx, project_context),
+                message=base,
                 node_id=node.id,
+                metadata={
+                    "tool_name": "ProvideInformation",
+                    **({"ack_message": ack_text} if ack_text else {}),
+                },
             )
 
 

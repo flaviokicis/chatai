@@ -124,6 +124,14 @@ class ProvideInformation(FlowResponse):
         default=None,
         description="Question key this information relates to",
     )
+    ack_message: str | None = Field(
+        default=None,
+        description=(
+            "Optional short acknowledgement or brief informative sentence (max ~140 chars) "
+            "to show before the next question. Must not add new business details beyond "
+            "what the user explicitly asked; keep it concise and neutral."
+        ),
+    )
 
 
 class ConfirmCompletion(FlowResponse):
@@ -158,7 +166,7 @@ class NavigateFlow(FlowResponse):
 
 class PathCorrection(FlowResponse):
     """Correct a previously selected path in the flow.
-    
+
     Use this when the user is correcting a path choice they made earlier,
     typically with phrases like "actually it's...", "I meant...", "sorry, it's...".
     This is different from RevisitQuestion which is for changing answer values.

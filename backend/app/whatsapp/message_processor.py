@@ -313,8 +313,10 @@ class WhatsAppMessageProcessor:
             if metadata.get("tool_name"):
                 tool_context = {
                     "tool_name": metadata.get("tool_name", ""),
-                    "description": metadata.get("tool_description", "")
+                    "description": metadata.get("tool_description", ""),
                 }
+                if metadata.get("ack_message"):
+                    tool_context["ack_message"] = metadata.get("ack_message")
             
             # Get current time in same format as conversation timestamps
             import datetime

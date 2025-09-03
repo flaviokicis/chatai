@@ -152,11 +152,11 @@ def run_cli() -> None:
 
             # Build tool context for better naturalization
             tool_context = None
-            if hasattr(result, 'metadata') and result.metadata.get("tool_name"):
-                tool_context = {
-                    "tool_name": result.metadata.get("tool_name", ""),
-                    "description": result.metadata.get("tool_description", "")
-                }
+            # Prefer explicit tool_name from TurnResult and attach ack_message if engine provided it in metadata
+            if getattr(result, "tool_name", None):
+                tool_context = {"tool_name": result.tool_name}
+                # FlowTurnRunner doesn't expose metadata directly; use final_response from engine if needed
+                # Here, result.assistant_message is the base text; ack (if any) is for context only
             
             # Get current time in same format as conversation timestamps
             import datetime
