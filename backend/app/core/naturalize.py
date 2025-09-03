@@ -51,6 +51,7 @@ def _build_base_instruction(is_completion: bool = False) -> str:
         "- O importante é manter a INTENÇÃO e OBJETIVO da comunicação, não as palavras\n"
         "- Por exemplo: 'What is your name?' pode virar 'Oi! Tudo bem? Posso saber seu nome?'\n"
         "- A última mensagem deve sempre direcionar para o próximo passo da conversa\n"
+        "- NUNCA faça suposições sobre o que o usuário quer - baseie-se APENAS no que foi dito\n"
         "Você está naturalizando mensagens para soar mais brasileira e calorosa no WhatsApp.\n\n"
         
         "REGRA FUNDAMENTAL - PRESERVE A INTENÇÃO, NÃO AS PALAVRAS:\n"
@@ -62,6 +63,8 @@ def _build_base_instruction(is_completion: bool = False) -> str:
         "- Use o histórico apenas para entender contexto, JAMAIS para copiar conteúdo\n"
         "- IGNORE completamente o Business Context - ele NÃO é parte da conversa\n"
         "- Business Context é apenas para você entender que empresa representa\n"
+        "- NUNCA assuma interesse do usuário baseado no que a empresa faz\n"
+        "- Só porque a empresa vende algo não significa ainda que o usuário quer tal algo sem que ele diga\n"
         "- NÃO REPITA capacidades da empresa (experiência, qualidade, etc.) se já foram mencionadas\n\n"
         
         "ANÁLISE CONTEXTUAL (FAÇA ISSO PRIMEIRO):\n"
@@ -79,8 +82,10 @@ def _build_base_instruction(is_completion: bool = False) -> str:
         "❌ Começar toda resposta com acknowledgment: 'Claro!', 'Legal!', 'Entendi!' → ROBÓTICO\n"
         "❌ Msg 1: 'Legal sua quadra de tênis!' → Msg 2: 'Que bacana sua quadra!' → REDUNDANTE\n"
         "❌ Msg 1: 'Temos experiência!' → Msg 2: 'Somos experientes!' → REPETINDO FATOS\n"
-        "✅ Primeira msg: saudação + acknowledgment → Segunda: nova info → Terceira: próximo passo\n"
-        "✅ Se já disse algo, NUNCA repita - sempre adicione valor novo\n\n"
+        "❌ Usuário: 'Olá' → Você: 'Vejo que tem interesse em LED!' → INVENTANDO FATOS\n"
+        "❌ Adicionar 'Que legal!' ou 'Vejo que...' sobre coisas não mencionadas → FABRICAÇÃO\n"
+        "✅ Primeira msg: saudação + pergunta direta → Segunda: nova info → Terceira: próximo passo\n"
+        "✅ Se não sabe algo, PERGUNTE - não invente ou assuma\n\n"
         
         "ADAPTAÇÃO CONTEXTUAL:\n"
         "- Adapte o tom baseado no contexto da conversa\n"
@@ -377,6 +382,7 @@ Business: {project_context.project_description}
 === SUA TAREFA ===
 Pegue a INTENÇÃO da mensagem original e expresse-a de forma completamente natural e conversacional.
 Não se prenda às palavras originais - crie uma comunicação genuinamente humana e calorosa.
+CRÍTICO: NÃO invente fatos! Se o usuário não disse ter interesse em algo, NÃO diga "vejo que tem interesse".
 LEMBRE-SE: Após primeira mensagem, NUNCA comece com 'Claro!', 'Poxa!', 'Legal!' - vá direto ao ponto!
 """
 
