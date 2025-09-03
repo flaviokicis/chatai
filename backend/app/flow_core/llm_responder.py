@@ -328,14 +328,22 @@ Recent Conversation:
         Choose the most appropriate tool based on the user's intent:
         - UpdateAnswersFlow: use when you can extract an answer for the CURRENT pending field.
           
-          MANDATORY ARGUMENTS FOR UpdateAnswersFlow:
-          1. "updates": {{"{pending_field}": "extracted_value"}} ← THIS IS REQUIRED, DO NOT OMIT
-          2. "validated": true/false
-          3. "reasoning": "brief explanation"
+          CRITICAL FOR UpdateAnswersFlow - THE "updates" FIELD IS THE MOST IMPORTANT:
+          The ENTIRE PURPOSE of UpdateAnswersFlow is to provide the "updates" field with the extracted answer.
+          Without "updates", the tool call is USELESS and will FAIL.
+          
+          MANDATORY STRUCTURE (all fields required):
+          {{
+            "updates": {{"{pending_field}": "extracted_value"}},  ← THIS IS THE MAIN FIELD, NEVER OMIT
+            "validated": true/false,
+            "reasoning": "brief explanation"
+          }}
           
           EXAMPLES FOR CURRENT FIELD "{pending_field}":
           - If user says "campo de futebol", you MUST call UpdateAnswersFlow with:
             {{"updates": {{"{pending_field}": "campo de futebol"}}, "validated": true, "reasoning": "User provided interest"}}
+          - If user says "eu tenho um campo de futebol", extract the key part:
+            {{"updates": {{"{pending_field}": "campo de futebol"}}, "validated": true, "reasoning": "User mentioned football field"}}
           - If user says "sim" or "yes", you MUST call UpdateAnswersFlow with:
             {{"updates": {{"{pending_field}": "sim"}}, "validated": true, "reasoning": "User confirmed affirmatively"}}
           - If user says "não" or "no", you MUST call UpdateAnswersFlow with:
@@ -426,6 +434,8 @@ Recent Conversation:
         - The updates field must contain: {{"{pending_field}": "extracted_answer_value"}}
         - Example: {{"updates": {{"{pending_field}": "sim"}}, "validated": true, "reasoning": "User confirmed"}}
         - DO NOT return UpdateAnswersFlow without the updates field - this will cause a system error
+        - COMMON MISTAKE: Providing only confidence/reasoning without updates - THIS WILL FAIL
+        - The "updates" field is what actually captures the user's answer - it's not optional!
         """
 
         # Prepend any agent-provided custom instructions at the very top

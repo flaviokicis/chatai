@@ -32,6 +32,7 @@ class TurnResult:
     escalate: bool
     terminal: bool
     ctx: FlowContext  # updated context
+    metadata: dict[str, Any] | None = None  # Tool metadata including ack_message
 
 
 class FlowTurnRunner:
@@ -115,10 +116,11 @@ class FlowTurnRunner:
                 ctx=ctx,
             )
 
-        # If no user message, just return the prompt (record assistant turn for first interaction)
+        # If no user message, just return the prompt (DO NOT record turn - let channel adapter do it)
         if not user_message or not self._responder:
-            if engine_response.kind == "prompt" and engine_response.message:
-                ctx.add_turn("assistant", engine_response.message, engine_response.node_id)
+            # DO NOT add to history here - channel adapter will add naturalized version
+            # if engine_response.kind == "prompt" and engine_response.message:
+            #     ctx.add_turn("assistant", engine_response.message, engine_response.node_id)
             return TurnResult(
                 assistant_message=engine_response.message,
                 answers_diff={},
@@ -241,9 +243,6 @@ class FlowTurnRunner:
         final_response = self._engine.process(ctx, None, engine_event)
         print(f"[DEBUG RUNNER] Engine returned: kind={final_response.kind}, message='{final_response.message[:100] if final_response.message else None}...'")
 
-        # Record assistant message in history (will be updated with rewritten version by channel adapter)
-        if final_response.message:
-            ctx.add_turn("assistant", final_response.message, final_response.node_id)
 
         # Calculate answers diff
         answers_diff = {}
@@ -258,6 +257,7 @@ class FlowTurnRunner:
             escalate=responder_result.escalate or final_response.kind == "escalate",
             terminal=final_response.kind == "terminal",
             ctx=ctx,
+            metadata=responder_result.metadata,  # Pass tool metadata for rewriter context
         )
         print(f"[DEBUG RUNNER] Final TurnResult: message='{result.assistant_message[:100] if result.assistant_message else None}...', tool={result.tool_name}")
         return result

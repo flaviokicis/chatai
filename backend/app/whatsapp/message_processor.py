@@ -284,8 +284,17 @@ class WhatsAppMessageProcessor:
         """Apply WhatsApp-specific message rewriting."""
         rewriter = ConversationalRewriter(getattr(app_context, "llm", None))
 
+        # Debug: Check what's in the flow context history
+        flow_history = getattr(flow_response.context, "history", None) if flow_response.context else None
+        if flow_history:
+            logger.debug(f"Flow context history has {len(list(flow_history))} turns")
+            for i, turn in enumerate(flow_history):
+                logger.debug(f"  Turn {i}: {getattr(turn, 'role', 'unknown')} - {str(getattr(turn, 'content', ''))[:50]}...")
+        else:
+            logger.debug("No flow context history available")
+        
         chat_history = rewriter.build_chat_history(
-            flow_context_history=getattr(flow_response.context, "history", None) if flow_response.context else None,
+            flow_context_history=flow_history,
             latest_user_input=message_data["message_text"]
         )
 
@@ -334,34 +343,49 @@ class WhatsAppMessageProcessor:
 
         print(f"[DEBUG WHATSAPP] Rewriter returned {len(messages or [])} messages")
 
-        # Update chat history with naturalized content to prevent context bleeding
-        if messages and not is_admin_operation and hasattr(app_context, 'store'):
+        # Add naturalized message to flow context history for proper rewriter context
+        if messages and flow_response.context:
             try:
                 # Combine all rewritten messages into a single string for history
                 rewritten_content = " ".join(msg.get("text", "") for msg in messages if msg.get("text"))
                 if rewritten_content.strip():
-                    # Use centralized Redis key builder for consistency
+                    # Add to flow context history (which the rewriter uses)
+                    flow_response.context.add_turn(
+                        "assistant", 
+                        rewritten_content,
+                        flow_response.context.current_node_id
+                    )
+                    logger.debug("Added naturalized content to flow context history")
+                    
+                    # Save the updated context with naturalized message
+                    from app.services.session_manager import RedisSessionManager
                     from app.core.redis_keys import RedisKeyBuilder
+                    
+                    session_manager = RedisSessionManager(app_context.store)
                     user_id = message_data["sender_number"]
                     flow_id = conversation_setup.flow_id
                     
-                    # Build session ID using the same pattern as RedisSessionManager.create_session()
+                    # Use the same session ID pattern as RedisSessionManager.create_session()
                     session_id = f"flow:{user_id}:{flow_id}"
+                    session_manager.save_context(session_id, flow_response.context)
+                    logger.debug("Saved updated context with naturalized history")
                     
-                    # Use RedisKeyBuilder to create the proper history key
-                    key_builder = RedisKeyBuilder(namespace=getattr(app_context.store, '_ns', 'chatai'))
-                    
-                    if hasattr(app_context.store, 'get_message_history'):
-                        history = app_context.store.get_message_history(session_id)
-                        if hasattr(history, 'messages') and history.messages:
-                            # Update the last assistant message with rewritten content
-                            for message in reversed(history.messages):
-                                if hasattr(message, 'type') and message.type == 'ai':
-                                    message.content = rewritten_content
-                                    break
-                        logger.debug("Updated chat history with naturalized content for session %s", session_id)
+                    # Also update Redis/LangChain history for persistence
+                    if not is_admin_operation and hasattr(app_context, 'store'):
+                        # Use RedisKeyBuilder to create the proper history key
+                        key_builder = RedisKeyBuilder(namespace=getattr(app_context.store, '_ns', 'chatai'))
+                        
+                        if hasattr(app_context.store, 'get_message_history'):
+                            history = app_context.store.get_message_history(session_id)
+                            if hasattr(history, 'messages') and history.messages:
+                                # Update the last assistant message with rewritten content
+                                for message in reversed(history.messages):
+                                    if hasattr(message, 'type') and message.type == 'ai':
+                                        message.content = rewritten_content
+                                        break
+                            logger.debug("Updated Redis chat history with naturalized content for session %s", session_id)
             except Exception as e:
-                logger.warning("Failed to update chat history with naturalized content: %s", e)
+                logger.warning("Failed to update history with naturalized content: %s", e)
 
         # Log WhatsApp message plan
         try:

@@ -292,6 +292,14 @@ class FlowProcessor:
 
             # Load existing context
             existing_context = self._session_manager.load_context(session_id)
+            
+            # Debug: Log what's in the loaded context
+            if existing_context and existing_context.history:
+                logger.debug(f"Loaded context has {len(existing_context.history)} history turns:")
+                for i, turn in enumerate(existing_context.history[-5:]):  # Last 5 turns
+                    logger.debug(f"  Turn {i}: {turn.role} - {turn.content[:50]}...")
+            else:
+                logger.debug("No history in loaded context")
 
             # Execute with thought tracing
             with create_session() as thought_session:
