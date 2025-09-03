@@ -313,6 +313,11 @@ class FlowProcessor:
                         "Do NOT use this tool for regular conversation or questions about the flow.\n"
                     )
 
+                # Track modification outcome for ModifyFlowLive and provide explicit user feedback
+                modification_intercepted = False
+                modification_message: str | None = None
+                modification_was_applied: bool = False
+
                 # Create tool event handler for live flow modification and restart
                 def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
                     if tool_name == "ModifyFlowLive":
@@ -395,43 +400,61 @@ CRITICAL FLOW SAFETY RULES:
                                     future = executor.submit(run_flow_chat_modification)
                                     try:
                                         result = future.result(timeout=180.0)  # 3 minute timeout for complex modifications
-                                        
+
                                         # Determine success message based on actual results
                                         if result.flow_was_modified:
                                             success_msg = "✅ Modificação aplicada com sucesso! As alterações já estão ativas no fluxo."
                                             if result.modification_summary:
                                                 success_msg += f"\n\nResumo: {result.modification_summary}"
                                             success_msg += "\n\n🔄 O fluxo foi reiniciado. A conversa agora começa do início para que você possa testar as mudanças."
-                                            
-                                            # Clear session to restart conversation
+
+                                            # Clear session context to restart conversation
                                             try:
-                                                self._session_manager.clear_session(session_id)
-                                                logger.info(f"Cleared session {session_id} after flow modification")
+                                                self._session_manager.clear_context(session_id)
+                                                logger.info(f"Cleared session context for {session_id} after flow modification")
                                             except Exception as e:
-                                                logger.warning(f"Failed to clear session after flow modification: {e}")
+                                                logger.warning(f"Failed to clear session context after flow modification: {e}")
+
+                                            modification_was_applied = True
+                                            modification_message = success_msg
+                                            modification_intercepted = True
                                         else:
-                                            success_msg = "ℹ️ Instrução processada, mas nenhuma modificação foi necessária no fluxo."
-                                            
-                                        logger.info(f"Live flow modification completed via FlowChatService: modified={result.flow_was_modified}")
-                                        logger.info(f"Success message: {success_msg}")
-                                        print(f"[DEBUG PROCESSOR] Flow chat modification completed: {result.flow_was_modified}")
-                                        
-                                        # TODO: Send follow-up message to user with success_msg
-                                        # For now, we'll just return True and the user will see the processing message
+                                            info_msg = "ℹ️ Instrução processada, mas nenhuma modificação foi necessária no fluxo."
+                                            modification_was_applied = False
+                                            modification_message = info_msg
+                                            modification_intercepted = True
+
+                                        logger.info(
+                                            "Live flow modification completed via FlowChatService: modified=%s",
+                                            result.flow_was_modified,
+                                        )
+                                        logger.info("Returning message to user: %s", modification_message)
+                                        print(
+                                            f"[DEBUG PROCESSOR] Flow chat modification completed: {result.flow_was_modified}"
+                                        )
+
                                         return True
                                         
                                     except concurrent.futures.TimeoutError:
                                         logger.error("Live flow modification timed out")
                                         print("[DEBUG PROCESSOR] Modification timed out")
-                                        # TODO: Send follow-up message: "❌ Modificação expirou. Tente novamente com uma instrução mais simples."
+                                        modification_was_applied = False
+                                        modification_message = "❌ Modificação expirou. Tente novamente com uma instrução mais simples."
+                                        modification_intercepted = True
                                         return True
                             except Exception as e:
                                 logger.exception(f"Live flow modification failed: {e}")
                                 print(f"[DEBUG PROCESSOR] Modification failed: {e}")
                                 # Log specific error for admin feedback
                                 logger.error(f"Live flow modification failed for admin {request.user_id}: {e}")
-                                # Return False to let normal tool processing handle the error
-                                return False
+                                modification_was_applied = False
+                                modification_message = f"❌ Falha ao modificar o fluxo: {e!s}"
+                                modification_intercepted = True
+                                return True
+
+                        # Intercepted; skip normal flow and respond with explicit message
+                        modification_intercepted = True
+                        return True
 
                     return False
 
@@ -462,22 +485,27 @@ CRITICAL FLOW SAFETY RULES:
 
 
 
-                # Handle live flow modification tool event
-                if result.tool_name == "ModifyFlowLive":
-                    # The modification success/failure is determined by the on_tool_event callback
-                    # If we reach here, the callback intercepted and handled the modification
-                    # We should not assume success - the callback should have handled the response
-                    # This code path should not be reached if the callback works properly
-                    logger.warning("ModifyFlowLive tool reached post-processing - this should be handled by on_tool_event callback")
-
+                # If we intercepted ModifyFlowLive, return the explicit success/error message
+                if 'modification_intercepted' in locals() and modification_intercepted:
                     return FlowResponse(
                         result=FlowProcessingResult.CONTINUE,
-                        message="🔧 Processando sua solicitação de modificação do fluxo... Aguarde um momento enquanto aplico as alterações com segurança.",
+                        message=modification_message or "",
                         context=result.ctx,
-                        metadata={"tool_name": result.tool_name, "flow_modified": False},
+                        metadata={
+                            "tool_name": "ModifyFlowLive",
+                            "flow_modified": modification_was_applied,
+                        },
                     )
 
 
+
+                # Handle AutoReset from escalation - clear session context
+                if result.tool_name == "AutoReset":
+                    try:
+                        self._session_manager.clear_context(session_id)
+                        logger.info(f"Cleared session context after auto-reset for {session_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to clear session context after auto-reset: {e}")
 
                 # Map result to response
                 if result.escalate:

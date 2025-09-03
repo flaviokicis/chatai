@@ -5,6 +5,9 @@ import logging
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Protocol
 
+# Local import to avoid circular dependencies at module import time
+from app.core.redis_keys import RedisKeyBuilder
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -68,7 +71,6 @@ class RedisStore:
 
     def _state_key(self, user_id: str, agent_type: str) -> str:
         # Use centralized key builder for consistency with our namespace
-        from app.core.redis_keys import RedisKeyBuilder  # noqa: E402
         key_builder = RedisKeyBuilder(namespace=self._ns)
         return key_builder.conversation_state_key(user_id, agent_type)
 
@@ -119,11 +121,35 @@ class RedisStore:
         if RedisChatMessageHistory is None:  # pragma: no cover - optional dependency
             msg = "langchain_community is not installed. Add 'langchain-community' to dependencies."
             raise RuntimeError(msg)
-        return RedisChatMessageHistory(
-            session_id=session_id,
-            client=self._r,
-            key_prefix=f"{self._ns}:history:",
-        )
+        # LangChain RedisChatMessageHistory signature changed across versions.
+        # Prefer redis_client if available; fall back to url for older/newer releases.
+        try:
+            return RedisChatMessageHistory(
+                session_id=session_id,
+                redis_client=self._r,  # modern param name
+                key_prefix=f"{self._ns}:history:",
+            )
+        except TypeError:
+            # Fallback for versions that accept host/port/db instead of a client
+            try:
+                pool_kwargs = self._r.connection_pool.connection_kwargs  # type: ignore[attr-defined]
+                host = pool_kwargs.get("host", "localhost")
+                port = int(pool_kwargs.get("port", 6379))
+                db = int(pool_kwargs.get("db", 0))
+                return RedisChatMessageHistory(
+                    session_id=session_id,
+                    host=host,
+                    port=port,
+                    db=db,
+                    key_prefix=f"{self._ns}:history:",
+                )
+            except Exception:
+                # Last resort: try older 'client' param name
+                return RedisChatMessageHistory(
+                    session_id=session_id,
+                    client=self._r,  # older param name in some releases
+                    key_prefix=f"{self._ns}:history:",
+                )
 
     def clear_chat_history(self, user_id: str, agent_type: str | None = None) -> int:
         """Clear chat history for a user and optionally specific agent type.

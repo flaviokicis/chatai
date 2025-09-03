@@ -103,11 +103,14 @@ class FlowTurnRunner:
             )
 
         if engine_response.kind == "escalate":
+            # Auto-reset on escalation: clear session context so next message starts fresh
+            print(f"[DEBUG RUNNER] Engine escalated, marking for session reset")
+            
             return TurnResult(
-                assistant_message=engine_response.message,
+                assistant_message="Vamos recomeçar! Como posso te ajudar hoje?",
                 answers_diff={},
-                tool_name=None,
-                escalate=True,
+                tool_name="AutoReset",
+                escalate=False,  # Don't escalate, just reset
                 terminal=False,
                 ctx=ctx,
             )

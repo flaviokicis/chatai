@@ -33,12 +33,18 @@ class AdminPhoneService:
         try:
             from app.db.models import Tenant
 
-            # Normalize phone number - remove whatsapp: prefix if present
-            normalized_phone = phone_number.replace("whatsapp:", "").strip()
+            # Normalize phone number - remove whatsapp: prefix and non-digit characters, ensure + prefix
+            def normalize(p: str) -> str:
+                p2 = p.replace("whatsapp:", "").replace(" ", "").strip()
+                # Keep leading + and digits only
+                if p2.startswith("+"):
+                    sign = "+"
+                    digits = "".join(ch for ch in p2 if ch.isdigit())
+                    return sign + digits
+                digits = "".join(ch for ch in p2 if ch.isdigit())
+                return "+" + digits if digits else p2
 
-            # Ensure + prefix for comparison (admin phones are stored with +)
-            if not normalized_phone.startswith("+"):
-                normalized_phone = "+" + normalized_phone
+            normalized_phone = normalize(phone_number)
 
             # Get tenant with admin phone numbers
             tenant = self.session.get(Tenant, tenant_id)
@@ -47,7 +53,8 @@ class AdminPhoneService:
 
             # Check if normalized phone is in the admin list
             admin_phones = tenant.admin_phone_numbers or []
-            return normalized_phone in admin_phones
+            normalized_admins = {normalize(p) for p in admin_phones}
+            return normalized_phone in normalized_admins
 
         except Exception as e:
             logger.error(f"Error checking admin phone {phone_number} for tenant {tenant_id}: {e}")
