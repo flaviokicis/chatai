@@ -239,7 +239,7 @@ class WhatsAppApiAdapter:
 
         try:
             # WhatsApp Cloud API endpoint for typing indicators
-            url = f"https://graph.facebook.com/v17.0/{phone_number_id}/messages"
+            url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
 
             headers = {
                 "Authorization": f"Bearer {self._settings.whatsapp_access_token}",
@@ -276,7 +276,7 @@ class WhatsAppApiAdapter:
 
         try:
             # WhatsApp Cloud API endpoint - use the Phone Number ID from our database
-            url = f"https://graph.facebook.com/v17.0/{phone_number_id}/messages"
+            url = f"https://graph.facebook.com/v22.0/{phone_number_id}/messages"
 
             headers = {
                 "Authorization": f"Bearer {self._settings.whatsapp_access_token}",

@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = Field(default="test", alias="WHATSAPP_VERIFY_TOKEN")
     whatsapp_access_token: str = Field(default="test", alias="WHATSAPP_ACCESS_TOKEN")
     # WhatsApp provider: "twilio" (default) or "cloud_api"
-    whatsapp_provider: str = Field(default="twilio", alias="WHATSAPP_PROVIDER")
+    whatsapp_provider: str = Field(default="cloud_api", alias="WHATSAPP_PROVIDER")
     google_api_key: str = Field(default="test", alias="GOOGLE_API_KEY")
     openai_api_key: str = Field(default="test", alias="OPENAI_API_KEY")
     llm_model: str = Field(default="gemini-2.5-flash", alias="LLM_MODEL")
