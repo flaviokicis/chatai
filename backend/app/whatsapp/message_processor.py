@@ -25,6 +25,8 @@ from app.services.processing_cancellation_manager import ProcessingCancelledExce
 from app.services.session_manager import RedisSessionManager
 from app.settings import get_settings
 from app.services.speech_to_text_service import SpeechToTextService
+from app.services.processing_cancellation_manager import ProcessingCancellationManager
+from app.services.audio_validation_service import AudioValidationService
 from app.whatsapp.thread_status_updater import WhatsAppThreadStatusUpdater
 from app.whatsapp.webhook_db_handler import WebhookDatabaseHandler
 
@@ -113,21 +115,33 @@ class WhatsAppMessageProcessor:
         receiver_number = params.get("To", "")
         message_text = params.get("Body", "")
 
-        # Handle audio messages early by transcribing them to text
-        if not message_text:
+        # Handle audio messages early by validating duration and transcribing them to text
+        # Check for audio messages more robustly - either empty text or MessageType is audio
+        is_audio_message = (
+            params.get("MessageType") == "audio" or
+            (not message_text and params.get("MessageType") == "audio") or
+            (message_text == "[audio message]")  # Fallback for legacy behavior
+        )
+        
+        if is_audio_message:
             stt_service = SpeechToTextService(self.settings)
+            audio_validator = AudioValidationService(self.settings.max_audio_duration_seconds)
+            
             try:
                 num_media = int(str(params.get("NumMedia", "0")) or 0)
                 media_type = str(params.get("MediaContentType0", ""))
                 media_url = params.get("MediaUrl0")
+                
                 if (
                     num_media > 0
                     and media_url
                     and media_type.startswith("audio")
                 ):
+                    # This is legacy Twilio code - transcribe directly since we use WhatsApp Cloud API
                     message_text = await asyncio.to_thread(
                         stt_service.transcribe_twilio_media, media_url
                     )
+                        
                 elif params.get("MessageType") == "audio":
                     raw_msg = params.get("WhatsAppRawMessage", {})
                     media_id = (
@@ -136,11 +150,32 @@ class WhatsAppMessageProcessor:
                         else None
                     )
                     if media_id:
-                        message_text = await asyncio.to_thread(
-                            stt_service.transcribe_whatsapp_api_media, media_id
+                        # Validate WhatsApp API audio duration first
+                        is_valid, duration, error_msg = await asyncio.to_thread(
+                            audio_validator.validate_whatsapp_api_media_duration,
+                            media_id, self.settings.whatsapp_access_token
                         )
+
+                        if not is_valid:
+                            logger.info("Audio duration validation failed for WhatsApp API media: %s (duration: %ss)",
+                                      error_msg, duration)
+                            
+                            # Different messages based on whether we could determine duration
+                            if duration is not None:
+                                # We know it's too long
+                                max_minutes = self.settings.max_audio_duration_seconds // 60
+                                duration_minutes = duration / 60
+                                message_text = f"Desculpe, áudios devem ter no máximo {max_minutes} minutos. Seu áudio tem {duration_minutes:.1f} minutos."
+                            else:
+                                # Error determining duration
+                                message_text = "Estamos com dificuldades para processar áudios no momento. Por favor, envie sua mensagem em texto."
+                        else:
+                            logger.info("Audio duration validation passed: %.1fs", duration or 0)
+                            message_text = await asyncio.to_thread(
+                                stt_service.transcribe_whatsapp_api_media, media_id
+                            )
             except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to transcribe WhatsApp audio: %s", e)
+                logger.warning("Failed to process WhatsApp audio: %s", e)
                 message_text = "[audio message]"
 
         # Extract WhatsApp message ID
@@ -226,6 +261,14 @@ class WhatsAppMessageProcessor:
         app_context: Any
     ):
         """Process through the flow processor with dependency injection."""
+        # Build session ID for cancellation coordination  
+        session_id = self._build_session_id(
+            message_data["sender_number"],
+            conversation_setup.flow_id or "unknown"
+        )
+        
+        logger.debug(f"Processing message for session {session_id}: {message_data.get('message_text', '')[:100]}")
+        
         # Create flow request
         flow_request = FlowRequest(
             user_id=message_data["sender_number"],
@@ -247,6 +290,7 @@ class WhatsAppMessageProcessor:
         thread_updater = WhatsAppThreadStatusUpdater()
 
         # Create flow processor with injected dependencies
+        # Note: Each request creates its own processor, but they share Redis state via cancellation manager
         flow_processor = FlowProcessor(
             llm=app_context.llm,
             session_manager=session_manager,
@@ -256,6 +300,10 @@ class WhatsAppMessageProcessor:
 
         # Process through flow processor
         return await flow_processor.process_flow(flow_request, app_context)
+    
+    def _build_session_id(self, user_id: str, flow_id: str) -> str:
+        """Build consistent session ID for cancellation coordination."""
+        return f"flow:{user_id}:{flow_id}"
 
     async def _build_whatsapp_response(
         self,
@@ -267,6 +315,13 @@ class WhatsAppMessageProcessor:
         """Build WhatsApp-specific response."""
         # Handle flow processor errors
         if not flow_response.is_success:
+            # Check if this was a cancellation (not a real error)
+            if flow_response.metadata and flow_response.metadata.get("cancelled"):
+                logger.info("Flow processing was cancelled for user %s (rapid messages)",
+                           message_data["sender_number"])
+                # Don't send error message for cancellations - messages are being aggregated
+                return PlainTextResponse("ok")
+            
             logger.error("Flow processor error for user %s: %s",
                         message_data["sender_number"], flow_response.error)
             return self.adapter.build_sync_response(
@@ -294,6 +349,9 @@ class WhatsAppMessageProcessor:
                 cancellation_manager.check_cancellation_and_raise(session_id, "naturalizing")
         except ProcessingCancelledException:
             logger.info("Message processing cancelled before naturalization")
+            # Mark this cancelled processing as complete
+            if cancellation_manager and session_id:
+                cancellation_manager.mark_processing_complete(session_id)
             return PlainTextResponse("ok")  # Don't send anything if cancelled
 
         # Apply WhatsApp message rewriting
@@ -311,6 +369,9 @@ class WhatsAppMessageProcessor:
                 cancellation_manager.check_cancellation_and_raise(session_id, "sending")
         except ProcessingCancelledException:
             logger.info("Message processing cancelled before sending")
+            # Mark this cancelled processing as complete
+            if cancellation_manager and session_id:
+                cancellation_manager.mark_processing_complete(session_id)
             return PlainTextResponse("ok")  # Don't send anything if cancelled
 
         logger.info("Sending WhatsApp reply: %r (total messages: %d)", sync_reply, len(messages))
@@ -321,6 +382,12 @@ class WhatsAppMessageProcessor:
         # Send WhatsApp follow-ups
         if len(messages) > 1:
             await self._send_whatsapp_followups(message_data, messages, app_context)
+
+        # Mark processing complete AFTER message is sent
+        # This ensures the cancellation window stays open until the message is actually delivered
+        if cancellation_manager and session_id:
+            cancellation_manager.mark_processing_complete(session_id)
+            logger.debug(f"Marked processing complete for session {session_id}")
 
         return self.adapter.build_sync_response(sync_reply)
 

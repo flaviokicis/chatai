@@ -214,26 +214,57 @@ class FlowProcessor:
                 request.flow_metadata.get("flow_id", "unknown")
             )
 
-            # Check if we should cancel ongoing processing for rapid messages
-            if request.user_message and self._cancellation_manager.should_cancel_processing(session_id):
-                # Cancel the ongoing processing
-                self._cancellation_manager.cancel_processing(session_id)
-                # Add current message to buffer
+            performed_aggregation = False
+
+            # Add current message to buffer immediately to ensure cross-request visibility
+            if request.user_message:
                 self._cancellation_manager.add_message_to_buffer(session_id, request.user_message)
                 
-                # Wait briefly for the previous processing to actually stop
+                # Wait a very short time to catch truly rapid messages
+                # We can't wait too long or we'll delay every single message
                 import asyncio
-                await asyncio.sleep(0.5)
+                initial_wait = 0.2  # Wait 200ms to catch rapid succession messages
+                logger.debug(f"Waiting {initial_wait}s for potential rapid messages...")
+                await asyncio.sleep(initial_wait)
+
+            # Check if we should cancel ongoing processing for rapid messages
+            if request.user_message and self._cancellation_manager.should_cancel_processing(session_id):
+                logger.info(f"Cancelling ongoing processing for session {session_id} due to new message")
+                # Cancel the ongoing processing
+                self._cancellation_manager.cancel_processing(session_id)
+                
+                # Wait for a bit longer to allow:
+                # 1. Previous processing to stop
+                # 2. More messages to potentially arrive for aggregation
+                import asyncio
+                wait_time = 1.5  # Increased from 0.5 to allow more messages to arrive
+                logger.info(f"Waiting {wait_time}s for message aggregation...")
+                await asyncio.sleep(wait_time)
                 
                 # Get all buffered messages
                 aggregated_message = self._cancellation_manager.get_aggregated_messages(session_id)
                 if aggregated_message:
-                    request = request.model_copy(update={"user_message": aggregated_message})
+                    from dataclasses import replace
+                    request = replace(request, user_message=aggregated_message)
                     logger.info(f"Processing aggregated message for session {session_id}: {aggregated_message[:100]}...")
+                    performed_aggregation = True
+                    # Clear the cancellation flag so the aggregated message can be processed
+                    self._cancellation_manager.clear_cancellation_flag(session_id)
+                else:
+                    # No messages to aggregate, this request was cancelled
+                    logger.info(f"No messages to aggregate for cancelled session {session_id}, exiting")
+                    self._cancellation_manager.mark_processing_complete(session_id)
+                    return FlowResponse(
+                        result=FlowProcessingResult.ERROR,
+                        message="Processing cancelled - messages being aggregated",
+                        context=None,
+                        metadata={"cancelled": True}
+                    )
 
-            # Add current message to buffer for future aggregation
-            if request.user_message:
-                self._cancellation_manager.add_message_to_buffer(session_id, request.user_message)
+            # Add current message to buffer for future aggregation ONLY if we did not already
+            # aggregate and replace the request.user_message above. If aggregated, the buffer
+            # has been consumed; re-adding would duplicate content.
+            # If aggregation did not occur, the single message is already buffered above
 
             try:
                 # Create cancellation token for this processing
@@ -266,17 +297,20 @@ class FlowProcessor:
                 flow_response.metadata["session_id"] = session_id
                 flow_response.metadata["cancellation_manager"] = self._cancellation_manager
                 
-                # Mark processing complete
-                self._cancellation_manager.mark_processing_complete(session_id)
+                # DO NOT mark processing complete here - let the message_processor do it
+                # after the message is actually sent. This keeps the cancellation window open.
                 
                 return flow_response
 
             finally:
-                # Clear processing state on any exit
-                self._cancellation_manager.mark_processing_complete(session_id)
+                # Only clear on error/exception, not on success
+                pass
 
         except Exception as e:
             logger.exception("Flow processing failed for user %s", request.user_id)
+            # Clear processing state on error
+            if session_id:
+                self._cancellation_manager.mark_processing_complete(session_id)
             return FlowResponse(
                 result=FlowProcessingResult.ERROR,
                 message=None,
@@ -356,10 +390,12 @@ class FlowProcessor:
                 try:
                     self._cancellation_manager.check_cancellation_and_raise(session_id, "flow_processing")
                 except ProcessingCancelledException:
+                    logger.info(f"Processing cancelled for session {session_id}")
+                    # Mark as complete to clean up state
+                    self._cancellation_manager.mark_processing_complete(session_id)
                     return FlowResponse(
-                        is_success=False,
                         result=FlowProcessingResult.ERROR,
-                        message=None,
+                        message="Processing cancelled - new message received",
                         context=existing_context,
                         metadata={"cancelled": True}
                     )
@@ -561,14 +597,21 @@ CRITICAL FLOW SAFETY RULES:
                 else:
                     flow_result = FlowProcessingResult.CONTINUE
 
+                # Build metadata including all tool metadata
+                response_metadata = {
+                    "tool_name": result.tool_name,
+                    "answers_diff": result.answers_diff,
+                }
+                
+                # Include all metadata from the turn result (including ack_message)
+                if result.metadata:
+                    response_metadata.update(result.metadata)
+                
                 return FlowResponse(
                     result=flow_result,
                     message=result.assistant_message,
                     context=result.ctx,
-                    metadata={
-                        "tool_name": result.tool_name,
-                        "answers_diff": result.answers_diff,
-                    },
+                    metadata=response_metadata,
                 )
 
         except Exception as e:

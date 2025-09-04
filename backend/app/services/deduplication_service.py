@@ -20,8 +20,9 @@ class MessageDeduplicationService:
     fallback heuristics for platforms that don't provide reliable message IDs.
     """
 
-    # TTL for message ID based deduplication (5 minutes)
-    MESSAGE_ID_TTL_SECONDS = 300
+    # TTL for message ID based deduplication (15 minutes)
+    # Increased from 5 minutes to handle WhatsApp's delayed webhook retries
+    MESSAGE_ID_TTL_SECONDS = 900
 
     # TTL for fallback deduplication (30 seconds)
     FALLBACK_TTL_SECONDS = 30

@@ -141,6 +141,10 @@ class WhatsAppApiAdapter:
                 return interactive.get("button_reply", {}).get("title", "")
             if interactive.get("type") == "list_reply":
                 return interactive.get("list_reply", {}).get("title", "")
+        
+        # For audio messages, return empty string so transcription can happen
+        if message_type == "audio":
+            return ""
 
         # For other message types (image, document, etc.), return a placeholder
         return f"[{message_type} message]"

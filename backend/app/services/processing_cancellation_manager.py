@@ -6,6 +6,7 @@ import logging
 from typing import Dict, Optional, Any
 from dataclasses import dataclass, field
 import json
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -26,111 +27,281 @@ class ProcessingCancellationManager:
     # Time windows for message handling
     RAPID_MESSAGE_WINDOW = 120.0  # 2 minutes - messages within this window get concatenated
     MESSAGE_AGGREGATION_PREFIX = "msg_buffer:"
+    PROCESSING_STATE_PREFIX = "processing_state:"
+    CANCELLATION_PREFIX = "cancellation:"
     
     def __init__(self, store=None):
         """Initialize the cancellation manager."""
         self._store = store
         self._processing_states: Dict[str, ProcessingState] = {}
+        self._local_cancellation_tokens: Dict[str, asyncio.Event] = {}
     
     def should_cancel_processing(self, session_id: str) -> bool:
         """Check if we should cancel ongoing processing for this session."""
-        if session_id not in self._processing_states:
-            return False
+        if not self._store or not hasattr(self._store, "_r"):
+            # Fallback to in-memory if Redis not available
+            if session_id not in self._processing_states:
+                return False
+            state = self._processing_states[session_id]
+            if not state.is_processing:
+                return False
+            time_since_last = time.time() - state.last_message_time
+            return time_since_last < self.RAPID_MESSAGE_WINDOW
         
-        state = self._processing_states[session_id]
-        if not state.is_processing:
+        try:
+            # Check Redis message buffer for rapid succession
+            buf_key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
+            try:
+                msg_count = int(self._store._r.llen(buf_key) or 0)
+            except Exception:
+                msg_count = 0
+
+            last_time = None
+            if msg_count > 0:
+                try:
+                    last_raw = self._store._r.lindex(buf_key, -1)
+                    if last_raw:
+                        data = json.loads(last_raw)
+                        last_time = float(data.get("timestamp", 0))
+                except Exception:
+                    last_time = None
+
+            # Check Redis for processing state
+            state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
+            state_data = self._store._r.get(state_key)
+            
+            if not state_data:
+                # If we have at least two recent messages in buffer, cancel anyway to aggregate
+                if msg_count >= 2 and last_time:
+                    time_since_last = time.time() - last_time
+                    return time_since_last < self.RAPID_MESSAGE_WINDOW
+                return False
+            
+            state = json.loads(state_data)
+            is_processing = bool(state.get("is_processing", False))
+            if not is_processing:
+                # If multiple messages are queued rapidly, cancel to aggregate
+                if msg_count >= 2 and last_time:
+                    time_since_last = time.time() - last_time
+                    return time_since_last < self.RAPID_MESSAGE_WINDOW
+                return False
+            
+            # Check if the last message was recent (rapid succession)
+            last_message_time = last_time if last_time is not None else state.get("last_message_time", 0)
+            time_since_last = time.time() - float(last_message_time or 0)
+            should_cancel = time_since_last < self.RAPID_MESSAGE_WINDOW
+            
+            if should_cancel:
+                logger.info(f"Should cancel processing for session {session_id}: last message {time_since_last:.1f}s ago")
+            
+            return should_cancel
+        except Exception as e:
+            logger.warning(f"Failed to check Redis processing state: {e}")
             return False
-        
-        # Check if the last message was recent (rapid succession)
-        time_since_last = time.time() - state.last_message_time
-        return time_since_last < self.RAPID_MESSAGE_WINDOW
     
     def create_cancellation_token(self, session_id: str) -> asyncio.Event:
         """Create a cancellation token for a processing session."""
+        # Always create a local event for this specific process
+        cancellation_token = asyncio.Event()
+        self._local_cancellation_tokens[session_id] = cancellation_token
+        
+        # Update local state
         if session_id not in self._processing_states:
             self._processing_states[session_id] = ProcessingState()
         
         state = self._processing_states[session_id]
-        state.cancellation_token = asyncio.Event()
+        state.cancellation_token = cancellation_token
         state.is_processing = True
         state.start_time = time.time()
         
-        return state.cancellation_token
+        # Also update Redis state for cross-process coordination
+        if self._store and hasattr(self._store, "_r"):
+            try:
+                state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
+                state_data = {
+                    "is_processing": True,
+                    "start_time": state.start_time,
+                    "last_message_time": state.last_message_time,
+                    "process_id": str(uuid.uuid4())  # Track which process owns this
+                }
+                self._store._r.setex(state_key, 300, json.dumps(state_data))  # 5 min expiry
+                logger.info(f"Created cancellation token for session {session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to update Redis processing state: {e}")
+        
+        return cancellation_token
     
     def cancel_processing(self, session_id: str) -> bool:
         """Cancel ongoing processing for a session."""
-        if session_id not in self._processing_states:
-            return False
+        cancelled = False
         
-        state = self._processing_states[session_id]
-        if state.cancellation_token and not state.cancellation_token.is_set():
-            state.cancellation_token.set()
-            logger.info(f"Cancelled processing for session {session_id}")
-            return True
+        # Cancel local token if exists
+        if session_id in self._local_cancellation_tokens:
+            token = self._local_cancellation_tokens[session_id]
+            if not token.is_set():
+                token.set()
+                cancelled = True
         
-        return False
+        # Also cancel in local state
+        if session_id in self._processing_states:
+            state = self._processing_states[session_id]
+            if state.cancellation_token and not state.cancellation_token.is_set():
+                state.cancellation_token.set()
+                cancelled = True
+        
+        # Set cancellation flag in Redis for other processes to see
+        if self._store and hasattr(self._store, "_r"):
+            try:
+                cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
+                self._store._r.setex(cancel_key, 60, "1")  # 1 minute expiry
+                
+                # Also update processing state
+                state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
+                state_data = self._store._r.get(state_key)
+                if state_data:
+                    state = json.loads(state_data)
+                    state["is_processing"] = False
+                    state["cancelled_at"] = time.time()
+                    self._store._r.setex(state_key, 300, json.dumps(state))
+                
+                logger.info(f"Cancelled processing for session {session_id} (Redis notified)")
+                cancelled = True
+            except Exception as e:
+                logger.warning(f"Failed to set Redis cancellation flag: {e}")
+        
+        if cancelled:
+            logger.info(f"Successfully cancelled processing for session {session_id}")
+        
+        return cancelled
     
     def mark_processing_complete(self, session_id: str) -> None:
         """Mark that processing is complete for a session."""
+        # Clear local state
         if session_id in self._processing_states:
             state = self._processing_states[session_id]
             state.is_processing = False
             state.cancellation_token = None
             # Clear messages after successful processing
             state.messages.clear()
+        
+        # Clear local cancellation token
+        if session_id in self._local_cancellation_tokens:
+            del self._local_cancellation_tokens[session_id]
+        
+        # Clear Redis state (do NOT clear message buffer here; it is consumed by the aggregator)
+        if self._store and hasattr(self._store, "_r"):
+            try:
+                state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
+                cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
+                
+                # Delete all related keys
+                self._store._r.delete(state_key, cancel_key)
+                logger.debug(f"Cleared processing state for session {session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to clear Redis state: {e}")
     
     def add_message_to_buffer(self, session_id: str, message: str) -> None:
         """Add a message to the buffer for aggregation."""
+        current_time = time.time()
+        
+        # Update local state
         if session_id not in self._processing_states:
             self._processing_states[session_id] = ProcessingState()
         
         state = self._processing_states[session_id]
-        state.messages.append(message)
-        state.last_message_time = time.time()
+        state.last_message_time = current_time
         
-        # Also persist to Redis if available
+        # Use Redis as the single source of truth to avoid duplicates
         if self._store and hasattr(self._store, "_r"):
             try:
+                # Check if this exact message is already in the buffer (avoid duplicates)
                 key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
+                existing_messages = self._store._r.lrange(key, 0, -1)
+                for existing in existing_messages:
+                    try:
+                        data = json.loads(existing)
+                        if data.get("content") == message:
+                            logger.debug(f"Message already in buffer, skipping: {message[:50]}...")
+                            return
+                    except (json.JSONDecodeError, KeyError):
+                        continue
+                
+                # Add message to buffer if not already there
                 msg_data = json.dumps({
                     "content": message,
-                    "timestamp": time.time()
+                    "timestamp": current_time
                 })
                 self._store._r.rpush(key, msg_data)
                 self._store._r.expire(key, 300)  # 5 minute expiry
+                
+                # Update processing state with last message time
+                state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
+                state_data = self._store._r.get(state_key)
+                if state_data:
+                    existing_state = json.loads(state_data)
+                    existing_state["last_message_time"] = current_time
+                    self._store._r.setex(state_key, 300, json.dumps(existing_state))
+                else:
+                    # Create new state if doesn't exist
+                    new_state = {
+                        "is_processing": False,
+                        "last_message_time": current_time,
+                        "start_time": current_time
+                    }
+                    self._store._r.setex(state_key, 300, json.dumps(new_state))
+                
+                logger.debug(f"Added message to buffer for session {session_id}")
             except Exception as e:
                 logger.warning(f"Failed to persist message to Redis: {e}")
+                # Fallback to local memory if Redis fails
+                if message not in state.messages:
+                    state.messages.append(message)
     
     def get_aggregated_messages(self, session_id: str) -> str:
         """Get all buffered messages aggregated intelligently."""
-        messages = []
+        messages: list[str] = []
         
-        # Get from memory first
-        if session_id in self._processing_states:
-            messages = self._processing_states[session_id].messages.copy()
-        
-        # Also check Redis for any persisted messages
-        if self._store and hasattr(self._store, "_r") and not messages:
+        # Use Redis as the primary source of truth with atomic operation
+        if self._store and hasattr(self._store, "_r"):
             try:
                 key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
-                msg_data_list = self._store._r.lrange(key, 0, -1)
+                # Use a pipeline to make the read+delete atomic
+                pipeline = self._store._r.pipeline()
+                pipeline.lrange(key, 0, -1)
+                pipeline.delete(key)
+                results = pipeline.execute()
+                msg_data_list = results[0]  # The lrange result
+                
                 if msg_data_list:
                     for msg_data in msg_data_list:
                         try:
                             data = json.loads(msg_data)
-                            messages.append(data["content"])
-                        except (json.JSONDecodeError, KeyError):
+                            content = data.get("content")
+                            if isinstance(content, str) and content.strip():
+                                messages.append(content)
+                        except (json.JSONDecodeError, KeyError, TypeError):
                             continue
-                    # Clear Redis buffer after reading
-                    self._store._r.delete(key)
             except Exception as e:
                 logger.warning(f"Failed to retrieve messages from Redis: {e}")
+        
+        # Fallback to local memory if Redis had no messages or failed
+        if not messages and session_id in self._processing_states and self._processing_states[session_id].messages:
+            messages = self._processing_states[session_id].messages.copy()
+            self._processing_states[session_id].messages.clear()
         
         if not messages:
             return ""
         
+        # Deduplicate consecutive identical messages while preserving order
+        deduped: list[str] = []
+        last: str | None = None
+        for msg in messages:
+            if msg != last:
+                deduped.append(msg)
+                last = msg
+        
         # Intelligent aggregation
-        return self._aggregate_messages_intelligently(messages)
+        return self._aggregate_messages_intelligently(deduped)
     
     def _aggregate_messages_intelligently(self, messages: list[str]) -> str:
         """Simply concatenate messages sent in rapid succession."""
@@ -155,11 +326,42 @@ class ProcessingCancellationManager:
         Raises:
             ProcessingCancelledException: If processing was cancelled
         """
+        # Check local cancellation token first
+        if session_id in self._local_cancellation_tokens:
+            token = self._local_cancellation_tokens[session_id]
+            if token.is_set():
+                logger.info(f"Processing cancelled during {stage} for session {session_id} (local token)")
+                raise ProcessingCancelledException(f"Processing cancelled during {stage}")
+        
+        # Check local state
         if session_id in self._processing_states:
             state = self._processing_states[session_id]
             if state.cancellation_token and state.cancellation_token.is_set():
-                logger.info(f"Processing cancelled during {stage} for session {session_id}")
+                logger.info(f"Processing cancelled during {stage} for session {session_id} (local state)")
                 raise ProcessingCancelledException(f"Processing cancelled during {stage}")
+        
+        # Also check Redis for cross-process cancellation
+        if self._store and hasattr(self._store, "_r"):
+            try:
+                cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
+                if self._store._r.get(cancel_key):
+                    logger.info(f"Processing cancelled during {stage} for session {session_id} (Redis flag)")
+                    raise ProcessingCancelledException(f"Processing cancelled during {stage}")
+            except ProcessingCancelledException:
+                raise  # Re-raise the cancellation
+            except Exception as e:
+                logger.warning(f"Failed to check Redis cancellation flag: {e}")
+    
+    def clear_cancellation_flag(self, session_id: str) -> None:
+        """Clear the cancellation flag for a session to allow processing to continue."""
+        # Clear Redis cancellation flag
+        if self._store and hasattr(self._store, "_r"):
+            try:
+                cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
+                self._store._r.delete(cancel_key)
+                logger.debug(f"Cleared cancellation flag for session {session_id}")
+            except Exception as e:
+                logger.warning(f"Failed to clear cancellation flag: {e}")
     
     def clear_session(self, session_id: str) -> None:
         """Clear all data for a session."""
