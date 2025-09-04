@@ -50,6 +50,7 @@ def _build_config(log_level: str) -> dict[str, Any]:
         "handlers": {
             "default": {
                 "class": "logging.StreamHandler",
+                "stream": "ext://sys.stdout",  # Explicitly use stdout instead of stderr
                 "formatter": "kv",
                 "filters": ["request_id"],
                 "level": log_level,

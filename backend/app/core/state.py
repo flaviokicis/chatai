@@ -121,35 +121,77 @@ class RedisStore:
         if RedisChatMessageHistory is None:  # pragma: no cover - optional dependency
             msg = "langchain_community is not installed. Add 'langchain-community' to dependencies."
             raise RuntimeError(msg)
+
         # LangChain RedisChatMessageHistory signature changed across versions.
-        # Prefer redis_client if available; fall back to url for older/newer releases.
+        # Try different parameter combinations based on the version
+
+        # Try 1: Current versions use 'url' parameter (most common)
+        try:
+            # Get the Redis URL from the connection
+            pool_kwargs = self._r.connection_pool.connection_kwargs  # type: ignore[attr-defined]
+            host = pool_kwargs.get("host", "localhost")
+            port = int(pool_kwargs.get("port", 6379))
+            db = int(pool_kwargs.get("db", 0))
+            password = pool_kwargs.get("password", "")
+
+            # Build URL
+            if password:
+                url = f"redis://:{password}@{host}:{port}/{db}"
+            else:
+                url = f"redis://{host}:{port}/{db}"
+
+            return RedisChatMessageHistory(
+                session_id=session_id,
+                url=url,  # current versions use url parameter
+                key_prefix=f"{self._ns}:history:",
+            )
+        except (TypeError, KeyError) as e1:
+            logger.debug("RedisChatMessageHistory with url failed: %s", e1)
+
+        # Try 2: Some versions use 'redis_client'
         try:
             return RedisChatMessageHistory(
                 session_id=session_id,
-                redis_client=self._r,  # modern param name
+                redis_client=self._r,  # some versions use redis_client
                 key_prefix=f"{self._ns}:history:",
             )
-        except TypeError:
-            # Fallback for versions that accept host/port/db instead of a client
-            try:
-                pool_kwargs = self._r.connection_pool.connection_kwargs  # type: ignore[attr-defined]
-                host = pool_kwargs.get("host", "localhost")
-                port = int(pool_kwargs.get("port", 6379))
-                db = int(pool_kwargs.get("db", 0))
-                return RedisChatMessageHistory(
-                    session_id=session_id,
-                    host=host,
-                    port=port,
-                    db=db,
-                    key_prefix=f"{self._ns}:history:",
-                )
-            except Exception:
-                # Last resort: try older 'client' param name
-                return RedisChatMessageHistory(
-                    session_id=session_id,
-                    client=self._r,  # older param name in some releases
-                    key_prefix=f"{self._ns}:history:",
-                )
+        except TypeError as e2:
+            logger.debug("RedisChatMessageHistory with redis_client failed: %s", e2)
+
+        # Try 3: Older versions use host/port/db parameters
+        try:
+            pool_kwargs = self._r.connection_pool.connection_kwargs  # type: ignore[attr-defined]
+            return RedisChatMessageHistory(
+                session_id=session_id,
+                redis_host=pool_kwargs.get("host", "localhost"),  # Note: redis_host not just host
+                redis_port=int(pool_kwargs.get("port", 6379)),
+                redis_db=int(pool_kwargs.get("db", 0)),
+                redis_password=pool_kwargs.get("password"),
+                key_prefix=f"{self._ns}:history:",
+            )
+        except (TypeError, KeyError) as e3:
+            logger.debug("RedisChatMessageHistory with redis_host/port/db failed: %s", e3)
+
+        # Try 4: Even older versions might use different param names
+        try:
+            pool_kwargs = self._r.connection_pool.connection_kwargs  # type: ignore[attr-defined]
+            return RedisChatMessageHistory(
+                session_id=session_id,
+                host=pool_kwargs.get("host", "localhost"),
+                port=int(pool_kwargs.get("port", 6379)),
+                db=int(pool_kwargs.get("db", 0)),
+                key_prefix=f"{self._ns}:history:",
+            )
+        except (TypeError, KeyError) as e4:
+            logger.debug("RedisChatMessageHistory with host/port/db failed: %s", e4)
+
+        # If all attempts fail, raise an informative error
+        msg = (
+            "Failed to initialize RedisChatMessageHistory. "
+            "This might be due to a version mismatch in langchain-community. "
+            "Please check your langchain-community version."
+        )
+        raise RuntimeError(msg)
 
     def clear_chat_history(self, user_id: str, agent_type: str | None = None) -> int:
         """Clear chat history for a user and optionally specific agent type.

@@ -24,6 +24,7 @@ from app.flow_core.compiler import compile_flow
 from app.flow_core.ir import Flow
 from app.flow_core.runner import FlowTurnRunner
 from app.services.admin_phone_service import AdminPhoneService
+from app.services.processing_cancellation_manager import ProcessingCancellationManager, ProcessingCancelledException
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -97,16 +98,6 @@ class SessionManager(Protocol):
         """Clear flow context."""
         ...
 
-    def acquire_lock(self, session_id: str) -> bool:
-        """Acquire distributed lock for session."""
-        ...
-
-    def release_lock(self, session_id: str) -> None:
-        """Release distributed lock for session."""
-        ...
-
-
-
 
 
 class ThreadStatusUpdater(Protocol):
@@ -165,6 +156,9 @@ class FlowProcessor:
         self._llm = llm
         self._session_manager = session_manager
         self._thread_updater = thread_updater
+        # Pass the session manager's store to cancellation manager for Redis access
+        store = getattr(session_manager, '_store', None)
+        self._cancellation_manager = ProcessingCancellationManager(store=store)
 
     def _check_admin_status(self, request: FlowRequest) -> bool:
         """
@@ -220,13 +214,35 @@ class FlowProcessor:
                 request.flow_metadata.get("flow_id", "unknown")
             )
 
-            lock_acquired = self._session_manager.acquire_lock(session_id)
-            if not lock_acquired:
-                logger.warning("Failed to acquire lock for session %s", session_id)
+            # Check if we should cancel ongoing processing for rapid messages
+            if request.user_message and self._cancellation_manager.should_cancel_processing(session_id):
+                # Cancel the ongoing processing
+                self._cancellation_manager.cancel_processing(session_id)
+                # Add current message to buffer
+                self._cancellation_manager.add_message_to_buffer(session_id, request.user_message)
+                
+                # Wait briefly for the previous processing to actually stop
+                import asyncio
+                await asyncio.sleep(0.5)
+                
+                # Get all buffered messages
+                aggregated_message = self._cancellation_manager.get_aggregated_messages(session_id)
+                if aggregated_message:
+                    request = request.model_copy(update={"user_message": aggregated_message})
+                    logger.info(f"Processing aggregated message for session {session_id}: {aggregated_message[:100]}...")
+
+            # Add current message to buffer for future aggregation
+            if request.user_message:
+                self._cancellation_manager.add_message_to_buffer(session_id, request.user_message)
 
             try:
-                # Step 2: Process through flow engine
-                flow_response = await self._execute_flow(request, session_id, app_context)
+                # Create cancellation token for this processing
+                cancellation_token = self._cancellation_manager.create_cancellation_token(session_id)
+                
+                # Step 2: Process through flow engine with cancellation support
+                flow_response = await self._execute_flow(
+                    request, session_id, app_context, cancellation_token
+                )
 
                 # Step 3: Update thread status if needed
                 if (self._thread_updater and
@@ -244,11 +260,20 @@ class FlowProcessor:
                 elif flow_response.result == FlowProcessingResult.TERMINAL:
                     self._session_manager.clear_context(session_id)
 
+                # Add session_id to metadata for downstream cancellation checks
+                if not flow_response.metadata:
+                    flow_response.metadata = {}
+                flow_response.metadata["session_id"] = session_id
+                flow_response.metadata["cancellation_manager"] = self._cancellation_manager
+                
+                # Mark processing complete
+                self._cancellation_manager.mark_processing_complete(session_id)
+                
                 return flow_response
 
             finally:
-                if lock_acquired:
-                    self._session_manager.release_lock(session_id)
+                # Clear processing state on any exit
+                self._cancellation_manager.mark_processing_complete(session_id)
 
         except Exception as e:
             logger.exception("Flow processing failed for user %s", request.user_id)
@@ -265,6 +290,7 @@ class FlowProcessor:
         request: FlowRequest,
         session_id: str,
         app_context: Any,
+        cancellation_token: Any = None,
     ) -> FlowResponse:
         """Execute the flow with the engine."""
         try:
@@ -325,6 +351,18 @@ class FlowProcessor:
                 modification_intercepted = False
                 modification_message: str | None = None
                 modification_was_applied: bool = False
+
+                # Check for cancellation before processing
+                try:
+                    self._cancellation_manager.check_cancellation_and_raise(session_id, "flow_processing")
+                except ProcessingCancelledException:
+                    return FlowResponse(
+                        is_success=False,
+                        result=FlowProcessingResult.ERROR,
+                        message=None,
+                        context=existing_context,
+                        metadata={"cancelled": True}
+                    )
 
                 # Create tool event handler for live flow modification and restart
                 def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:

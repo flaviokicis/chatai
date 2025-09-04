@@ -18,9 +18,7 @@ logger = logging.getLogger(__name__)
 class RedisSessionManager(SessionManager):
     """Redis-based implementation of session management."""
 
-    LOCK_WAIT_SECONDS = 30
-    LOCK_HOLD_SECONDS = 60
-
+     
     def __init__(self, store: ConversationStore):
         self._store = store
 
@@ -84,58 +82,4 @@ class RedisSessionManager(SessionManager):
             except Exception as e:
                 logger.warning("Failed to clear flow context: %s", e)
 
-    def acquire_lock(self, session_id: str) -> bool:
-        """Acquire distributed lock for session."""
-        lock_key = f"lock:{session_id}"
-        lock_expiry = int(time.time()) + self.LOCK_HOLD_SECONDS
 
-        # Try to acquire lock with timeout
-        for attempt in range(self.LOCK_WAIT_SECONDS):
-            if hasattr(self._store, "_r"):  # Redis store
-                current_time = int(time.time())
-
-                # Try to set lock with expiry
-                lock_set = self._store._r.set(
-                    lock_key, lock_expiry, nx=True, ex=self.LOCK_HOLD_SECONDS
-                )
-                if lock_set:
-                    logger.debug("Acquired lock for session %s", session_id)
-                    return True
-
-                # Check if existing lock has expired
-                existing_lock = self._store._r.get(lock_key)
-                if existing_lock:
-                    try:
-                        existing_expiry = int(
-                            existing_lock.decode() if isinstance(existing_lock, bytes)
-                            else existing_lock
-                        )
-                        if current_time > existing_expiry:
-                            # Lock expired, try to claim it
-                            if self._store._r.getset(lock_key, lock_expiry):
-                                logger.debug("Claimed expired lock for session %s", session_id)
-                                return True
-                    except (ValueError, TypeError):
-                        pass
-            else:
-                # Fallback for non-Redis stores - just proceed
-                return True
-
-            if attempt < self.LOCK_WAIT_SECONDS - 1:  # Don't sleep on last attempt
-                time.sleep(1)
-
-        logger.warning("Failed to acquire lock for session %s, proceeding anyway", session_id)
-        return False
-
-    def release_lock(self, session_id: str) -> None:
-        """Release distributed lock for session."""
-        lock_key = f"lock:{session_id}"
-
-        if not hasattr(self._store, "_r"):
-            return
-
-        try:
-            self._store._r.delete(lock_key)
-            logger.debug("Released lock for session %s", session_id)
-        except Exception as e:
-            logger.warning("Failed to release lock for session %s: %s", session_id, e)

@@ -21,6 +21,7 @@ from app.core.flow_processor import FlowProcessingResult, FlowProcessor, FlowReq
 from app.db.models import MessageDirection, MessageStatus
 from app.services.deduplication_service import MessageDeduplicationService
 from app.services.message_logging_service import message_logging_service
+from app.services.processing_cancellation_manager import ProcessingCancelledException
 from app.services.session_manager import RedisSessionManager
 from app.settings import get_settings
 from app.whatsapp.thread_status_updater import WhatsAppThreadStatusUpdater
@@ -253,6 +254,17 @@ class WhatsAppMessageProcessor:
         else:
             reply_text = flow_response.message or ""
 
+        # Check for cancellation before naturalizing
+        try:
+            cancellation_manager = flow_response.metadata.get("cancellation_manager") if flow_response.metadata else None
+            session_id = flow_response.metadata.get("session_id") if flow_response.metadata else None
+            
+            if cancellation_manager and session_id:
+                cancellation_manager.check_cancellation_and_raise(session_id, "naturalizing")
+        except ProcessingCancelledException:
+            logger.info("Message processing cancelled before naturalization")
+            return PlainTextResponse("ok")  # Don't send anything if cancelled
+
         # Apply WhatsApp message rewriting
         messages = self._rewrite_for_whatsapp(
             reply_text, flow_response, message_data, conversation_setup, app_context
@@ -261,6 +273,14 @@ class WhatsAppMessageProcessor:
         # Extract sync response
         first_message = messages[0] if messages else {"text": reply_text, "delay_ms": 0}
         sync_reply = str(first_message.get("text", reply_text)).strip() or reply_text
+
+        # Final cancellation check before sending
+        try:
+            if cancellation_manager and session_id:
+                cancellation_manager.check_cancellation_and_raise(session_id, "sending")
+        except ProcessingCancelledException:
+            logger.info("Message processing cancelled before sending")
+            return PlainTextResponse("ok")  # Don't send anything if cancelled
 
         logger.info("Sending WhatsApp reply: %r (total messages: %d)", sync_reply, len(messages))
 

@@ -76,6 +76,16 @@ flow-llm:
 flow-llm-raw:
 	. .venv/bin/activate && uv run python -m app.flow_core.cli --llm --no-rewrite --model gpt-5 --tenant default
 
+# Run the async Flow CLI - allows typing while processing (non-blocking)
+.PHONY: flow-async
+flow-async:
+	. .venv/bin/activate && uv run python -m app.flow_core.cli_async ./playground/fluxo_luminarias.json --model gpt-5
+
+# Run the unified Flow CLI - uses exact same FlowProcessor as WhatsApp (with cancellation/aggregation)
+.PHONY: flow-unified
+flow-unified:
+	. .venv/bin/activate && uv run python -m app.flow_core.cli_unified ./playground/fluxo_luminarias.json --model gpt-5
+
 # Run the Flow Core CLI with LLM using the JSON file (for testing without database)
 .PHONY: flow-llm-file
 flow-llm-file:
