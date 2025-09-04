@@ -24,6 +24,7 @@ from app.services.message_logging_service import message_logging_service
 from app.services.processing_cancellation_manager import ProcessingCancelledException
 from app.services.session_manager import RedisSessionManager
 from app.settings import get_settings
+from app.services.speech_to_text_service import SpeechToTextService
 from app.whatsapp.thread_status_updater import WhatsAppThreadStatusUpdater
 from app.whatsapp.webhook_db_handler import WebhookDatabaseHandler
 
@@ -69,7 +70,7 @@ class WhatsAppMessageProcessor:
         app_context = get_app_context(request.app)  # type: ignore[arg-type]
 
         # Step 2: Extract WhatsApp message data
-        message_data = self._extract_whatsapp_message_data(params, request)
+        message_data = await self._extract_whatsapp_message_data(params, request)
 
         # Skip processing if no meaningful message content (delivery receipts, status updates, etc.)
         if not message_data.get("sender_number") or not message_data.get("receiver_number"):
@@ -102,7 +103,7 @@ class WhatsAppMessageProcessor:
             flow_response, message_data, conversation_setup, app_context
         )
 
-    def _extract_whatsapp_message_data(
+    async def _extract_whatsapp_message_data(
         self,
         params: dict[str, Any],
         request: Request
@@ -111,6 +112,36 @@ class WhatsAppMessageProcessor:
         sender_number = params.get("From", "")
         receiver_number = params.get("To", "")
         message_text = params.get("Body", "")
+
+        # Handle audio messages early by transcribing them to text
+        if not message_text:
+            stt_service = SpeechToTextService(self.settings)
+            try:
+                num_media = int(str(params.get("NumMedia", "0")) or 0)
+                media_type = str(params.get("MediaContentType0", ""))
+                media_url = params.get("MediaUrl0")
+                if (
+                    num_media > 0
+                    and media_url
+                    and media_type.startswith("audio")
+                ):
+                    message_text = await asyncio.to_thread(
+                        stt_service.transcribe_twilio_media, media_url
+                    )
+                elif params.get("MessageType") == "audio":
+                    raw_msg = params.get("WhatsAppRawMessage", {})
+                    media_id = (
+                        raw_msg.get("audio", {}).get("id")
+                        if isinstance(raw_msg, dict)
+                        else None
+                    )
+                    if media_id:
+                        message_text = await asyncio.to_thread(
+                            stt_service.transcribe_whatsapp_api_media, media_id
+                        )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Failed to transcribe WhatsApp audio: %s", e)
+                message_text = "[audio message]"
 
         # Extract WhatsApp message ID
         message_id = (
