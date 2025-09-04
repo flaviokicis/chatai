@@ -154,3 +154,41 @@ def test_refactored_webhook_no_config_fallback(monkeypatch):
     assert response.status_code == 200
     # Should get the "not configured" error message
     assert "não está configurado" in response.text
+
+
+def test_audio_message_transcription(monkeypatch):
+    """Ensure audio messages are transcribed and processed."""
+    monkeypatch.setenv("WHATSAPP_PROVIDER", "twilio")
+    tenant, channel, flow, to_num = create_test_tenant_and_flow()
+    _patch_signature_validation(monkeypatch)
+
+    # Patch transcription service to avoid external calls
+    from app.services.speech_to_text_service import SpeechToTextService
+
+    called: dict[str, str] = {}
+
+    def fake_transcribe(self, media_url: str) -> str:  # noqa: ANN001
+        called["url"] = media_url
+        return "transcribed audio"
+
+    monkeypatch.setattr(SpeechToTextService, "transcribe_twilio_media", fake_transcribe)
+
+    client = TestClient(app)
+    headers = {"X-Twilio-Signature": "test"}
+    from_num = "whatsapp:+15550001234"
+
+    response = client.post(
+        "/webhooks/whatsapp",
+        data={
+            "From": from_num,
+            "To": to_num,
+            "NumMedia": "1",
+            "MediaUrl0": "http://example.com/audio.ogg",
+            "MediaContentType0": "audio/ogg",
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert called
+    assert len(response.text) > 0
