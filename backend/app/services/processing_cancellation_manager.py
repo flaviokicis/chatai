@@ -29,6 +29,7 @@ class ProcessingCancellationManager:
     MESSAGE_AGGREGATION_PREFIX = "msg_buffer:"
     PROCESSING_STATE_PREFIX = "processing_state:"
     CANCELLATION_PREFIX = "cancellation:"
+    AGGREGATION_LOCK_PREFIX = "agg_lock:"  # Lock to ensure only one request processes aggregation
     
     def __init__(self, store=None):
         """Initialize the cancellation manager."""
@@ -188,15 +189,17 @@ class ProcessingCancellationManager:
         if session_id in self._local_cancellation_tokens:
             del self._local_cancellation_tokens[session_id]
         
-        # Clear Redis state (do NOT clear message buffer here; it is consumed by the aggregator)
+        # Clear Redis state including aggregation lock
         if self._store and hasattr(self._store, "_r"):
             try:
                 state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
                 cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
+                lock_key = f"{self.AGGREGATION_LOCK_PREFIX}{session_id}"
+                buffer_key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
                 
                 # Delete all related keys
-                self._store._r.delete(state_key, cancel_key)
-                logger.debug(f"Cleared processing state for session {session_id}")
+                self._store._r.delete(state_key, cancel_key, lock_key, buffer_key)
+                logger.debug(f"Cleared processing state and aggregation lock for session {session_id}")
             except Exception as e:
                 logger.warning(f"Failed to clear Redis state: {e}")
     
@@ -257,37 +260,96 @@ class ProcessingCancellationManager:
                 if message not in state.messages:
                     state.messages.append(message)
     
+    def is_aggregation_available(self, session_id: str) -> bool:
+        """Check if aggregation can be claimed for a session."""
+        if not self._store or not hasattr(self._store, "_r"):
+            return True  # In-memory mode is always available
+        
+        try:
+            lock_key = f"{self.AGGREGATION_LOCK_PREFIX}{session_id}"
+            # Check if lock exists
+            return not bool(self._store._r.exists(lock_key))
+        except Exception:
+            return True  # Default to available on error
+    
+    def try_claim_aggregation(self, session_id: str) -> str | None:
+        """Try to atomically claim and get aggregated messages.
+        
+        Returns the aggregated messages if successfully claimed, None if another request already claimed them.
+        """
+        if not self._store or not hasattr(self._store, "_r"):
+            return self._get_aggregated_from_memory(session_id)
+        
+        try:
+            # Use a unique ID for this aggregation attempt
+            claim_id = str(uuid.uuid4())
+            lock_key = f"{self.AGGREGATION_LOCK_PREFIX}{session_id}"
+            
+            # Try to set the lock (expires in 30 seconds to prevent deadlocks)
+            # Lock is properly cleared when mark_processing_complete is called
+            if not self._store._r.set(lock_key, claim_id, nx=True, ex=30):
+                # Another request already has the lock
+                logger.debug(f"Another request is already processing aggregation for {session_id}")
+                return None
+            
+            # We have the lock, get and clear the messages atomically
+            key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
+            pipeline = self._store._r.pipeline()
+            pipeline.lrange(key, 0, -1)
+            pipeline.delete(key)
+            results = pipeline.execute()
+            msg_data_list = results[0]
+            
+            if not msg_data_list:
+                # No messages to aggregate, release lock
+                self._store._r.delete(lock_key)
+                return None
+            
+            messages: list[str] = []
+            for msg_data in msg_data_list:
+                try:
+                    data = json.loads(msg_data)
+                    content = data.get("content")
+                    if isinstance(content, str) and content.strip():
+                        messages.append(content)
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    continue
+            
+            if not messages:
+                # No valid messages, release lock
+                self._store._r.delete(lock_key)
+                return None
+            
+            # Successfully got messages, lock will expire naturally
+            return self._aggregate_messages(messages)
+            
+        except Exception as e:
+            logger.warning(f"Failed to claim aggregation: {e}")
+            return None
+    
     def get_aggregated_messages(self, session_id: str) -> str:
         """Get all buffered messages aggregated intelligently."""
+        # Try to claim the aggregation
+        result = self.try_claim_aggregation(session_id)
+        if result is not None:
+            return result
+        
+        # If we couldn't claim it, return empty (another request is handling it)
+        return ""
+    
+    def _get_aggregated_from_memory(self, session_id: str) -> str:
+        """Fallback to get aggregated messages from memory."""
         messages: list[str] = []
         
-        # Use Redis as the primary source of truth with atomic operation
-        if self._store and hasattr(self._store, "_r"):
-            try:
-                key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
-                # Use a pipeline to make the read+delete atomic
-                pipeline = self._store._r.pipeline()
-                pipeline.lrange(key, 0, -1)
-                pipeline.delete(key)
-                results = pipeline.execute()
-                msg_data_list = results[0]  # The lrange result
-                
-                if msg_data_list:
-                    for msg_data in msg_data_list:
-                        try:
-                            data = json.loads(msg_data)
-                            content = data.get("content")
-                            if isinstance(content, str) and content.strip():
-                                messages.append(content)
-                        except (json.JSONDecodeError, KeyError, TypeError):
-                            continue
-            except Exception as e:
-                logger.warning(f"Failed to retrieve messages from Redis: {e}")
-        
-        # Fallback to local memory if Redis had no messages or failed
-        if not messages and session_id in self._processing_states and self._processing_states[session_id].messages:
+        # Get messages from local memory
+        if session_id in self._processing_states and self._processing_states[session_id].messages:
             messages = self._processing_states[session_id].messages.copy()
             self._processing_states[session_id].messages.clear()
+        
+        return self._aggregate_messages(messages) if messages else ""
+    
+    def _aggregate_messages(self, messages: list[str]) -> str:
+        """Aggregate multiple messages intelligently."""
         
         if not messages:
             return ""

@@ -241,9 +241,10 @@ class FlowProcessor:
                 logger.info(f"Waiting {wait_time}s for message aggregation...")
                 await asyncio.sleep(wait_time)
                 
-                # Get all buffered messages
+                # Try to claim and get all buffered messages
                 aggregated_message = self._cancellation_manager.get_aggregated_messages(session_id)
                 if aggregated_message:
+                    # We successfully claimed the aggregation
                     from dataclasses import replace
                     request = replace(request, user_message=aggregated_message)
                     logger.info(f"Processing aggregated message for session {session_id}: {aggregated_message[:100]}...")
@@ -251,12 +252,12 @@ class FlowProcessor:
                     # Clear the cancellation flag so the aggregated message can be processed
                     self._cancellation_manager.clear_cancellation_flag(session_id)
                 else:
-                    # No messages to aggregate, this request was cancelled
-                    logger.info(f"No messages to aggregate for cancelled session {session_id}, exiting")
+                    # Either no messages or another request is handling aggregation
+                    logger.info(f"Aggregation already claimed by another request for session {session_id}, exiting")
                     self._cancellation_manager.mark_processing_complete(session_id)
                     return FlowResponse(
                         result=FlowProcessingResult.ERROR,
-                        message="Processing cancelled - messages being aggregated",
+                        message="Processing cancelled - another request handling aggregation",
                         context=None,
                         metadata={"cancelled": True}
                     )
