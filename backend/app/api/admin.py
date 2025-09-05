@@ -30,7 +30,6 @@ from app.db.repository import (
     create_channel_instance,
     create_tenant_with_config,
     delete_tenant_cascade,
-    get_active_tenants,
     get_active_tenants_with_counts,
     get_channel_instances_by_tenant,
     get_flow_by_id,

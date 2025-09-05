@@ -16,7 +16,6 @@ from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
 
 from app.core.app_context import get_app_context
-from app.core.channel_adapter import ConversationalRewriter
 from app.core.flow_processor import FlowProcessingResult, FlowProcessor, FlowRequest
 from app.db.models import MessageDirection, MessageStatus
 from app.services.deduplication_service import MessageDeduplicationService
@@ -354,10 +353,8 @@ class WhatsAppMessageProcessor:
                 cancellation_manager.mark_processing_complete(session_id)
             return PlainTextResponse("ok")  # Don't send anything if cancelled
 
-        # Apply WhatsApp message rewriting
-        messages = self._rewrite_for_whatsapp(
-            reply_text, flow_response, message_data, conversation_setup, app_context
-        )
+        # Get messages directly from flow response
+        messages = self._get_whatsapp_messages(flow_response)
 
         # Extract sync response
         first_message = messages[0] if messages else {"text": reply_text, "delay_ms": 0}
@@ -391,38 +388,21 @@ class WhatsAppMessageProcessor:
 
         return self.adapter.build_sync_response(sync_reply)
 
-    def _rewrite_for_whatsapp(
+    def _get_whatsapp_messages(
         self,
-        reply_text: str,
         flow_response,
-        message_data: dict[str, Any],
-        conversation_setup: Any,
-        app_context: Any,
     ) -> list[dict[str, Any]]:
-        """Apply WhatsApp-specific message rewriting."""
-        rewriter = ConversationalRewriter(getattr(app_context, "llm", None))
-
-        # Debug: Check what's in the flow context history
-        flow_history = getattr(flow_response.context, "history", None) if flow_response.context else None
-        if flow_history:
-            logger.debug(f"Flow context history has {len(list(flow_history))} turns")
-            for i, turn in enumerate(flow_history):
-                logger.debug(f"  Turn {i}: {getattr(turn, 'role', 'unknown')} - {str(getattr(turn, 'content', ''))[:50]}...")
-        else:
-            logger.debug("No flow context history available")
+        """Get WhatsApp messages from flow response."""
+        # Check if flow response has messages
+        if hasattr(flow_response, "messages") and flow_response.messages:
+            return flow_response.messages
         
-        chat_history = rewriter.build_chat_history(
-            flow_context_history=flow_history,
-            latest_user_input=message_data["message_text"]
-        )
-
-        print(f"[DEBUG WHATSAPP] About to rewrite message: '{reply_text[:100]}...'")
-        print(f"[DEBUG WHATSAPP] Flow response metadata: {getattr(flow_response, 'metadata', {})}")
-
-        # Check if this is an admin operation that shouldn't be rewritten
-        metadata = getattr(flow_response, "metadata", {})
-        is_admin_operation = (
-            metadata.get("tool_name") == "ModifyFlowLive" or
+        # Fallback to message field
+        if hasattr(flow_response, "message") and flow_response.message:
+            return [{"text": flow_response.message, "delay_ms": 0}]
+        
+        # Final fallback
+        return [{"text": "Entendi. Vou te ajudar com isso.", "delay_ms": 0}] or
             metadata.get("flow_modified") == True or
             "admin" in reply_text.lower() or
             "instrução" in reply_text.lower()

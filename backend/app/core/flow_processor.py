@@ -24,7 +24,10 @@ from app.flow_core.compiler import compile_flow
 from app.flow_core.ir import Flow
 from app.flow_core.runner import FlowTurnRunner
 from app.services.admin_phone_service import AdminPhoneService
-from app.services.processing_cancellation_manager import ProcessingCancellationManager, ProcessingCancelledException
+from app.services.processing_cancellation_manager import (
+    ProcessingCancellationManager,
+    ProcessingCancelledException,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -157,7 +160,7 @@ class FlowProcessor:
         self._session_manager = session_manager
         self._thread_updater = thread_updater
         # Pass the session manager's store to cancellation manager for Redis access
-        store = getattr(session_manager, '_store', None)
+        store = getattr(session_manager, "_store", None)
         self._cancellation_manager = ProcessingCancellationManager(store=store)
 
     def _check_admin_status(self, request: FlowRequest) -> bool:
@@ -219,7 +222,7 @@ class FlowProcessor:
             # Add current message to buffer immediately to ensure cross-request visibility
             if request.user_message:
                 self._cancellation_manager.add_message_to_buffer(session_id, request.user_message)
-                
+
                 # Wait a very short time to catch truly rapid messages
                 # We can't wait too long or we'll delay every single message
                 import asyncio
@@ -232,7 +235,7 @@ class FlowProcessor:
                 logger.info(f"Cancelling ongoing processing for session {session_id} due to new message")
                 # Cancel the ongoing processing
                 self._cancellation_manager.cancel_processing(session_id)
-                
+
                 # Wait for a bit longer to allow:
                 # 1. Previous processing to stop
                 # 2. More messages to potentially arrive for aggregation
@@ -240,7 +243,7 @@ class FlowProcessor:
                 wait_time = 1.5  # Increased from 0.5 to allow more messages to arrive
                 logger.info(f"Waiting {wait_time}s for message aggregation...")
                 await asyncio.sleep(wait_time)
-                
+
                 # Try to claim and get all buffered messages
                 aggregated_message = self._cancellation_manager.get_aggregated_messages(session_id)
                 if aggregated_message:
@@ -270,7 +273,7 @@ class FlowProcessor:
             try:
                 # Create cancellation token for this processing
                 cancellation_token = self._cancellation_manager.create_cancellation_token(session_id)
-                
+
                 # Step 2: Process through flow engine with cancellation support
                 flow_response = await self._execute_flow(
                     request, session_id, app_context, cancellation_token
@@ -297,10 +300,10 @@ class FlowProcessor:
                     flow_response.metadata = {}
                 flow_response.metadata["session_id"] = session_id
                 flow_response.metadata["cancellation_manager"] = self._cancellation_manager
-                
+
                 # DO NOT mark processing complete here - let the message_processor do it
                 # after the message is actually sent. This keeps the cancellation window open.
-                
+
                 return flow_response
 
             finally:
@@ -353,7 +356,7 @@ class FlowProcessor:
 
             # Load existing context
             existing_context = self._session_manager.load_context(session_id)
-            
+
             # Debug: Log what's in the loaded context
             if existing_context and existing_context.history:
                 logger.debug(f"Loaded context has {len(existing_context.history)} history turns:")
@@ -372,15 +375,6 @@ class FlowProcessor:
 
                 # Check admin status
                 is_admin = self._check_admin_status(request)
-                if is_admin:
-                    from app.flow_core.tool_schemas import ModifyFlowLive
-                    extra_tools.append(ModifyFlowLive)
-                    instruction_prefix = (
-                        "ADMIN MODE: You have access to live flow modification.\n"
-                        "Use ModifyFlowLive ONLY when the user gives clear instructions about changing flow behavior.\n"
-                        "Examples: 'você deveria perguntar sobre tipo de unha', 'next time ask about X first'\n"
-                        "Do NOT use this tool for regular conversation or questions about the flow.\n"
-                    )
 
                 # Track modification outcome for ModifyFlowLive and provide explicit user feedback
                 modification_intercepted = False
@@ -517,7 +511,7 @@ CRITICAL FLOW SAFETY RULES:
                                         )
 
                                         return True
-                                        
+
                                     except concurrent.futures.TimeoutError:
                                         logger.error("Live flow modification timed out")
                                         print("[DEBUG PROCESSOR] Modification timed out")
@@ -569,7 +563,7 @@ CRITICAL FLOW SAFETY RULES:
 
 
                 # If we intercepted ModifyFlowLive, return the explicit success/error message
-                if 'modification_intercepted' in locals() and modification_intercepted:
+                if "modification_intercepted" in locals() and modification_intercepted:
                     return FlowResponse(
                         result=FlowProcessingResult.CONTINUE,
                         message=modification_message or "",
@@ -603,11 +597,15 @@ CRITICAL FLOW SAFETY RULES:
                     "tool_name": result.tool_name,
                     "answers_diff": result.answers_diff,
                 }
-                
+
                 # Include all metadata from the turn result (including ack_message)
                 if result.metadata:
                     response_metadata.update(result.metadata)
-                
+
+                # Pass through messages if available
+                if hasattr(result, "messages") and result.messages:
+                    response_metadata["messages"] = result.messages
+
                 return FlowResponse(
                     result=flow_result,
                     message=result.assistant_message,

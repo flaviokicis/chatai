@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from langchain.chat_models import init_chat_model
+from langfuse import get_client
 
-from langfuse import get_client, observe
 from .llm import LLMClient
 
 if TYPE_CHECKING:
@@ -59,7 +58,7 @@ class LangChainToolsLLM(LLMClient):
 
             # Extract token usage if available
             usage = getattr(result, "usage_metadata", None) or getattr(result, "response_metadata", {}).get("usage", {})
-            
+
             calls: list[dict[str, Any]] = []
             for tc in raw_calls:
                 name = tc.get("name")
@@ -110,7 +109,7 @@ class LangChainToolsLLM(LLMClient):
             generation.end()
 
             return out
-            
+
         except Exception as e:
             generation.update(
                 output=f"ERROR: {e}",

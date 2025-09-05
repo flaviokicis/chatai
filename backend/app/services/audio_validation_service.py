@@ -45,9 +45,10 @@ class AudioValidationService:
     def _get_audio_duration_audioread(self, audio_bytes: bytes) -> float | None:
         """Get audio duration using audioread library."""
         try:
-            import audioread
             import tempfile
             from pathlib import Path
+
+            import audioread
 
             # Write bytes to temporary file (audioread needs a file path)
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as temp_file:
@@ -71,7 +72,7 @@ class AudioValidationService:
             logger.debug("audioread failed to parse audio: %s", e)
 
         return None
-    
+
     def validate_twilio_media_duration(self, media_url: str, auth: tuple[str, str] | None = None) -> tuple[bool, float | None, str | None]:
         """
         Validate audio duration for Twilio media URL.

@@ -8,7 +8,8 @@ from app.core.agent_base import Agent
 from app.core.messages import AgentResult, InboundMessage, OutboundMessage
 from app.flow_core.runner import FlowTurnRunner
 from app.flow_core.state import FlowContext
-from app.flow_core.tool_schemas import SelectFlowPath
+
+# Tool imports removed - no longer needed
 
 if TYPE_CHECKING:  # pragma: no cover - import-time only for typing
     from app.core.llm import LLMClient
@@ -35,15 +36,15 @@ class BaseAgent(Agent):
     # Helper used by concrete agents
     def _escalate(self, reason: str, summary: dict[str, Any]) -> AgentResult:
         self.deps.handoff.escalate(self.user_id, reason, summary)
-        
+
         # Clear chat history to prevent context bleeding when user re-engages
-        if hasattr(self.deps.store, 'clear_chat_history'):
+        if hasattr(self.deps.store, "clear_chat_history"):
             try:
                 deleted_keys = self.deps.store.clear_chat_history(self.user_id, self.agent_type)
                 logger.info("Cleared %d chat history keys for user %s after handoff", deleted_keys, self.user_id)
             except Exception as e:
                 logger.warning("Failed to clear chat history after handoff for user %s: %s", self.user_id, e)
-        
+
         return AgentResult(
             outbound=OutboundMessage(
                 text="Transferindo você para um atendente humano para mais assistência."

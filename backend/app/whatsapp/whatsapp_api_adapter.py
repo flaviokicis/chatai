@@ -141,7 +141,7 @@ class WhatsAppApiAdapter:
                 return interactive.get("button_reply", {}).get("title", "")
             if interactive.get("type") == "list_reply":
                 return interactive.get("list_reply", {}).get("title", "")
-        
+
         # For audio messages, return empty string so transcription can happen
         if message_type == "audio":
             return ""
@@ -282,15 +282,15 @@ class WhatsAppApiAdapter:
             # Fix Brazilian mobile number format
             # WhatsApp webhooks may send old 8-digit format (e.g., 553188245287)
             # but the API expects new 9-digit format (e.g., 5531988245287)
-            # 
+            #
             # Background: Brazil added a 9th digit to mobile numbers starting in 2012-2016.
             # WhatsApp's webhook sometimes sends the old format without the 9, but the API
             # requires the new format. This is a known issue in the WhatsApp developer community.
             # See: https://github.com/pedroslopez/whatsapp-web.js/issues/1967
-            
+
             original_phone = to_phone  # Keep original for fallback
             converted_phone = None
-            
+
             if to_phone.startswith("55") and len(to_phone) == 12:  # Brazilian number with 8 digits
                 # Check if it's a valid Brazilian area code (11-99)
                 area_code = to_phone[2:4]
@@ -298,7 +298,7 @@ class WhatsAppApiAdapter:
                     # Since we can't reliably determine mobile vs landline from the number alone,
                     # we'll try adding the 9 prefix and fall back to original if it fails
                     converted_phone = to_phone[:4] + "9" + to_phone[4:]
-                    logger.debug("Will try Brazilian number with 9-digit format: %s -> %s", 
+                    logger.debug("Will try Brazilian number with 9-digit format: %s -> %s",
                                original_phone, converted_phone)
                     to_phone = converted_phone
 
@@ -327,7 +327,7 @@ class WhatsAppApiAdapter:
                 logger.warning("9-digit format failed, trying original 8-digit format: %s", original_phone)
                 payload["to"] = original_phone
                 response = requests.post(url, headers=headers, json=payload, timeout=10)
-                
+
                 if response.status_code == 200:
                     logger.info("Successfully sent with original format: %s", original_phone)
                 else:

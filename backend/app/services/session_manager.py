@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class RedisSessionManager(SessionManager):
     """Redis-based implementation of session management."""
 
-     
+
     def __init__(self, store: ConversationStore):
         self._store = store
 

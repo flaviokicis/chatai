@@ -167,7 +167,7 @@ def test_audio_message_transcription(monkeypatch):
 
     called: dict[str, str] = {}
 
-    def fake_transcribe(self, media_url: str) -> str:  # noqa: ANN001
+    def fake_transcribe(self, media_url: str) -> str:
         called["url"] = media_url
         return "transcribed audio"
 

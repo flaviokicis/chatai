@@ -45,7 +45,7 @@ class SpeechToTextService:
     def _transcribe(self, audio_bytes: bytes, filename: str) -> str:
         import logging
         logger = logging.getLogger(__name__)
-        
+
         # Start Langfuse generation for cost tracking
         generation = self._langfuse.start_observation(
             name="audio_transcription",
@@ -59,7 +59,7 @@ class SpeechToTextService:
                 "filename": filename,
             }
         )
-        
+
         try:
             headers = {"Authorization": f"Bearer {self._settings.openai_api_key}"}
             files = {"file": (filename, audio_bytes)}
@@ -67,9 +67,9 @@ class SpeechToTextService:
                 "model": "whisper-1",  # Using standard Whisper model name
                 "language": "pt"  # Portuguese language hint for better accuracy
             }
-            
+
             logger.info("Starting audio transcription with OpenAI (size: %d bytes)", len(audio_bytes))
-            
+
             resp = requests.post(
                 "https://api.openai.com/v1/audio/transcriptions",
                 headers=headers,
@@ -78,14 +78,14 @@ class SpeechToTextService:
                 timeout=300,
             )
             resp.raise_for_status()
-            
+
             response_data = resp.json()
             transcribed_text = response_data.get("text", "")
-            
+
             # Calculate audio duration in seconds (approximate based on file size)
             # WhatsApp audio is typically Opus at ~16kbps = 2KB/s
             estimated_duration_seconds = len(audio_bytes) / 2000
-            
+
             # Update Langfuse with output and estimated usage
             generation.update(
                 output=transcribed_text,
@@ -101,11 +101,11 @@ class SpeechToTextService:
                 }
             )
             generation.end()
-            
+
             logger.info("Audio transcription completed: %r", transcribed_text)
-            
+
             return transcribed_text
-            
+
         except Exception as e:
             # Track error in Langfuse
             generation.update(
