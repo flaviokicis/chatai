@@ -83,7 +83,10 @@ class ConversationalRewriter:
                 tool_context=tool_context,
                 current_time=current_time,
             )
-        except Exception:
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Message rewriting failed, using original text: {e}")
             # Fallback to single message
             return [{"text": text, "delay_ms": 0}]
 

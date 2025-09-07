@@ -419,15 +419,23 @@ class LLMFlowEngine:
             )
 
         if tool_name == "ProvideInformation":
-            # Stay on the same node. Use the base prompt as the message, and pass any ack as metadata for rewriter context.
-            base = self._generate_contextual_prompt(node, ctx, project_context)
+            # For ProvideInformation, only use the ack_message as the response
+            # The rewriter will handle creating the appropriate messages
+            # We don't want to repeat the base prompt unnecessarily
+            message = ack_text if ack_text else ""
+            
+            # If no ack_message provided, generate a contextual prompt
+            if not message:
+                message = self._generate_contextual_prompt(node, ctx, project_context)
+            
             return EngineResponse(
                 kind="prompt",
-                message=base,
+                message=message,
                 node_id=node.id,
                 metadata={
                     "tool_name": "ProvideInformation",
                     **({"ack_message": ack_text} if ack_text else {}),
+                    "is_information_only": True,  # Flag to indicate this is just information, not a new prompt
                 },
             )
 

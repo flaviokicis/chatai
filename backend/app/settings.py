@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     # Admin authentication
     admin_username: str = Field(default="super@inboxed.com", alias="ADMIN_USERNAME")
     admin_password: str | None = Field(default=None, alias="ADMIN_PASSWORD")
+    # Audio validation
+    max_audio_duration_seconds: int = Field(default=300, alias="MAX_AUDIO_DURATION_SECONDS")  # 5 minutes
 
     model_config = SettingsConfigDict(
         env_file=".env",
