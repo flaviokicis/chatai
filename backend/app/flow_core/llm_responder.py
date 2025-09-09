@@ -20,6 +20,17 @@ from .services.responder import EnhancedFlowResponder
 
 
 @dataclass(slots=True)
+class ResponseConfig:
+    """Configuration for LLM response generation."""
+
+    allowed_values: list[str] | None = None
+    agent_custom_instructions: str | None = None
+    project_context: ProjectContext | None = None
+    is_completion: bool = False
+    available_edges: list[dict[str, Any]] | None = None
+
+
+@dataclass(slots=True)
 class FlowResponse:
     """Response from the LLM responder."""
 
@@ -48,8 +59,8 @@ class LLMFlowResponder:
 
     def __init__(
         self,
-        llm: LLMClient,  # type: ignore[name-defined]
-        thought_tracer: DatabaseThoughtTracer | None = None,  # type: ignore[name-defined]
+        llm: LLMClient,
+        thought_tracer: DatabaseThoughtTracer | None = None,
     ) -> None:
         """
         Initialize the responder.
@@ -64,12 +75,9 @@ class LLMFlowResponder:
         self,
         prompt: str,
         pending_field: str | None,
-        ctx: FlowContext,  # type: ignore[name-defined]
+        ctx: FlowContext,
         user_message: str,
-        allowed_values: list[str] | None = None,
-        *,
-        agent_custom_instructions: str | None = None,
-        project_context: ProjectContext | None = None,  # type: ignore[name-defined]
+        config: ResponseConfig | None = None,
     ) -> FlowResponse:
         """
         Generate a response using enhanced GPT-5 processing.
@@ -79,20 +87,22 @@ class LLMFlowResponder:
             pending_field: The field we're trying to fill
             ctx: The flow context with history and state
             user_message: The user's message
-            allowed_values: Optional list of allowed values for validation
-            agent_custom_instructions: Custom instructions (integrated into prompt)
-            project_context: Project context for styling
+            config: Optional configuration for response generation
 
         Returns:
             FlowResponse with updates, messages, and metadata
         """
+        # Use default config if none provided
+        if config is None:
+            config = ResponseConfig()
+
         # Determine if this is a completion
-        is_completion = ctx.is_complete
+        is_completion = ctx.is_complete or config.is_completion
 
         # Merge custom instructions into prompt if provided
         enhanced_prompt = prompt
-        if agent_custom_instructions:
-            enhanced_prompt = f"{agent_custom_instructions}\n\n{prompt}"
+        if config.agent_custom_instructions:
+            enhanced_prompt = f"{config.agent_custom_instructions}\n\n{prompt}"
 
         # Call the enhanced responder
         output = self._enhanced_responder.respond(
@@ -100,9 +110,10 @@ class LLMFlowResponder:
             pending_field=pending_field,
             context=ctx,
             user_message=user_message,
-            allowed_values=allowed_values,
-            project_context=project_context,
+            allowed_values=config.allowed_values,
+            project_context=config.project_context,
             is_completion=is_completion,
+            available_edges=config.available_edges,
         )
 
         # Convert to FlowResponse format
@@ -114,7 +125,7 @@ class LLMFlowResponder:
         return FlowResponse(
             updates=result.updates,
             message=primary_message,
-            messages=output.messages,
+            messages=[dict(msg) for msg in output.messages] if output.messages else None,
             tool_name=output.tool_name,
             confidence=output.confidence,
             metadata=result.metadata,

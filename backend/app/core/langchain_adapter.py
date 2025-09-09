@@ -22,20 +22,20 @@ class LangChainToolsLLM(LLMClient):
         """Get the model name from the underlying chat model."""
         # Try to extract model name from LangChain chat model
         if hasattr(self._chat, "model_name"):
-            return self._chat.model_name
+            return str(self._chat.model_name)
         if hasattr(self._chat, "model"):
-            return self._chat.model
+            return str(self._chat.model)
         if hasattr(self._chat, "_model_name"):
-            return self._chat._model_name
+            return str(self._chat._model_name)
         # Fallback: try to get from class name or other attributes
         class_name = self._chat.__class__.__name__
         if "Gemini" in class_name:
             return "gemini-2.5-flash"
         if "OpenAI" in class_name or "GPT" in class_name:
             return "gpt-4"
-        return class_name
+        return str(class_name)
 
-    def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
+    def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:
         # Start Langfuse generation with proper cost tracking
         generation = self._langfuse.start_observation(
             name="langchain_extract",
@@ -78,10 +78,19 @@ class LangChainToolsLLM(LLMClient):
 
             out: dict[str, Any] = {"content": content, "tool_calls": calls}
 
-            # Backwards compatibility: expose first tool call's args at top level
+            # Expose a preferred tool call's args at top level for convenience
             if calls:
                 chosen = None
-                for name in ("UpdateAnswersFlow", "RequestHumanHandoff"):
+                # Prefer our simplified essential tools in this order
+                preferred = (
+                    "UpdateAnswers",
+                    "RequestHumanHandoff",
+                    "StayOnThisNode",
+                    "NavigateToNode",
+                    "ConfirmCompletion",
+                    "RestartConversation",
+                )
+                for name in preferred:
                     chosen = next((c for c in calls if c.get("name") == name), None)
                     if chosen:
                         break

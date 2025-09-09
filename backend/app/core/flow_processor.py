@@ -56,8 +56,8 @@ class FlowRequest:
     user_message: str
     flow_definition: dict[str, Any]
     flow_metadata: dict[str, Any]  # flow_name, flow_id, etc.
-    tenant_id: UUID  # type: ignore[name-defined]
-    project_context: ProjectContext  # type: ignore[name-defined]
+    tenant_id: UUID
+    project_context: ProjectContext
     channel_id: str | None = None  # Channel identifier for customer traceability
 
 
@@ -67,7 +67,7 @@ class FlowResponse:
 
     result: FlowProcessingResult
     message: str | None
-    context: FlowContext | None  # type: ignore[name-defined]
+    context: FlowContext | None
     metadata: dict[str, Any]
     error: str | None = None
 
@@ -296,10 +296,14 @@ class FlowProcessor:
                     self._session_manager.clear_context(session_id)
 
                 # Add session_id to metadata for downstream cancellation checks
-                if not flow_response.metadata:
-                    flow_response.metadata = {}
-                flow_response.metadata["session_id"] = session_id
-                flow_response.metadata["cancellation_manager"] = self._cancellation_manager
+                # Create new metadata dict since FlowResponse.metadata is read-only
+                metadata_update = dict(flow_response.metadata) if flow_response.metadata else {}
+                metadata_update["session_id"] = session_id
+                metadata_update["cancellation_manager"] = self._cancellation_manager
+                
+                # Create new FlowResponse with updated metadata
+                from dataclasses import replace
+                flow_response = replace(flow_response, metadata=metadata_update)
 
                 # DO NOT mark processing complete here - let the message_processor do it
                 # after the message is actually sent. This keeps the cancellation window open.
@@ -370,7 +374,7 @@ class FlowProcessor:
                 thought_tracer = DatabaseThoughtTracer(thought_session)
 
                 # Check if user is admin for live flow modification
-                extra_tools = []
+                extra_tools: list[type] = []
                 instruction_prefix = ""
 
                 # Check admin status
@@ -442,8 +446,8 @@ class FlowProcessor:
                                         tools = []
                                         for tool_config in FLOW_MODIFICATION_TOOLS:
                                             tools.append(ToolSpec(
-                                                name=tool_config["name"],
-                                                description=tool_config["description"],
+                                                name=str(tool_config["name"]),
+                                                description=str(tool_config["description"]) if tool_config.get("description") else None,
                                                 args_schema=tool_config["args_schema"],
                                                 func=tool_config["func"]
                                             ))
@@ -538,12 +542,8 @@ CRITICAL FLOW SAFETY RULES:
                 # Create and run flow
                 runner = FlowTurnRunner(
                     compiled_flow=compiled_flow,
-                    llm=self._llm,
-                    strict_mode=True,
-                    thought_tracer=thought_tracer,
-                    extra_tools=extra_tools,
-                    instruction_prefix=instruction_prefix,
-                    on_tool_event=on_tool_event,
+                    llm_client=self._llm,
+                    use_all_tools=True,
                 )
 
                 # Initialize context
@@ -567,7 +567,7 @@ CRITICAL FLOW SAFETY RULES:
                     return FlowResponse(
                         result=FlowProcessingResult.CONTINUE,
                         message=modification_message or "",
-                        context=result.ctx,
+                        context=ctx,
                         metadata={
                             "tool_name": "ModifyFlowLive",
                             "flow_modified": modification_was_applied,
@@ -593,7 +593,7 @@ CRITICAL FLOW SAFETY RULES:
                     flow_result = FlowProcessingResult.CONTINUE
 
                 # Build metadata including all tool metadata
-                response_metadata = {
+                response_metadata: dict[str, Any] = {
                     "tool_name": result.tool_name,
                     "answers_diff": result.answers_diff,
                 }
@@ -609,7 +609,7 @@ CRITICAL FLOW SAFETY RULES:
                 return FlowResponse(
                     result=flow_result,
                     message=result.assistant_message,
-                    context=result.ctx,
+                    context=ctx,
                     metadata=response_metadata,
                 )
 

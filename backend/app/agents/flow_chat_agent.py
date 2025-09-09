@@ -58,7 +58,7 @@ class FlowChatAgent:
         flow_modified = False
         modification_details: list[str] = []
 
-        # Create custom tool mapping to handle LangChain's class name convention
+        # Extract tool schemas for LangChain
         tool_schemas = []
         schema_to_tool_map = {}  # Maps schema class name -> actual tool name
 

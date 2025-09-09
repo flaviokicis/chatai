@@ -127,7 +127,7 @@ class TestLLMFlowResponder:
 
         # Check that module is clean
         assert "FLOW_TOOLS" not in dir(module)
-        assert "UpdateAnswersFlow" not in dir(module)  # No legacy aliases
+        assert "UpdateAnswers" not in dir(module)  # No legacy aliases
 
 
 class TestToolSimplification:

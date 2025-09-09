@@ -45,7 +45,7 @@ class SequentialMockLLM(LLMClient):
 
         # Default fallback
         return {
-            "__tool_name__": "UpdateAnswersFlow",
+            "__tool_name__": "UpdateAnswers",
             "updates": {},
             "assistant_message": "I understand.",
         }
@@ -331,39 +331,39 @@ class TestSubflowExecution:
             [
                 # Main flow questions
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"product": "Widget"},
                     "assistant_message": "Got it, you want a Widget.",
                 },
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"quantity": "5"},
                     "assistant_message": "5 Widgets, noted.",
                 },
                 # Address subflow
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"street_address": "123 Main St"},
                     "assistant_message": "Address recorded.",
                 },
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"city": "Springfield"},
                     "assistant_message": "City noted.",
                 },
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"postal_code": "12345"},
                     "assistant_message": "Postal code saved.",
                 },
                 # Payment subflow
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"payment_method": "credit_card"},
                     "assistant_message": "Using credit card.",
                 },
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"card_number": "4111111111111111"},
                     "assistant_message": "Card information saved.",
                 },
@@ -419,12 +419,12 @@ class TestSubflowExecution:
         mock_llm = SequentialMockLLM(
             [
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"payment_method": "credit_card"},
                     "assistant_message": "Credit card selected.",
                 },
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"card_number": "4111111111111111"},
                     "assistant_message": "Card saved.",
                 },
@@ -541,7 +541,7 @@ class TestFlowNavigation:
                 },
                 # Answer second question
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"email": "test@example.com"},
                     "assistant_message": "Email saved.",
                 },
@@ -553,7 +553,7 @@ class TestFlowNavigation:
                 },
                 # Now answer it
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"name": "Alice"},
                     "assistant_message": "Thanks, Alice!",
                 },
@@ -614,12 +614,12 @@ class TestFlowNavigation:
             [
                 # First, ask for clarification
                 {
-                    "__tool_name__": "UnknownAnswer",
+                    "__tool_name__": "StayOnThisNode",
                     "reason": "clarification_needed",
                 },
                 # Then provide answer
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"complex_answer": "blue-green"},
                 },
             ]
@@ -642,7 +642,7 @@ class TestFlowNavigation:
         )
 
         # LLM should return clarification and update context
-        assert clarification_response.tool_name == "UnknownAnswer"
+        assert clarification_response.tool_name == "StayOnThisNode"
         assert ctx.clarification_count > 0
         assert clarification_response.metadata is not None
         assert clarification_response.metadata.get("reason") == "clarification_needed"
@@ -654,7 +654,7 @@ class TestFlowNavigation:
         )
 
         # LLM should extract the answer
-        assert answer_response.tool_name == "UpdateAnswersFlow"
+        assert answer_response.tool_name == "UpdateAnswers"
         assert "blue-green" in answer_response.updates.get("complex_answer", "")
 
         # Apply updates and process with engine
@@ -753,12 +753,12 @@ class TestEngineIntelligence:
         mock_llm = SequentialMockLLM(
             [
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"name": "Bob"},
                     "assistant_message": "Hey Bob! Nice to meet you!",
                 },
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"reason": "just browsing"},
                     "assistant_message": "Cool, happy to help you browse around!",
                 },
@@ -824,7 +824,7 @@ class TestEngineIntelligence:
         mock_llm = SequentialMockLLM(
             [
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"intent": "my computer won't start"},
                     "assistant_message": "I see you're having technical issues.",
                 },
@@ -887,7 +887,7 @@ class TestEngineIntelligence:
         mock_llm = SequentialMockLLM(
             [
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"budget": "50000"},
                     "assistant_message": "Great budget to work with!",
                 },

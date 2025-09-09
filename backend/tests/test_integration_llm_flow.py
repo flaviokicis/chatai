@@ -282,7 +282,7 @@ class TestLLMFlowIntegration:
         # 2. LLM should extract intent correctly
         result = runner.process_turn(ctx, "Preciso de suporte técnico")
         assert result.answers_diff.get("user_intent") is not None
-        assert result.tool_name == "UpdateAnswersFlow"
+        assert result.tool_name == "UpdateAnswers"
         interactions.append(("intent", "Preciso de suporte técnico", result.assistant_message, result.tool_name))
         rate_limit_delay()
 
@@ -301,7 +301,7 @@ class TestLLMFlowIntegration:
         # 5. Test providing answer after clarification
         result = runner.process_turn(ctx, "suporte")
         # Should extract answer or provide information
-        assert result.tool_name in ["UpdateAnswersFlow", "ProvideInformation"]
+        assert result.tool_name in ["UpdateAnswers", "StayOnThisNode"]
         interactions.append(("answer", "suporte", result.assistant_message, result.tool_name))
 
         # Print interactions for debugging
@@ -312,7 +312,7 @@ class TestLLMFlowIntegration:
                 print(f"    Assistant: {assistant_msg[:100]}...")
 
         # Verify we have essential functionality working
-        assert len([i for i in interactions if i[3] == "UpdateAnswersFlow"]) >= 1, "Should extract answers"
+        assert len([i for i in interactions if i[3] == "UpdateAnswers"]) >= 1, "Should extract answers"
         assert len([i for i in interactions if i[3] == "ClarifyQuestion"]) >= 1, "Should handle clarifications"
         assert len(ctx.answers) > 0, "Should collect some answers"
 
@@ -394,13 +394,13 @@ class TestLLMFlowIntegration:
         assert not result.terminal
         log_turn("O que você quer dizer com urgência? Pode explicar os diferentes níveis?", result)
 
-        # 6. Test UNKNOWN ANSWER - don't know urgency (LLM might choose ClarifyQuestion or UnknownAnswer)
+        # 6. Test UNKNOWN ANSWER - don't know urgency (LLM might choose ClarifyQuestion or StayOnThisNode)
         result = runner.process_turn(ctx)  # Should still be asking about urgency
         log_turn("", result)
 
         result = runner.process_turn(ctx, "Não sei o nível de urgência - não tenho ideia")
-        # LLM might reasonably choose either ClarifyQuestion or UnknownAnswer for uncertain responses
-        assert result.tool_name in ["UnknownAnswer", "ClarifyQuestion"]
+        # LLM might reasonably choose either ClarifyQuestion or StayOnThisNode for uncertain responses
+        assert result.tool_name in ["StayOnThisNode", "ClarifyQuestion"]
         log_turn("Não sei o nível de urgência - não tenho ideia", result)
 
         # 7. Should continue to service details despite unknown urgency (it's optional)

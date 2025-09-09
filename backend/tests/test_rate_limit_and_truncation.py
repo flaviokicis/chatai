@@ -21,7 +21,7 @@ class DummyLLM(LLMClient):
 
     def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
         return {
-            "__tool_name__": "UpdateAnswersFlow",
+            "__tool_name__": "UpdateAnswers",
             "updates": {"intention": "testing"},
             "validated": True,
         }

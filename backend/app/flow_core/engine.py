@@ -195,13 +195,9 @@ class LLMFlowEngine:
                 ctx.current_node_id = target
                 return self.process(ctx, None, None, project_context)
 
-        # For automatic decisions, just follow first edge
+        # For automatic decisions, still present options to GPT-5 for consistency
+        # GPT-5 will make the routing decision via NavigateToNode
         decision_type = getattr(node, "decision_type", "automatic")
-        if decision_type == "automatic" or decision_type == "llm_assisted":
-            # No LLM decision - just take first edge
-            if edges:
-                ctx.current_node_id = edges[0].target
-                return self.process(ctx, None, None, project_context)
 
         # Return decision prompt with options
         return EngineResponse(

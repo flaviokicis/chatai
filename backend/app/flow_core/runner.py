@@ -21,7 +21,7 @@ from .constants import (
     TOOL_UPDATE_ANSWERS,
 )
 from .engine import LLMFlowEngine
-from .llm_responder import LLMFlowResponder
+from .llm_responder import FlowResponse, LLMFlowResponder, ResponseConfig
 from .state import FlowContext
 
 logger = logging.getLogger(__name__)
@@ -61,7 +61,7 @@ class FlowTurnRunner:
     ):
         """Initialize the runner with engine and responder."""
         self._engine = LLMFlowEngine(compiled_flow, llm_client)
-        self._responder = LLMFlowResponder(llm_client, use_all_tools=use_all_tools)
+        self._responder = LLMFlowResponder(llm_client)
         self._flow = compiled_flow
 
     def initialize_context(self, existing_context: FlowContext | None = None) -> FlowContext:
@@ -118,16 +118,21 @@ class FlowTurnRunner:
         if engine_response.metadata and "allowed_values" in engine_response.metadata:
             allowed_values = engine_response.metadata["allowed_values"]
 
+        # Create response config with additional parameters
+        config = ResponseConfig(
+            allowed_values=allowed_values,
+            project_context=project_context,
+            is_completion=False,
+            available_edges=available_edges,
+        ) if any([allowed_values, project_context, available_edges]) else None
+
         # Use GPT-5 responder to process
         responder_result = self._responder.respond(
             prompt=engine_response.message or "",
             pending_field=ctx.pending_field,
             ctx=ctx,
             user_message=user_message or "",
-            allowed_values=allowed_values,
-            project_context=project_context,
-            is_completion=False,
-            available_edges=available_edges,
+            config=config,
         )
 
         # Convert responder result to engine event and process
@@ -136,9 +141,8 @@ class FlowTurnRunner:
         # Special handling for certain tools
         if responder_result.tool_name == TOOL_NAVIGATE_TO_NODE:
             # Navigate to the target node
-            target_node = responder_result.tool_args.get("target_node_id")
-            if target_node:
-                engine_event["target_node_id"] = target_node
+            if responder_result.navigation:
+                engine_event["target_node_id"] = responder_result.navigation
 
         elif responder_result.tool_name == TOOL_UPDATE_ANSWERS:
             # Update answers and advance
@@ -156,7 +160,7 @@ class FlowTurnRunner:
         elif responder_result.tool_name == TOOL_REQUEST_HANDOFF:
             # Escalate to human
             engine_event["tool_name"] = "RequestHumanHandoff"
-            engine_event["reason"] = responder_result.tool_args.get("reason", "requested")
+            engine_event["reason"] = responder_result.escalate_reason or "requested"
 
         elif responder_result.tool_name == TOOL_RESTART_CONVERSATION:
             # Restart the conversation
@@ -173,7 +177,7 @@ class FlowTurnRunner:
             final_response = self._engine.process(ctx, None, engine_event)
 
             # Update metadata with final response info
-            if final_response.metadata:
+            if final_response.metadata and responder_result.metadata:
                 responder_result.metadata.update(final_response.metadata)
 
         # Calculate answers diff
@@ -184,31 +188,28 @@ class FlowTurnRunner:
 
         # Build final result
         return TurnResult(
-            assistant_message=responder_result.assistant_message,
+            assistant_message=responder_result.message,
             messages=responder_result.messages,
             tool_name=responder_result.tool_name,
-            tool_args=responder_result.tool_args,
+            tool_args={"navigation": responder_result.navigation} if responder_result.navigation else None,
             answers_diff=answers_diff,
-            metadata=responder_result.metadata,
-            terminal=responder_result.terminal or ctx.is_complete,
+            metadata=responder_result.metadata or {},
+            terminal=ctx.is_complete,
             escalate=responder_result.escalate,
             confidence=responder_result.confidence,
-            reasoning=responder_result.reasoning,
+            reasoning=None,  # Not available in FlowResponse
         )
 
-    def _build_engine_event(self, responder_result) -> dict[str, Any]:
+    def _build_engine_event(self, responder_result: FlowResponse) -> dict[str, Any]:
         """Build an engine event from responder result."""
-        event = {
+        event: dict[str, Any] = {
             "tool_name": responder_result.tool_name,
         }
-
-        if responder_result.tool_args:
-            event.update(responder_result.tool_args)
 
         if responder_result.updates:
             event["updates"] = responder_result.updates
 
-        if hasattr(responder_result, "navigation"):
+        if responder_result.navigation:
             event["navigation"] = responder_result.navigation
 
         return event

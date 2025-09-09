@@ -50,7 +50,7 @@ class MessageList(BaseModel):
         description="List of messages to send"
     )
 
-    @field_validator("messages")
+    @field_validator("messages")  # type: ignore[misc]
     @classmethod
     def validate_messages(cls, messages: list[WhatsAppMessage]) -> list[WhatsAppMessage]:
         """Validate message structure and delays."""
@@ -182,7 +182,7 @@ class GPT5Response(BaseModel):
     )
     reasoning: str = Field(..., description="Overall reasoning for the response")
 
-    @field_validator("messages")
+    @field_validator("messages")  # type: ignore[misc]
     @classmethod
     def validate_messages(cls, messages: list[WhatsAppMessage]) -> list[WhatsAppMessage]:
         """Ensure messages are properly structured."""
@@ -195,7 +195,8 @@ class GPT5Response(BaseModel):
 
     def get_tool_data(self) -> dict[str, Any]:
         """Get tool data as a dictionary."""
-        return self.tool.model_dump(exclude={"tool_name"})
+        result = self.tool.model_dump(exclude={"tool_name"})
+        return dict(result) if result is not None else {}
 
 
 # Flow state types
@@ -250,16 +251,6 @@ class ToolExecutionError(Exception):
 
 
 # Validation helpers
-def _create_unknown_tool_error(
-    tool_name: str,
-    raw_response: dict[str, Any],
-) -> GPT5SchemaError:
-    """Create error for unknown tool name."""
-    error_msg = f"Unknown tool name: {tool_name}"
-    validation_errors = [f"Tool '{tool_name}' is not recognized"]
-    return GPT5SchemaError(error_msg, raw_response, validation_errors)
-
-
 def _create_validation_error(
     exception: Exception,
     raw_response: dict[str, Any],
@@ -270,6 +261,26 @@ def _create_validation_error(
     if hasattr(exception, "errors"):
         validation_errors = [str(err) for err in exception.errors()][:MAX_VALIDATION_ERRORS_TO_SHOW]
     return GPT5SchemaError(error_msg, raw_response, validation_errors)
+
+
+def _create_tool_model(tool_name: str, tool_data: dict[str, Any]) -> ToolCallUnion:
+    """Create the appropriate tool model based on tool name."""
+    if tool_name == "UpdateAnswers":
+        return UpdateAnswersCall(**tool_data)
+    if tool_name == "StayOnThisNode":
+        return StayOnThisNodeCall(**tool_data)
+    if tool_name == "NavigateToNode":
+        return NavigateToNodeCall(**tool_data)
+    if tool_name == "RequestHumanHandoff":
+        return RequestHumanHandoffCall(**tool_data)
+    if tool_name == "ConfirmCompletion":
+        return ConfirmCompletionCall(**tool_data)
+    if tool_name == "RestartConversation":
+        return RestartConversationCall(**tool_data)
+
+    msg = f"Unknown tool name: {tool_name}"
+    validation_errors = [f"Tool '{tool_name}' is not recognized"]
+    raise GPT5SchemaError(msg, None, validation_errors)
 
 
 def validate_gpt5_response(raw_response: dict[str, Any]) -> GPT5Response:
@@ -290,21 +301,7 @@ def validate_gpt5_response(raw_response: dict[str, Any]) -> GPT5Response:
         tool_name = tool_data.get("tool_name", "")
 
         # Create the appropriate tool model
-        tool_model: ToolCallUnion
-        if tool_name == "UpdateAnswers":
-            tool_model = UpdateAnswersCall(**tool_data)
-        elif tool_name == "StayOnThisNode":
-            tool_model = StayOnThisNodeCall(**tool_data)
-        elif tool_name == "NavigateToNode":
-            tool_model = NavigateToNodeCall(**tool_data)
-        elif tool_name == "RequestHumanHandoff":
-            tool_model = RequestHumanHandoffCall(**tool_data)
-        elif tool_name == "ConfirmCompletion":
-            tool_model = ConfirmCompletionCall(**tool_data)
-        elif tool_name == "RestartConversation":
-            tool_model = RestartConversationCall(**tool_data)
-        else:
-            raise _create_unknown_tool_error(tool_name, raw_response)
+        tool_model = _create_tool_model(tool_name, tool_data)
 
         # Create the full response
         return GPT5Response(
