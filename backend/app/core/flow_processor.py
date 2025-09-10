@@ -24,6 +24,7 @@ from app.flow_core.compiler import compile_flow
 from app.flow_core.ir import Flow
 from app.flow_core.runner import FlowTurnRunner
 from app.services.admin_phone_service import AdminPhoneService
+from app.services.handoff_service import HandoffService, HandoffData
 from app.services.processing_cancellation_manager import (
     ProcessingCancellationManager,
     ProcessingCancelledException,
@@ -557,7 +558,8 @@ CRITICAL FLOW SAFETY RULES:
                 result = runner.process_turn(
                     ctx=ctx,
                     user_message=request.user_message,
-                    project_context=request.project_context
+                    project_context=request.project_context,
+                    is_admin=is_admin
                 )
 
 
@@ -584,6 +586,19 @@ CRITICAL FLOW SAFETY RULES:
                     except Exception as e:
                         logger.warning(f"Failed to clear session context after auto-reset: {e}")
 
+                # Handle handoff requests - save to database/Redis for reliability
+                if result.escalate:
+                    try:
+                        await self._save_handoff_request(
+                            request=request,
+                            context=ctx,
+                            result=result,
+                            app_context=app_context,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save handoff request: {e}")
+                        # Don't fail the entire flow processing for handoff save failures
+                
                 # Map result to response
                 if result.escalate:
                     flow_result = FlowProcessingResult.ESCALATE
@@ -616,3 +631,69 @@ CRITICAL FLOW SAFETY RULES:
         except Exception as e:
             error_msg = f"Flow execution failed: {e!s}"
             raise FlowProcessingError(error_msg, e) from e
+
+    async def _save_handoff_request(
+        self,
+        request: FlowRequest,
+        context: FlowContext,
+        result: Any,
+        app_context: Any,
+    ) -> None:
+        """Save handoff request to database/Redis with robust error handling."""
+        try:
+            # Get Redis client from app context if available
+            redis_client = getattr(app_context, 'redis_client', None)
+            handoff_service = HandoffService(redis_client=redis_client)
+            
+            # Extract handoff reason from result metadata
+            handoff_reason = None
+            if hasattr(result, 'metadata') and result.metadata:
+                handoff_reason = result.metadata.get('reason') or result.metadata.get('escalate_reason')
+            
+            # Create handoff data
+            handoff_data = HandoffData(
+                tenant_id=request.tenant_id,
+                reason=handoff_reason or "User requested human assistance",
+                flow_id=request.flow_id,
+                thread_id=getattr(request, 'thread_id', None),
+                contact_id=getattr(request, 'contact_id', None),
+                channel_instance_id=getattr(request, 'channel_instance_id', None),
+                current_node_id=context.current_node_id,
+                user_message=request.user_message,
+                collected_answers=dict(context.answers) if context.answers else {},
+                session_id=getattr(context, 'session_id', None),
+                conversation_context={
+                    "turn_count": getattr(context, 'turn_count', 0),
+                    "clarification_count": getattr(context, 'clarification_count', 0),
+                    "active_path": getattr(context, 'active_path', None),
+                    "tool_name": getattr(result, 'tool_name', None),
+                    "confidence": getattr(result, 'confidence', None),
+                },
+            )
+            
+            # Save with robust retry logic
+            success = handoff_service.save_handoff_request(handoff_data)
+            
+            if success:
+                logger.info(
+                    "Handoff request saved successfully: %s (tenant: %s, flow: %s)",
+                    handoff_data.id,
+                    request.tenant_id,
+                    request.flow_id,
+                )
+            else:
+                logger.error(
+                    "Failed to save handoff request: %s (tenant: %s, flow: %s)",
+                    handoff_data.id,
+                    request.tenant_id,
+                    request.flow_id,
+                )
+                
+        except Exception as e:
+            logger.error(
+                "Exception while saving handoff request (tenant: %s, flow: %s): %s",
+                request.tenant_id,
+                request.flow_id,
+                str(e),
+                exc_info=True,
+            )

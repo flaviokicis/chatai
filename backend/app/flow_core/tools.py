@@ -38,90 +38,6 @@ class FlowTool(BaseModel):
     )
 
 
-class StayOnThisNode(FlowTool):
-    """Stay on the current node and repeat/clarify the current question.
-
-    Use this when:
-    - User needs clarification about the question
-    - User's response was unclear or off-topic
-    - You need to acknowledge something before repeating the question
-    - User asks about format/units but still needs to answer
-    """
-
-    acknowledgment: str | None = Field(
-        default=None,
-        max_length=MAX_ACKNOWLEDGMENT_LENGTH,
-        description="Optional brief acknowledgment before repeating the question"
-    )
-    clarification_reason: Literal[
-        "unclear_response",
-        "off_topic",
-        "needs_explanation",
-        "format_clarification"
-    ] = Field(
-        ...,
-        description="Why we're staying on this node"
-    )
-
-
-class NavigateToNode(FlowTool):
-    """Navigate to a specific node in the flow.
-
-    Use this when:
-    - User wants to skip the current question
-    - User wants to go back to a previous question
-    - Flow logic requires jumping to a specific node
-    - Following a decision path to the next node
-    """
-
-    target_node_id: str = Field(
-        ...,
-        description="The ID of the node to navigate to"
-    )
-    navigation_type: Literal[
-        "next",
-        "skip",
-        "back",
-        "jump"
-    ] = Field(
-        ...,
-        description="Type of navigation being performed"
-    )
-
-
-class UpdateAnswers(FlowTool):
-    """Update one or more answers in the flow state.
-
-    CRITICAL: The 'updates' field is MANDATORY and must contain at least one key-value pair.
-    The key should be the field name and the value should be the extracted answer.
-
-    Use this when:
-    - User provides an answer to the current question
-    - User corrects a previous answer
-    - Multiple answers can be extracted from a single response
-    """
-
-    updates: dict[str, Any] = Field(
-        ...,
-        min_items=MIN_DICT_ITEMS,
-        description="Key-value pairs to update in the answers map"
-    )
-
-    @field_validator("updates")
-    @classmethod
-    def validate_updates(cls, updates: dict[str, Any]) -> dict[str, Any]:
-        """Ensure updates is not empty."""
-        if not updates:
-            error_msg = "Updates must contain at least one key-value pair"
-            raise ValueError(error_msg)
-        return updates
-
-    validated: bool = Field(
-        default=True,
-        description="Whether the answers have been validated against constraints"
-    )
-
-
 class RequestHumanHandoff(FlowTool):
     """Request handoff to a human agent.
 
@@ -154,62 +70,110 @@ class RequestHumanHandoff(FlowTool):
     )
 
 
-class ConfirmCompletion(FlowTool):
-    """Confirm that the flow has been completed successfully.
-
-    Use this when:
-    - All required information has been collected
-    - The flow reaches a terminal node
-    - User explicitly ends the conversation
+class ModifyFlowLive(FlowTool):
+    """Modify the current flow based on admin instructions during conversation.
+    
+    ADMIN ONLY TOOL - Use this when an admin user wants to:
+    - Change how the flow behaves
+    - Add or modify questions
+    - Adjust flow logic or routing
+    - Update prompts or messages
+    
+    The modification will be stored and applied to future conversations.
     """
-
-    summary: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Summary of collected information"
+    
+    instruction: str = Field(
+        ...,
+        description="The specific instruction about how to modify the flow behavior"
+    )
+    
+    target_node: str | None = Field(
+        default=None,
+        description="Specific node to modify (if applicable)"
+    )
+    
+    modification_type: Literal["prompt", "routing", "validation", "general"] = Field(
+        default="general",
+        description="Type of modification being requested"
     )
 
-    next_steps: list[str] = Field(
-        default_factory=list,
-        max_items=MAX_NEXT_STEPS,
-        description="Next steps for the user"
-    )
 
-    completion_type: Literal["success", "partial", "abandoned"] = Field(
-        default=DEFAULT_COMPLETION_TYPE,
-        description="Type of completion"
-    )
-
-
-class RestartConversation(FlowTool):
-    """Completely restart the conversation from the beginning.
-
-    Use this ONLY when:
-    - User explicitly says "restart", "start over", "begin again"
-    - User clearly wants to reset everything and start fresh
-
-    This will clear all answers and return to the entry node.
+class PerformAction(FlowTool):
+    """Unified action tool that combines all necessary actions and messages.
+    
+    This tool handles the complete response including:
+    - Staying on current node or navigating
+    - Updating answers if needed
+    - Sending messages to the user
+    
+    ALWAYS use this tool for any response.
     """
-
-    clear_history: bool = Field(
-        default=True,
-        description="Whether to clear conversation history"
+    
+    actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart"]] = Field(
+        ...,
+        description="Actions to take in sequence (e.g., ['update', 'navigate'] to save answer then navigate)"
     )
+    
+    messages: list[dict[str, Any]] = Field(
+        ...,
+        min_items=1,
+        max_items=5,
+        description="WhatsApp messages to send to the user"
+    )
+    
+    # Optional fields based on action
+    updates: dict[str, Any] | None = Field(
+        default=None,
+        description="Field updates when action is 'update'"
+    )
+    
+    target_node_id: str | None = Field(
+        default=None,
+        description="Target node when action is 'navigate'"
+    )
+    
+    clarification_reason: str | None = Field(
+        default=None,
+        description="Reason when action is 'stay'"
+    )
+    
+    handoff_reason: str | None = Field(
+        default=None,
+        description="Reason when action is 'handoff'"
+    )
+    
+    @field_validator("messages")
+    @classmethod
+    def validate_messages(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Validate message structure."""
+        for msg in v:
+            if "text" not in msg or not msg["text"]:
+                raise ValueError("Each message must have a non-empty 'text' field")
+            if "delay_ms" not in msg:
+                msg["delay_ms"] = 0
+        return v
 
 
 # Tool registry - only essential tools
 FLOW_TOOLS = [
-    StayOnThisNode,
-    NavigateToNode,
-    UpdateAnswers,
+    PerformAction,
     RequestHumanHandoff,
-    ConfirmCompletion,
-    RestartConversation,
+]
+
+# Admin-only tools (not included in default registry)
+ADMIN_TOOLS = [
+    ModifyFlowLive,
 ]
 
 
 def get_tool_by_name(name: str) -> type[FlowTool] | None:
     """Get a tool class by its name."""
+    # Check regular tools first
     for tool in FLOW_TOOLS:
+        if tool.__name__ == name:
+            return tool
+    # Then check admin tools
+    for tool in ADMIN_TOOLS:
         if tool.__name__ == name:
             return tool
     return None

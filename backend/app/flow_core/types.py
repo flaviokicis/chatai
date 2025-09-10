@@ -86,6 +86,12 @@ class ToolCall(BaseModel):
     """Base model for tool calls from GPT-5."""
 
     tool_name: str = Field(..., description="Name of the tool to execute")
+    messages: list[WhatsAppMessage] = Field(
+        ...,
+        min_items=MIN_MESSAGES_PER_TURN,
+        max_items=MAX_MESSAGES_ALLOWED,
+        description="WhatsApp messages to send to user"
+    )
     confidence: float = Field(
         default=DEFAULT_CONFIDENCE,
         ge=MIN_CONFIDENCE,
@@ -93,39 +99,6 @@ class ToolCall(BaseModel):
         description="Confidence in this tool selection"
     )
     reasoning: str = Field(..., description="Reasoning for this tool choice")
-
-
-class UpdateAnswersCall(ToolCall):
-    """Tool call for UpdateAnswers."""
-
-    tool_name: Literal["UpdateAnswers"] = "UpdateAnswers"
-    updates: dict[str, Any] = Field(
-        ...,
-        min_items=1,
-        description="Updates to apply to answers"
-    )
-    validated: bool = Field(default=True)
-
-
-class StayOnThisNodeCall(ToolCall):
-    """Tool call for StayOnThisNode."""
-
-    tool_name: Literal["StayOnThisNode"] = "StayOnThisNode"
-    acknowledgment: str | None = Field(default=None, max_length=MAX_ACKNOWLEDGMENT_LENGTH)
-    clarification_reason: Literal[
-        "unclear_response",
-        "off_topic",
-        "needs_explanation",
-        "format_clarification"
-    ] = Field(...)
-
-
-class NavigateToNodeCall(ToolCall):
-    """Tool call for NavigateToNode."""
-
-    tool_name: Literal["NavigateToNode"] = "NavigateToNode"
-    target_node_id: str = Field(...)
-    navigation_type: Literal["next", "skip", "back", "jump"] = Field(...)
 
 
 class RequestHumanHandoffCall(ToolCall):
@@ -142,61 +115,77 @@ class RequestHumanHandoffCall(ToolCall):
     urgency: Literal["low", "medium", "high"] = Field(default=DEFAULT_URGENCY)
 
 
-class ConfirmCompletionCall(ToolCall):
-    """Tool call for ConfirmCompletion."""
+class ModifyFlowLiveCall(ToolCall):
+    """Tool call for ModifyFlowLive (admin only)."""
 
-    tool_name: Literal["ConfirmCompletion"] = "ConfirmCompletion"
-    summary: dict[str, Any] = Field(default_factory=dict)
-    next_steps: list[str] = Field(default_factory=list, max_items=MAX_NEXT_STEPS)
-    completion_type: Literal["success", "partial", "abandoned"] = Field(default=DEFAULT_COMPLETION_TYPE)
+    tool_name: Literal["ModifyFlowLive"] = "ModifyFlowLive"
+    instruction: str = Field(..., description="The modification instruction")
+    target_node: str | None = Field(default=None, description="Target node to modify")
+    modification_type: Literal["prompt", "routing", "validation", "general"] = Field(
+        default="general",
+        description="Type of modification"
+    )
 
 
-class RestartConversationCall(ToolCall):
-    """Tool call for RestartConversation."""
 
-    tool_name: Literal["RestartConversation"] = "RestartConversation"
-    clear_history: bool = Field(default=True)
+
+class PerformActionCall(ToolCall):
+    """Tool call for unified PerformAction."""
+    
+    tool_name: Literal["PerformAction"] = "PerformAction"
+    actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart"]] = Field(
+        ...,
+        description="Actions to take in sequence (e.g., ['update', 'navigate'])"
+    )
+    # messages field inherited from ToolCall
+    updates: dict[str, Any] | None = Field(default=None)
+    target_node_id: str | None = Field(default=None)
+    clarification_reason: str | None = Field(default=None)
+    handoff_reason: str | None = Field(default=None)
 
 
 # Union type for all possible tool calls
 ToolCallUnion = (
-    UpdateAnswersCall
-    | StayOnThisNodeCall
-    | NavigateToNodeCall
+    PerformActionCall
     | RequestHumanHandoffCall
-    | ConfirmCompletionCall
-    | RestartConversationCall
+    | ModifyFlowLiveCall
 )
 
 
 # GPT-5 response schema
 class GPT5Response(BaseModel):
-    """Complete response from GPT-5 including tool and messages."""
+    """Complete response from GPT-5 including tools only."""
 
-    tool: ToolCallUnion = Field(..., description="Tool to execute")
-    messages: list[WhatsAppMessage] = Field(
-        ...,
-        min_items=MIN_MESSAGES_PER_TURN,
-        max_items=MAX_MESSAGES_PER_TURN,
-        description="Natural WhatsApp messages to send"
+    tools: list[ToolCallUnion] = Field(
+        ..., 
+        min_items=1,
+        max_items=3,  # Allow up to 3 tool calls per turn
+        description="Tools to execute in sequence"
     )
     reasoning: str = Field(..., description="Overall reasoning for the response")
 
-    @field_validator("messages")  # type: ignore[misc]
-    @classmethod
-    def validate_messages(cls, messages: list[WhatsAppMessage]) -> list[WhatsAppMessage]:
-        """Ensure messages are properly structured."""
-        validator = MessageList(messages=messages)
-        return validator.messages
-
     def get_tool_name(self) -> str:
-        """Get the name of the selected tool."""
-        return self.tool.tool_name
+        """Get the primary tool name from the response (first tool)."""
+        return self.tools[0].tool_name if self.tools else "PerformAction"
+    
+    def get_all_tool_names(self) -> list[str]:
+        """Get all tool names from the response."""
+        return [tool.tool_name for tool in self.tools]
 
     def get_tool_data(self) -> dict[str, Any]:
-        """Get tool data as a dictionary."""
-        result = self.tool.model_dump(exclude={"tool_name"})
+        """Get primary tool-specific data as dictionary (first tool)."""
+        if not self.tools:
+            return {}
+        result = self.tools[0].model_dump(exclude={"tool_name", "messages"})
         return dict(result) if result is not None else {}
+    
+    def get_all_tools_data(self) -> list[tuple[str, dict[str, Any]]]:
+        """Get all tools with their data."""
+        tools_data = []
+        for tool in self.tools:
+            data = tool.model_dump(exclude={"tool_name", "messages"})
+            tools_data.append((tool.tool_name, dict(data) if data else {}))
+        return tools_data
 
 
 # Flow state types
@@ -265,18 +254,12 @@ def _create_validation_error(
 
 def _create_tool_model(tool_name: str, tool_data: dict[str, Any]) -> ToolCallUnion:
     """Create the appropriate tool model based on tool name."""
-    if tool_name == "UpdateAnswers":
-        return UpdateAnswersCall(**tool_data)
-    if tool_name == "StayOnThisNode":
-        return StayOnThisNodeCall(**tool_data)
-    if tool_name == "NavigateToNode":
-        return NavigateToNodeCall(**tool_data)
+    if tool_name == "PerformAction":
+        return PerformActionCall(**tool_data)
     if tool_name == "RequestHumanHandoff":
         return RequestHumanHandoffCall(**tool_data)
-    if tool_name == "ConfirmCompletion":
-        return ConfirmCompletionCall(**tool_data)
-    if tool_name == "RestartConversation":
-        return RestartConversationCall(**tool_data)
+    if tool_name == "ModifyFlowLive":
+        return ModifyFlowLiveCall(**tool_data)
 
     msg = f"Unknown tool name: {tool_name}"
     validation_errors = [f"Tool '{tool_name}' is not recognized"]
@@ -296,16 +279,33 @@ def validate_gpt5_response(raw_response: dict[str, Any]) -> GPT5Response:
         GPT5SchemaError: If validation fails
     """
     try:
-        # First try to parse the tool
-        tool_data = raw_response.get("tool", {})
-        tool_name = tool_data.get("tool_name", "")
-
-        # Create the appropriate tool model
-        tool_model = _create_tool_model(tool_name, tool_data)
+        # Handle both single tool (legacy) and multiple tools
+        tools_list = []
+        
+        # Check for new format (multiple tools)
+        if "tools" in raw_response:
+            for tool_data in raw_response["tools"]:
+                tool_name = tool_data.get("tool_name", "")
+                tool_model = _create_tool_model(tool_name, tool_data)
+                tools_list.append(tool_model)
+        # Handle legacy single tool format
+        elif "tool" in raw_response:
+            tool_data = raw_response["tool"]
+            tool_name = tool_data.get("tool_name", "")
+            tool_model = _create_tool_model(tool_name, tool_data)
+            tools_list.append(tool_model)
+        else:
+            # Default fallback
+            tools_list.append(_create_tool_model("PerformAction", {
+                "reasoning": "No tool specified",
+                "actions": ["stay"],
+                "clarification_reason": "unclear_response",
+                "messages": [{"text": "Como posso ajudar?", "delay_ms": 0}]
+            }))
 
         # Create the full response
         return GPT5Response(
-            tool=tool_model,
+            tools=tools_list,
             messages=raw_response.get("messages", []),
             reasoning=raw_response.get("reasoning", ""),
         )
@@ -321,10 +321,7 @@ def validate_gpt5_response(raw_response: dict[str, Any]) -> GPT5Response:
 AnswersDict = dict[str, Any]
 MetadataDict = dict[str, Any]
 ToolName = Literal[
-    "UpdateAnswers",
-    "StayOnThisNode",
-    "NavigateToNode",
+    "PerformAction",
     "RequestHumanHandoff",
-    "ConfirmCompletion",
-    "RestartConversation"
+    "ModifyFlowLive"
 ]

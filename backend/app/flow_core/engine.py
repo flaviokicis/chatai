@@ -125,6 +125,7 @@ class LLMFlowEngine:
             # Handle tool events
             tool_name = event.get("tool_name")
             if tool_name == "RestartConversation":
+                # This is now handled by PerformAction with "restart" action
                 return self._handle_restart(ctx, project_context)
             if tool_name == "RequestHumanHandoff":
                 return EngineResponse(
@@ -196,7 +197,7 @@ class LLMFlowEngine:
                 return self.process(ctx, None, None, project_context)
 
         # For automatic decisions, still present options to GPT-5 for consistency
-        # GPT-5 will make the routing decision via NavigateToNode
+        # GPT-5 will make the routing decision via PerformAction with navigate action
         decision_type = getattr(node, "decision_type", "automatic")
 
         # Return decision prompt with options

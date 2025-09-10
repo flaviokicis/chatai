@@ -91,6 +91,8 @@ class EnhancedFlowResponder:
         project_context: ProjectContext | None = None,
         is_completion: bool = False,
         available_edges: list[dict[str, Any]] | None = None,
+        is_admin: bool = False,
+        flow_graph: dict[str, Any] | None = None,
     ) -> ResponderOutput:
         """Process user message and generate response with tool calling and natural messages.
         
@@ -119,7 +121,7 @@ class EnhancedFlowResponder:
         )
 
         # Select appropriate tools
-        tools = self._select_contextual_tools(context, pending_field)
+        tools = self._select_contextual_tools(context, pending_field, is_admin)
 
         # Start thought tracing if available
         thought_id = self._start_thought_trace(
@@ -323,25 +325,25 @@ Apply this style naturally while maintaining conversational flow.
         self,
         context: FlowContext,
         pending_field: str | None,
+        is_admin: bool = False,
     ) -> list[type]:
         """Select appropriate tools based on context."""
-        # Always include core tools
+        from ..tools import FLOW_TOOLS, ADMIN_TOOLS
+        
+        # Always include core flow tools
         tools: list[type] = [
             tool for tool in FLOW_TOOLS
-            if tool.__name__ in [
-                "UpdateAnswers",
-                "StayOnThisNode",
-                "RequestHumanHandoff",
-                "ConfirmCompletion",
-                "RestartConversation",
-            ]
+            if tool.__name__ in ["PerformAction", "RequestHumanHandoff"]
         ]
+        
+        # Add admin tools if user is admin
+        if is_admin:
+            tools.extend([
+                tool for tool in ADMIN_TOOLS
+                if tool.__name__ == "ModifyFlowLive"
+            ])
 
-        # Add NavigateToNode if there are answers (can go back) or paths
-        if context.answers or context.available_paths:
-            from ..tools import NavigateToNode
-            tools.append(NavigateToNode)
-
+        
         return tools
 
     def _call_gpt5(

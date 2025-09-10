@@ -12,14 +12,6 @@ if TYPE_CHECKING:
 
     from .compiler import CompiledFlow
 
-from .constants import (
-    TOOL_CONFIRM_COMPLETION,
-    TOOL_NAVIGATE_TO_NODE,
-    TOOL_REQUEST_HANDOFF,
-    TOOL_RESTART_CONVERSATION,
-    TOOL_STAY_ON_NODE,
-    TOOL_UPDATE_ANSWERS,
-)
 from .engine import LLMFlowEngine
 from .llm_responder import FlowResponse, LLMFlowResponder, ResponseConfig
 from .state import FlowContext
@@ -73,6 +65,7 @@ class FlowTurnRunner:
         ctx: FlowContext,
         user_message: str | None = None,
         project_context: ProjectContext | None = None,
+        is_admin: bool = False,
     ) -> TurnResult:
         """
         Process a turn in the conversation.
@@ -118,13 +111,32 @@ class FlowTurnRunner:
         if engine_response.metadata and "allowed_values" in engine_response.metadata:
             allowed_values = engine_response.metadata["allowed_values"]
 
+        # Build flow graph from compiled flow for the LLM
+        flow_graph = {
+            "nodes": [
+                {"id": node_id, "type": node.__class__.__name__} 
+                for node_id, node in self._flow.nodes.items()
+            ],
+            "edges": [
+                {
+                    "from": source,
+                    "to": edge.target,
+                    "condition": getattr(edge, 'label', None) or getattr(edge, 'condition', None)
+                }
+                for source, edges in self._flow.edges_from.items()
+                for edge in edges
+            ]
+        }
+
         # Create response config with additional parameters
         config = ResponseConfig(
             allowed_values=allowed_values,
             project_context=project_context,
             is_completion=False,
             available_edges=available_edges,
-        ) if any([allowed_values, project_context, available_edges]) else None
+            is_admin=is_admin,
+            flow_graph=flow_graph,
+        ) if any([allowed_values, project_context, available_edges, is_admin, flow_graph]) else None
 
         # Use GPT-5 responder to process
         responder_result = self._responder.respond(
@@ -139,36 +151,29 @@ class FlowTurnRunner:
         engine_event = self._build_engine_event(responder_result)
 
         # Special handling for certain tools
-        if responder_result.tool_name == TOOL_NAVIGATE_TO_NODE:
-            # Navigate to the target node
-            if responder_result.navigation:
-                engine_event["target_node_id"] = responder_result.navigation
-
-        elif responder_result.tool_name == TOOL_UPDATE_ANSWERS:
-            # Update answers and advance
+        if responder_result.tool_name == "PerformAction":
+            # PerformAction handles everything - extract what happened
             if responder_result.updates:
                 for field, value in responder_result.updates.items():
                     ctx.answers[field] = value
                     # Mark as answer event for engine
                     if field == ctx.pending_field:
                         engine_event["answer"] = value
-
-        elif responder_result.tool_name == TOOL_STAY_ON_NODE:
-            # Stay on current node - no navigation
-            pass
-
-        elif responder_result.tool_name == TOOL_REQUEST_HANDOFF:
+            
+            if responder_result.navigation:
+                engine_event["target_node_id"] = responder_result.navigation
+            
+            if responder_result.escalate:
+                engine_event["tool_name"] = "RequestHumanHandoff"
+                engine_event["reason"] = responder_result.metadata.get("reason", "requested")
+            
+            if responder_result.terminal:
+                ctx.is_complete = True
+                
+        elif responder_result.tool_name == "RequestHumanHandoff":
             # Escalate to human
             engine_event["tool_name"] = "RequestHumanHandoff"
             engine_event["reason"] = responder_result.escalate_reason or "requested"
-
-        elif responder_result.tool_name == TOOL_RESTART_CONVERSATION:
-            # Restart the conversation
-            engine_event["tool_name"] = "RestartConversation"
-
-        elif responder_result.tool_name == TOOL_CONFIRM_COMPLETION:
-            # Mark as complete
-            ctx.is_complete = True
 
         # Process the event if needed
         if engine_event and (engine_event.get("target_node_id") or
@@ -179,6 +184,23 @@ class FlowTurnRunner:
             # Update metadata with final response info
             if final_response.metadata and responder_result.metadata:
                 responder_result.metadata.update(final_response.metadata)
+
+        # Add assistant response(s) to conversation history
+        if responder_result.messages:
+            # Add each message as a separate turn in the conversation
+            for i, msg in enumerate(responder_result.messages):
+                ctx.add_turn("assistant", msg["text"], ctx.current_node_id, {
+                    "tool_name": responder_result.tool_name,
+                    "confidence": responder_result.confidence,
+                    "message_index": i,
+                    "total_messages": len(responder_result.messages),
+                    "delay_ms": msg.get("delay_ms", 0)
+                })
+        elif responder_result.message:
+            ctx.add_turn("assistant", responder_result.message, ctx.current_node_id, {
+                "tool_name": responder_result.tool_name,
+                "confidence": responder_result.confidence
+            })
 
         # Calculate answers diff
         answers_diff = {

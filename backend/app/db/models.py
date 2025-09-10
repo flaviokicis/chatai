@@ -398,6 +398,42 @@ class FlowChatSession(Base, TimestampMixin):
     cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class HandoffRequest(Base, TimestampMixin):
+    """Tracks human handoff requests for reliable processing and acknowledgment."""
+
+    __tablename__ = "handoff_requests"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    flow_id: Mapped[UUID | None] = mapped_column(ForeignKey("flows.id", ondelete="SET NULL"))
+    thread_id: Mapped[UUID | None] = mapped_column(ForeignKey("chat_threads.id", ondelete="SET NULL"))
+    contact_id: Mapped[UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
+    channel_instance_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("channel_instances.id", ondelete="SET NULL")
+    )
+
+    # Request details
+    reason: Mapped[str | None] = mapped_column(EncryptedString)  # Why handoff was requested
+    current_node_id: Mapped[str | None] = mapped_column(String(255))  # Where in flow
+    user_message: Mapped[str | None] = mapped_column(EncryptedString)  # Last user message
+    collected_answers: Mapped[dict | None] = mapped_column(JSONB)  # Flow progress so far
+    
+    # Status tracking
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    
+    # Context preservation
+    session_id: Mapped[str | None] = mapped_column(String(255))  # Flow session
+    conversation_context: Mapped[dict | None] = mapped_column(JSONB)  # Additional context
+    
+    # Relationships
+    tenant: Mapped[Tenant] = relationship()
+    flow: Mapped[Flow | None] = relationship()
+    thread: Mapped[ChatThread | None] = relationship()
+    contact: Mapped[Contact | None] = relationship()
+    channel_instance: Mapped[ChannelInstance | None] = relationship()
+
+
 # --- Agent Thought Tracing Models ---
 
 

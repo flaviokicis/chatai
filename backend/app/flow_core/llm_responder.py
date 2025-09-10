@@ -28,6 +28,8 @@ class ResponseConfig:
     project_context: ProjectContext | None = None
     is_completion: bool = False
     available_edges: list[dict[str, Any]] | None = None
+    is_admin: bool = False
+    flow_graph: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -43,6 +45,7 @@ class FlowResponse:
     escalate: bool = False
     escalate_reason: str | None = None
     navigation: str | None = None  # next node to navigate to
+    terminal: bool = False  # whether the flow reached a terminal node
 
 
 class LLMFlowResponder:
@@ -114,6 +117,8 @@ class LLMFlowResponder:
             project_context=config.project_context,
             is_completion=is_completion,
             available_edges=config.available_edges,
+            is_admin=config.is_admin,
+            flow_graph=config.flow_graph,
         )
 
         # Convert to FlowResponse format
@@ -132,4 +137,5 @@ class LLMFlowResponder:
             escalate=result.escalate,
             escalate_reason=result.metadata.get("reason") if result.escalate else None,
             navigation=result.navigation,
+            terminal=result.terminal,
         )

@@ -68,12 +68,9 @@ All LLM interactions use tool calling, not separate prompts:
 
 ```python
 # Tools the LLM can use
-UpdateAnswers         # Extract and store answers (multi-field capable)
-StayOnThisNode        # Stay on current node for clarification
-NavigateToNode        # Navigate to any node in the flow
-RequestHumanHandoff   # Escalate to human
-ConfirmCompletion     # Mark flow as complete
-RestartConversation   # Start over
+PerformAction         # Unified tool for all conversation actions (stay, update, navigate, handoff, complete, restart)
+RequestHumanHandoff   # Escalate to human agent (also available via PerformAction)
+ModifyFlowLive        # Modify flow behavior (admin only)
 ```
 
 ### 5. Rich Context Management

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.core.session import SessionPolicy
     from app.core.state import ConversationStore
     from app.services.rate_limiter import RateLimiter
+    from app.services.processing_cancellation_manager import ProcessingCancellationManager
 
 
 @dataclass(slots=True)
@@ -21,6 +22,7 @@ class AppContext:
     llm_model: str
     session_policy: SessionPolicy | None = None
     rate_limiter: RateLimiter | None = None
+    cancellation_manager: ProcessingCancellationManager | None = None
 
 
 def set_app_context(app: FastAPI, ctx: AppContext) -> None:

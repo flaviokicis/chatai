@@ -80,12 +80,8 @@ HANDOFF_TOO_COMPLEX = "too_complex"
 HANDOFF_TECHNICAL = "technical_issue"
 
 # Tool names (for type safety)
-TOOL_UPDATE_ANSWERS = "UpdateAnswers"
-TOOL_STAY_ON_NODE = "StayOnThisNode"
-TOOL_NAVIGATE_TO_NODE = "NavigateToNode"
 TOOL_REQUEST_HANDOFF = "RequestHumanHandoff"
-TOOL_CONFIRM_COMPLETION = "ConfirmCompletion"
-TOOL_RESTART_CONVERSATION = "RestartConversation"
+TOOL_PERFORM_ACTION = "PerformAction"
 
 # Model names
 MODEL_GPT5 = "gpt-5"

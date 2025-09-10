@@ -372,9 +372,9 @@ class ProcessingCancellationManager:
         if len(messages) == 1:
             return messages[0]
 
-        # Just join all messages with a space
-        # The LLM can figure out the context from the concatenated messages
-        return " ".join(msg.strip() for msg in messages if msg.strip())
+        # Join messages with line breaks to maintain clarity for LLM
+        # This helps the LLM understand each message as a separate thought/correction
+        return "\n".join(msg.strip() for msg in messages if msg.strip())
 
     def check_cancellation_and_raise(self, session_id: str, stage: str = "processing") -> None:
         """

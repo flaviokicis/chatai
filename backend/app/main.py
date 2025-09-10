@@ -86,6 +86,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("Rate limiter initialization failed: %s", e)
         ctx.rate_limiter = None
 
+    # Initialize cancellation manager for rapid message handling
+    try:
+        from app.services.processing_cancellation_manager import ProcessingCancellationManager
+        ctx.cancellation_manager = ProcessingCancellationManager(store=ctx.store)
+        logger.info("Message cancellation manager initialized")
+    except Exception as e:
+        logger.warning("Failed to initialize cancellation manager: %s", e)
+        ctx.cancellation_manager = None
+
     # Configure default session policy (stable); channels may override
     ctx.session_policy = StableSessionPolicy()
 

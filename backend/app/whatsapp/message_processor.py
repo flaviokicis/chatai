@@ -67,6 +67,10 @@ class WhatsAppMessageProcessor:
         """
         # Step 1: Parse WhatsApp webhook (adapter will raise HTTPException for invalid signatures)
         params = await self.adapter.validate_and_parse(request, x_twilio_signature)
+        
+        # Step 1.5: Log raw webhook data for debugging (only in debug/dev mode)
+        if self.settings.debug or getattr(self.settings, 'environment', '') == 'development':
+            await self._log_webhook_data(request, params)
 
         app_context = get_app_context(request.app)  # type: ignore[arg-type]
 
@@ -94,12 +98,46 @@ class WhatsAppMessageProcessor:
                 "Desculpe, este número do WhatsApp não está configurado."
             )
 
-        # Step 6: Process through flow processor with dependency injection
+        # Step 6: Check for rapid message coordination BEFORE flow processing
+        session_id = self._build_session_id(
+            message_data["sender_number"],
+            conversation_setup.flow_id or "unknown"
+        )
+        
+        # Add to message buffer and check if we should wait for aggregation
+        cancellation_manager = getattr(app_context, 'cancellation_manager', None)
+        if cancellation_manager and message_data.get("message_text"):
+            # Add this message to buffer
+            cancellation_manager.add_message_to_buffer(session_id, message_data["message_text"])
+            
+            # Check if there's ongoing processing that we should cancel
+            if cancellation_manager.should_cancel_processing(session_id):
+                logger.info(f"Detected rapid messages for session {session_id}, attempting aggregation")
+                
+                # Wait a bit for more messages to arrive
+                await asyncio.sleep(1.0)
+                
+                # Try to claim aggregation (only one webhook request will succeed)
+                aggregated_message = cancellation_manager.try_claim_aggregation(session_id)
+                if not aggregated_message:
+                    # Another request is handling aggregation, we should exit
+                    logger.info(f"Another request is handling aggregation for {session_id}, exiting")
+                    return PlainTextResponse("ok")
+                
+                # We got the aggregated message, update our request
+                logger.info(f"Processing aggregated message for {session_id}: {aggregated_message[:100]}...")
+                message_data["message_text"] = aggregated_message
+                
+                # Mark that this is an aggregated message for proper logging
+                message_data["is_aggregated"] = True
+                message_data["original_message_count"] = len(aggregated_message.split('\n'))
+        
+        # Step 7: Process through flow processor with dependency injection
         flow_response = await self._process_through_flow_processor(
             message_data, conversation_setup, app_context
         )
 
-        # Step 7: Build WhatsApp response
+        # Step 8: Build WhatsApp response
         return await self._build_whatsapp_response(
             flow_response, message_data, conversation_setup, app_context
         )
@@ -221,6 +259,94 @@ class WhatsAppMessageProcessor:
             message_data["params"],
             message_data["client_ip"]
         )
+    
+    async def _log_webhook_data(self, request: Request, params: dict[str, Any]) -> None:
+        """Log raw webhook data to file for debugging."""
+        try:
+            import json
+            import os
+            from datetime import datetime
+            
+            # Create webhook logs directory
+            log_dir = "/tmp/webhook-calls"
+            os.makedirs(log_dir, exist_ok=True)
+            
+            # Get sender number and timestamp
+            sender_number = "unknown"
+            if "From" in params:
+                sender_number = params["From"].replace("whatsapp:", "").replace("+", "")
+            elif "entry" in params:  # WhatsApp Cloud API format
+                try:
+                    entry = params["entry"][0] if params["entry"] else {}
+                    changes = entry.get("changes", [{}])[0]
+                    messages = changes.get("value", {}).get("messages", [{}])
+                    if messages:
+                        sender_number = messages[0].get("from", "unknown")
+                except (IndexError, KeyError):
+                    pass
+            
+            # Create timestamp with full precision
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            
+            # Create filename
+            filename = f"{sender_number}_{timestamp}.txt"
+            filepath = os.path.join(log_dir, filename)
+            
+            # Get request body for logging
+            body = await request.body()
+            
+            # Prepare log data
+            log_data = {
+                "timestamp": datetime.now().isoformat(),
+                "method": request.method,
+                "url": str(request.url),
+                "headers": dict(request.headers),
+                "query_params": dict(request.query_params),
+                "parsed_params": params,
+                "raw_body": body.decode("utf-8") if body else "",
+                "client_ip": request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+            }
+            
+            # Write to file
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(log_data, f, indent=2, ensure_ascii=False)
+            
+            logger.debug(f"[DEBUG MODE] Logged webhook data to {filepath}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to log webhook data: {e}")
+    
+    def _is_likely_retry(
+        self,
+        message_data: dict[str, Any],
+        app_context: Any
+    ) -> bool:
+        """Check if this is likely a webhook retry based on timing and patterns."""
+        # Check if we've recently processed a message from this user
+        if not app_context.store or not hasattr(app_context.store, "_r"):
+            return False
+        
+        try:
+            # Create a unique key for this specific message content and sender
+            message_text = message_data.get("message_text", "")
+            sender = message_data.get("sender_number", "")
+            
+            # Use a hash of the message content to handle long messages
+            import hashlib
+            message_hash = hashlib.md5(message_text.encode()).hexdigest()[:16]
+            
+            retry_key = f"webhook_processed:{sender}:{message_hash}"
+            
+            # Check if we've seen this exact message recently (within 2 minutes)
+            if app_context.store._r.get(retry_key):
+                return True
+            
+            # Mark this message as processed for 2 minutes (webhook retry window)
+            app_context.store._r.setex(retry_key, 120, "1")
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to check retry status: {e}")
+            return False
 
     async def _send_whatsapp_typing_indicator(self, message_data: dict[str, Any]) -> None:
         """Send WhatsApp typing indicator."""
@@ -321,6 +447,12 @@ class WhatsAppMessageProcessor:
                 # Don't send error message for cancellations - messages are being aggregated
                 return PlainTextResponse("ok")
             
+            # Check if this might be a duplicate/retry webhook to avoid sending multiple error messages
+            if self._is_likely_retry(message_data, app_context):
+                logger.warning("Likely webhook retry detected for user %s, not sending duplicate error message",
+                             message_data["sender_number"])
+                return PlainTextResponse("ok")
+            
             logger.error("Flow processor error for user %s: %s",
                         message_data["sender_number"], flow_response.error)
             return self.adapter.build_sync_response(
@@ -393,9 +525,11 @@ class WhatsAppMessageProcessor:
         flow_response,
     ) -> list[dict[str, Any]]:
         """Get WhatsApp messages from flow response."""
-        # Check if flow response has messages
-        if hasattr(flow_response, "messages") and flow_response.messages:
-            return flow_response.messages
+        # After refactor, messages are always stored in metadata by flow processor
+        if hasattr(flow_response, "metadata") and flow_response.metadata:
+            metadata_messages = flow_response.metadata.get("messages")
+            if metadata_messages and isinstance(metadata_messages, list):
+                return metadata_messages
         
         # Fallback to message field
         if hasattr(flow_response, "message") and flow_response.message:
@@ -412,7 +546,16 @@ class WhatsAppMessageProcessor:
     ) -> None:
         """Log WhatsApp messages asynchronously."""
         try:
-            # Log inbound message
+            # Prepare payload for aggregated messages
+            payload = None
+            if message_data.get("is_aggregated"):
+                payload = {
+                    "aggregated": True,
+                    "original_message_count": message_data.get("original_message_count", 1),
+                    "aggregation_method": "rapid_succession"
+                }
+            
+            # Log inbound message (will be the aggregated version if applicable)
             await message_logging_service.save_message_async(
                 tenant_id=conversation_setup.tenant_id,
                 channel_instance_id=conversation_setup.channel_instance_id,
@@ -424,6 +567,7 @@ class WhatsAppMessageProcessor:
                     message_data["params"].get("SmsMessageSid") or
                     message_data["params"].get("MessageSid")
                 ),
+                payload=payload,
                 status=MessageStatus.delivered,
                 delivered_at=datetime.now(UTC),
             )

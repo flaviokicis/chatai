@@ -83,12 +83,9 @@ class LangChainToolsLLM(LLMClient):
                 chosen = None
                 # Prefer our simplified essential tools in this order
                 preferred = (
-                    "UpdateAnswers",
+                    "PerformAction",
                     "RequestHumanHandoff",
-                    "StayOnThisNode",
-                    "NavigateToNode",
-                    "ConfirmCompletion",
-                    "RestartConversation",
+                    "ModifyFlowLive",
                 )
                 for name in preferred:
                     chosen = next((c for c in calls if c.get("name") == name), None)

@@ -137,7 +137,7 @@ def run_cli() -> None:
                 tenants = get_active_tenants(session)
                 tenant_found = False
                 for tenant in tenants:
-                    if tenant.id == args.tenant:
+                    if str(tenant.id) == args.tenant:
                         tenant_found = True
                         flows = get_flows_by_tenant(session, tenant.id)
                         if flows:
@@ -192,11 +192,12 @@ def run_cli() -> None:
     project_context = None
     if args.tenant:
         try:
+            from uuid import UUID
             with db_session() as session:
-                config_service = TenantConfigService()
-                tenant_config = config_service.get_tenant_config(args.tenant, session)
-                if tenant_config and tenant_config.project_context:
-                    project_context = ProjectContext.model_validate(tenant_config.project_context)
+                config_service = TenantConfigService(session)
+                tenant_uuid = UUID(args.tenant)
+                project_context = config_service.get_project_context_by_tenant_id(tenant_uuid)
+                if project_context:
                     cli_adapter.print_status("Loaded project context from tenant config")
         except Exception as e:
             cli_adapter.print_status(f"Could not load project context: {e}")
@@ -205,7 +206,14 @@ def run_cli() -> None:
     cli_adapter.print_status("Starting conversation. Type 'quit' or 'exit' to stop, Ctrl+C to interrupt.")
     cli_adapter.print_status(f"Flow: {flow_name}")
     if project_context:
-        cli_adapter.print_status(f"Project: {project_context.name}")
+        cli_adapter.print_status(f"Project context loaded for tenant: {project_context.tenant_id}")
+    
+    # Show initial state
+    print("\n" + "="*60)
+    print("📊 INITIAL STATE:")
+    print(f"   Starting node: {context.current_node_id}")
+    print(f"   No answers collected yet")
+    print("="*60)
     print()
 
     turn_count = 0
@@ -246,6 +254,17 @@ def run_cli() -> None:
             
             # Update context
             context = result.ctx if hasattr(result, 'ctx') else context
+            
+            # Show current state
+            print("\n" + "="*60)
+            print("📊 CURRENT STATE:")
+            print(f"   Node: {context.current_node_id}")
+            print(f"   Answers collected: {len(context.answers)}")
+            for key, value in context.answers.items():
+                print(f"     • {key}: {value}")
+            if context.pending_field:
+                print(f"   Pending field: {context.pending_field}")
+            print("="*60 + "\n")
             
             # Check for completion
             if result.terminal:
