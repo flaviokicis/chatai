@@ -85,7 +85,6 @@ class LangChainToolsLLM(LLMClient):
                 preferred = (
                     "PerformAction",
                     "RequestHumanHandoff",
-                    "ModifyFlowLive",
                 )
                 for name in preferred:
                     chosen = next((c for c in calls if c.get("name") == name), None)

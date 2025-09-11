@@ -20,7 +20,6 @@ def test_tool_schemas():
     from app.flow_core.types import (
         PerformActionCall, 
         RequestHumanHandoffCall, 
-        ModifyFlowLiveCall,
         GPT5Response
     )
     
@@ -55,22 +54,6 @@ def test_tool_schemas():
     except Exception as e:
         print(f"❌ RequestHumanHandoffCall schema error: {e}")
         return False
-    
-    # Test ModifyFlowLiveCall
-    try:
-        modify_call = ModifyFlowLiveCall(
-            tool_name="ModifyFlowLive",
-            messages=test_messages,
-            reasoning="Test modification",
-            confidence=0.7,
-            instruction="Add a new node",
-            modification={"action": "add_node", "data": {}}
-        )
-        print("✅ ModifyFlowLiveCall schema valid")
-    except Exception as e:
-        print(f"❌ ModifyFlowLiveCall schema error: {e}")
-        return False
-    
     # Test GPT5Response
     try:
         response = GPT5Response(

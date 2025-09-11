@@ -183,7 +183,7 @@ class FlowTurnRunner:
                         # Keep the node in pending state since we're collecting more info
                         node_state = ctx.get_node_state(ctx.current_node_id)
                         if node_state:
-                            node_state.status = NodeStatus.PENDING
+                            node_state.status = NodeStatus.IN_PROGRESS
             
             if responder_result.navigation:
                 engine_event["target_node_id"] = responder_result.navigation

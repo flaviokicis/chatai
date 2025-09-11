@@ -740,17 +740,32 @@ Apply this style naturally while maintaining conversational flow.
     def _add_admin_instructions(self) -> str:
         """Add admin-specific instructions to the prompt."""
         return """
-### ModifyFlowLive (ADMIN ONLY)
-As an admin, you have access to the `ModifyFlowLive` tool to edit the flow definition in real-time.
+### ADMIN FLOW MODIFICATION
+As an admin, you can modify the flow in real-time using the PerformAction tool with the "modify_flow" action.
+
+**DETECTING ADMIN COMMANDS:**
+Admin commands are meta-instructions about the flow itself, NOT answers to questions. Look for:
+- "Change this question to..."
+- "Make this more/less..."  
+- "Add/remove a question..."
+- "Break this into multiple questions..."
+- "Don't ask about..."
+- Commands that reference the flow structure itself
 
 **Usage:**
-- `instruction` (str): Natural language instruction for the modification (e.g., "Make the greeting more friendly", "Add a question about budget").
-- `target_node` (str, optional): The ID of the specific node to modify. If omitted, the modification applies to the current node or the flow generally.
-- `modification_type` (str, optional): Can be "prompt", "routing", "validation", or "general".
+When an admin requests flow changes, use PerformAction with:
+- `actions`: Include "modify_flow" in the action list (e.g., ["modify_flow", "stay"])
+- `flow_modification_instruction`: Natural language instruction for the modification
+- `flow_modification_target` (optional): The ID of the specific node to modify
+- `flow_modification_type` (optional): Can be "prompt", "routing", "validation", or "general"
+- `messages`: Always include messages to confirm the action to the admin
 
 **Examples:**
-- User says: "Change this question to ask for their full name" -> `ModifyFlowLive(instruction="Change the prompt to ask for the user's full name", target_node="current_node_id")`
-- User says: "Make the greeting more friendly" -> `ModifyFlowLive(instruction="Make the greeting more friendly", target_node="q.greeting")`
+- Admin says: "Nao, isso foi uma ordem como admin pra quebrar o flow em 3 perguntas ao inves de uma só"
+  → Use: PerformAction with actions=["modify_flow", "stay"], flow_modification_instruction="Break the current question into 3 separate sequential questions", messages=[{"text": "Entendi! Vou dividir em 3 perguntas separadas conforme solicitado 👍", "delay_ms": 0}, {"text": "Primeiro: qual é a largura e o comprimento?", "delay_ms": 1700}]
+  
+- Admin says: "Change this question to ask for their full name"
+  → Use: PerformAction with actions=["modify_flow", "stay"], flow_modification_instruction="Change the prompt to ask for the user's full name", messages=[{"text": "Perfeito! Vou alterar a pergunta para solicitar o nome completo.", "delay_ms": 0}]
 """
 
     def _select_contextual_tools(
@@ -761,16 +776,12 @@ As an admin, you have access to the `ModifyFlowLive` tool to edit the flow defin
     ) -> list[type]:
         """Select appropriate tools based on context."""
         # Use PerformAction as the main tool - it can handle multiple actions
-        from ..tools import PerformAction, RequestHumanHandoff, ModifyFlowLive
+        from ..tools import PerformAction, RequestHumanHandoff
         
         tools: list[type] = [
-            PerformAction,  # This can do UpdateAnswers + NavigateToNode + more
+            PerformAction,  # This can do everything including flow modification for admins
             RequestHumanHandoff,  # For escalation
         ]
-        
-        # Add admin tools if user is admin
-        if is_admin:
-            tools.append(ModifyFlowLive)
 
         return tools
 
@@ -903,7 +914,7 @@ As an admin, you have access to the `ModifyFlowLive` tool to edit the flow defin
 
     def _convert_langchain_to_gpt5_response(self, langchain_result: dict[str, Any]) -> GPT5Response:
         """Convert LangChain tool result to GPT5Response format."""
-        from ..types import PerformActionCall, RequestHumanHandoffCall, ModifyFlowLiveCall
+        from ..types import PerformActionCall, RequestHumanHandoffCall
         
         # DEBUG: Log what we received from LangChain
         logger.info(f"[DEBUG] LangChain result: {json.dumps(langchain_result, indent=2)}")
@@ -960,10 +971,6 @@ As an admin, you have access to the `ModifyFlowLive` tool to edit the flow defin
             if "context_summary" not in tool_args:
                 tool_args["context_summary"] = "User requested human assistance"
             tool_call = RequestHumanHandoffCall(**tool_args)
-        elif tool_name == "ModifyFlowLive":
-            if "instruction" not in tool_args:
-                tool_args["instruction"] = "No specific instruction provided"
-            tool_call = ModifyFlowLiveCall(**tool_args)
         else:
             # Fallback to PerformAction
             tool_call = PerformActionCall(

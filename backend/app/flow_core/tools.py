@@ -70,32 +70,6 @@ class RequestHumanHandoff(FlowTool):
     )
 
 
-class ModifyFlowLive(FlowTool):
-    """Modify the current flow based on admin instructions during conversation.
-    
-    ADMIN ONLY TOOL - Use this when an admin user wants to:
-    - Change how the flow behaves
-    - Add or modify questions
-    - Adjust flow logic or routing
-    - Update prompts or messages
-    
-    The modification will be stored and applied to future conversations.
-    """
-    
-    instruction: str = Field(
-        ...,
-        description="The specific instruction about how to modify the flow behavior"
-    )
-    
-    target_node: str | None = Field(
-        default=None,
-        description="Specific node to modify (if applicable)"
-    )
-    
-    modification_type: Literal["prompt", "routing", "validation", "general"] = Field(
-        default="general",
-        description="Type of modification being requested"
-    )
 
 
 class PerformAction(FlowTool):
@@ -105,11 +79,12 @@ class PerformAction(FlowTool):
     - Staying on current node or navigating
     - Updating answers if needed
     - Sending messages to the user
+    - Modifying the flow (admin only)
     
     ALWAYS use this tool for any response.
     """
     
-    actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart"]] = Field(
+    actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow"]] = Field(
         ...,
         description="Actions to take in sequence (e.g., ['update', 'navigate'] to save answer then navigate)"
     )
@@ -141,6 +116,22 @@ class PerformAction(FlowTool):
         description="Reason when action is 'handoff'"
     )
     
+    # Flow modification fields (admin only)
+    flow_modification_instruction: str | None = Field(
+        default=None,
+        description="Instruction for modifying the flow when action is 'modify_flow' (admin only)"
+    )
+    
+    flow_modification_target: str | None = Field(
+        default=None,
+        description="Target node for flow modification (optional)"
+    )
+    
+    flow_modification_type: Literal["prompt", "routing", "validation", "general"] | None = Field(
+        default=None,
+        description="Type of flow modification (optional)"
+    )
+    
     @field_validator("messages")
     @classmethod
     def validate_messages(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -159,20 +150,10 @@ FLOW_TOOLS = [
     RequestHumanHandoff,
 ]
 
-# Admin-only tools (not included in default registry)
-ADMIN_TOOLS = [
-    ModifyFlowLive,
-]
-
 
 def get_tool_by_name(name: str) -> type[FlowTool] | None:
     """Get a tool class by its name."""
-    # Check regular tools first
     for tool in FLOW_TOOLS:
-        if tool.__name__ == name:
-            return tool
-    # Then check admin tools
-    for tool in ADMIN_TOOLS:
         if tool.__name__ == name:
             return tool
     return None

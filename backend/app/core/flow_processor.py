@@ -403,8 +403,9 @@ class FlowProcessor:
 
                 # Create tool event handler for live flow modification and restart
                 def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
-                    if tool_name == "ModifyFlowLive":
-                        print(f"[DEBUG PROCESSOR] ModifyFlowLive requested by user: {request.user_id}")
+                    # Check if this is a PerformAction with modify_flow action
+                    if tool_name == "PerformAction" and metadata.get("flow_modification_requested"):
+                        print(f"[DEBUG PROCESSOR] Flow modification requested by user: {request.user_id}")
                         print(f"[DEBUG PROCESSOR] User is admin: {is_admin}")
 
                         if not is_admin:
@@ -412,7 +413,7 @@ class FlowProcessor:
                             return False  # Don't intercept - let normal flow handle it
 
                         # Handle live flow modification
-                        instruction = metadata.get("instruction", "")
+                        instruction = metadata.get("modification_instruction", "")
                         print(f"[DEBUG PROCESSOR] Admin instruction: {instruction}")
                         if instruction:
                             try:
@@ -565,16 +566,23 @@ CRITICAL FLOW SAFETY RULES:
 
 
 
-                # If we intercepted ModifyFlowLive, return the explicit success/error message
+                # If we intercepted flow modification, return the explicit success/error message
+                # But also include the messages from the runner result if available
                 if "modification_intercepted" in locals() and modification_intercepted:
+                    metadata = {
+                        "tool_name": "PerformAction",
+                        "flow_modified": modification_was_applied,
+                        "action": "modify_flow",
+                    }
+                    # Include messages from the runner result if available
+                    if hasattr(result, "messages") and result.messages:
+                        metadata["messages"] = result.messages
+                    
                     return FlowResponse(
                         result=FlowProcessingResult.CONTINUE,
                         message=modification_message or "",
                         context=ctx,
-                        metadata={
-                            "tool_name": "ModifyFlowLive",
-                            "flow_modified": modification_was_applied,
-                        },
+                        metadata=metadata,
                     )
 
 

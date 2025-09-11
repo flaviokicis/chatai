@@ -80,8 +80,6 @@ class ToolExecutionService:
 
         try:
             # Route to appropriate handler based on tool name
-            if tool_name == "ModifyFlowLive":
-                return self._handle_modify_flow_live(tool_data, context)
             if tool_name == "PerformAction":
                 return self._handle_perform_action(tool_data, context, pending_field)
             if tool_name == "RequestHumanHandoff":
@@ -171,6 +169,23 @@ class ToolExecutionService:
                 result.navigation = context.flow_id
                 result.metadata[META_RESTART] = True
                 
+            elif action == "modify_flow":
+                # Handle flow modification (admin only)
+                instruction = tool_data.get("flow_modification_instruction", "")
+                target_node = tool_data.get("flow_modification_target")
+                modification_type = tool_data.get("flow_modification_type", "general")
+                
+                logger.info(f"Admin flow modification requested: {instruction}")
+                logger.info(f"Target node: {target_node}, Type: {modification_type}")
+                
+                # Store modification metadata for flow processor to handle
+                result.metadata.update({
+                    "flow_modification_requested": True,
+                    "modification_instruction": instruction,
+                    "target_node": target_node,
+                    "modification_type": modification_type,
+                    "admin_action": True,
+                })
         
         return result
 
@@ -182,41 +197,4 @@ class ToolExecutionService:
             escalate=False,
             terminal=False,
             metadata={}
-        )
-    
-    def _handle_modify_flow_live(
-        self,
-        tool_data: dict[str, Any],
-        context: FlowContext,
-    ) -> ToolExecutionResult:
-        """Handle ModifyFlowLive tool for admin users.
-        
-        Args:
-            tool_data: Tool parameters including instruction
-            context: Current flow context
-            
-        Returns:
-            Execution result with modification metadata
-        """
-        instruction = tool_data.get("instruction", "")
-        target_node = tool_data.get("target_node")
-        modification_type = tool_data.get("modification_type", "general")
-        
-        logger.info(f"Admin flow modification requested: {instruction}")
-        logger.info(f"Target node: {target_node}, Type: {modification_type}")
-        
-        # Store the modification instruction in metadata
-        # The actual modification will be handled by the flow processor
-        return ToolExecutionResult(
-            updates={},
-            navigation=None,
-            escalate=False,
-            terminal=False,
-            metadata={
-                "flow_modification_requested": True,
-                "modification_instruction": instruction,
-                "target_node": target_node,
-                "modification_type": modification_type,
-                "admin_action": True,
-            },
         )

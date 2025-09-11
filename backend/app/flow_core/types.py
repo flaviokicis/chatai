@@ -109,25 +109,13 @@ class RequestHumanHandoffCall(ToolCall):
     urgency: Literal["low", "medium", "high"] = Field(default=DEFAULT_URGENCY)
 
 
-class ModifyFlowLiveCall(ToolCall):
-    """Tool call for ModifyFlowLive (admin only)."""
-
-    tool_name: Literal["ModifyFlowLive"] = "ModifyFlowLive"
-    instruction: str = Field(..., description="The modification instruction")
-    target_node: str | None = Field(default=None, description="Target node to modify")
-    modification_type: Literal["prompt", "routing", "validation", "general"] = Field(
-        default="general",
-        description="Type of modification"
-    )
-
-
 
 
 class PerformActionCall(ToolCall):
     """Tool call for unified PerformAction."""
     
     tool_name: Literal["PerformAction"] = "PerformAction"
-    actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart"]] = Field(
+    actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow"]] = Field(
         ...,
         description="Actions to take in sequence (e.g., ['update', 'navigate'])"
     )
@@ -136,13 +124,16 @@ class PerformActionCall(ToolCall):
     target_node_id: str | None = Field(default=None)
     clarification_reason: str | None = Field(default=None)
     handoff_reason: str | None = Field(default=None)
+    # Flow modification fields (admin only)
+    flow_modification_instruction: str | None = Field(default=None)
+    flow_modification_target: str | None = Field(default=None)
+    flow_modification_type: Literal["prompt", "routing", "validation", "general"] | None = Field(default=None)
 
 
 # Union type for all possible tool calls
 ToolCallUnion = (
     PerformActionCall
     | RequestHumanHandoffCall
-    | ModifyFlowLiveCall
 )
 
 
@@ -249,8 +240,6 @@ def _create_tool_model(tool_name: str, tool_data: dict[str, Any]) -> ToolCallUni
         return PerformActionCall(**tool_data)
     if tool_name == "RequestHumanHandoff":
         return RequestHumanHandoffCall(**tool_data)
-    if tool_name == "ModifyFlowLive":
-        return ModifyFlowLiveCall(**tool_data)
 
     msg = f"Unknown tool name: {tool_name}"
     validation_errors = [f"Tool '{tool_name}' is not recognized"]
