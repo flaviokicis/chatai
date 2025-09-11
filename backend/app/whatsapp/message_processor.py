@@ -160,9 +160,14 @@ class WhatsAppMessageProcessor:
             (message_text == "[audio message]")  # Fallback for legacy behavior
         )
         
+        logger.debug("Message type check: MessageType=%s, message_text='%s', is_audio=%s", 
+                    params.get("MessageType"), message_text[:50] if message_text else "", is_audio_message)
+        
         if is_audio_message:
+            logger.info("Processing audio message from %s", sender_number)
             stt_service = SpeechToTextService(self.settings)
             audio_validator = AudioValidationService(self.settings.max_audio_duration_seconds)
+            logger.debug("Audio validator initialized with max_duration=%ds", self.settings.max_audio_duration_seconds)
             
             try:
                 num_media = int(str(params.get("NumMedia", "0")) or 0)
@@ -174,10 +179,31 @@ class WhatsAppMessageProcessor:
                     and media_url
                     and media_type.startswith("audio")
                 ):
-                    # This is legacy Twilio code - transcribe directly since we use WhatsApp Cloud API
-                    message_text = await asyncio.to_thread(
-                        stt_service.transcribe_twilio_media, media_url
+                    # Validate Twilio audio duration first
+                    is_valid, duration, error_msg = await asyncio.to_thread(
+                        audio_validator.validate_twilio_media_duration,
+                        media_url,
+                        (self.settings.twilio_account_sid, self.settings.twilio_auth_token) if self.settings.twilio_account_sid else None
                     )
+                    
+                    if not is_valid:
+                        logger.info("Audio duration validation failed for Twilio media: %s (duration: %ss)",
+                                  error_msg, duration)
+                        
+                        # Pass the audio error to the LLM so it can generate a natural response
+                        if duration is not None:
+                            # We know it's too long
+                            max_minutes = self.settings.max_audio_duration_seconds // 60
+                            duration_minutes = duration / 60
+                            message_text = f"[AUDIO_ERROR: Áudio muito longo - {duration_minutes:.1f} minutos, máximo permitido {max_minutes} minutos]"
+                        else:
+                            # Error determining duration or processing
+                            message_text = "[AUDIO_ERROR: Não foi possível processar o áudio]"
+                    else:
+                        logger.info("Audio duration validation passed: %.1fs", duration or 0)
+                        message_text = await asyncio.to_thread(
+                            stt_service.transcribe_twilio_media, media_url
+                        )
                         
                 elif params.get("MessageType") == "audio":
                     raw_msg = params.get("WhatsAppRawMessage", {})
@@ -186,7 +212,11 @@ class WhatsAppMessageProcessor:
                         if isinstance(raw_msg, dict)
                         else None
                     )
+                    logger.debug("WhatsApp Cloud API audio: media_id=%s, raw_msg_keys=%s", 
+                               media_id, list(raw_msg.keys()) if isinstance(raw_msg, dict) else "not_dict")
+                    
                     if media_id:
+                        logger.info("Validating WhatsApp Cloud API audio: media_id=%s", media_id)
                         # Validate WhatsApp API audio duration first
                         is_valid, duration, error_msg = await asyncio.to_thread(
                             audio_validator.validate_whatsapp_api_media_duration,
@@ -194,26 +224,31 @@ class WhatsAppMessageProcessor:
                         )
 
                         if not is_valid:
-                            logger.info("Audio duration validation failed for WhatsApp API media: %s (duration: %ss)",
+                            logger.warning("Audio duration validation FAILED for WhatsApp API media: %s (duration: %ss)",
                                       error_msg, duration)
                             
-                            # Different messages based on whether we could determine duration
+                            # Pass the audio error to the LLM so it can generate a natural response
                             if duration is not None:
                                 # We know it's too long
                                 max_minutes = self.settings.max_audio_duration_seconds // 60
                                 duration_minutes = duration / 60
-                                message_text = f"Desculpe, áudios devem ter no máximo {max_minutes} minutos. Seu áudio tem {duration_minutes:.1f} minutos."
+                                message_text = f"[AUDIO_ERROR: Áudio muito longo - {duration_minutes:.1f} minutos, máximo permitido {max_minutes} minutos]"
                             else:
-                                # Error determining duration
-                                message_text = "Estamos com dificuldades para processar áudios no momento. Por favor, envie sua mensagem em texto."
+                                # Error determining duration or processing
+                                message_text = "[AUDIO_ERROR: Não foi possível processar o áudio]"
                         else:
-                            logger.info("Audio duration validation passed: %.1fs", duration or 0)
+                            logger.info("Audio duration validation PASSED: %.1fs", duration or 0)
+                            logger.info("Transcribing WhatsApp audio: media_id=%s", media_id)
                             message_text = await asyncio.to_thread(
                                 stt_service.transcribe_whatsapp_api_media, media_id
                             )
+                            logger.debug("Transcription complete: '%s'", message_text[:100] if message_text else "empty")
+                    else:
+                        logger.error("No media_id found in WhatsApp audio message. raw_msg=%s", raw_msg)
+                        message_text = "[AUDIO_ERROR: Não foi possível processar o áudio - ID não encontrado]"
             except Exception as e:  # noqa: BLE001
-                logger.warning("Failed to process WhatsApp audio: %s", e)
-                message_text = "[audio message]"
+                logger.error("Failed to process WhatsApp audio: %s", e, exc_info=True)
+                message_text = "[AUDIO_ERROR: Erro inesperado ao processar áudio]"
 
         # Extract WhatsApp message ID
         message_id = (
