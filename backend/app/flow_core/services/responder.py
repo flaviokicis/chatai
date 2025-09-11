@@ -320,7 +320,7 @@ Current question/intent (from current node {context.current_node_id or 'unknown'
   * Use actions: ["update", "stay"] to update the field while staying at current node
   * Update ANY previously collected field that needs correction, not just the current one
   * Example: User says "Wait, I said 40m but meant 4m for height"
-    - updates: {"altura_poste_m": 4}
+    - updates: {{"altura_poste_m": 4}}
     - Stay at current node and acknowledge: "Got it, I've corrected the height to 4 meters. Now about [current question]..."
   * Don't navigate backwards - just update and continue from where you are
 
