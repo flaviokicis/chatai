@@ -12,6 +12,7 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+import requests
 from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
 
@@ -216,33 +217,25 @@ class WhatsAppMessageProcessor:
                                media_id, list(raw_msg.keys()) if isinstance(raw_msg, dict) else "not_dict")
                     
                     if media_id:
-                        logger.info("Validating WhatsApp Cloud API audio: media_id=%s", media_id)
-                        # Validate WhatsApp API audio duration first
-                        is_valid, duration, error_msg = await asyncio.to_thread(
-                            audio_validator.validate_whatsapp_api_media_duration,
-                            media_id, self.settings.whatsapp_access_token
-                        )
-
-                        if not is_valid:
-                            logger.warning("Audio duration validation FAILED for WhatsApp API media: %s (duration: %ss)",
-                                      error_msg, duration)
-                            
-                            # Pass the audio error to the LLM so it can generate a natural response
-                            if duration is not None:
-                                # We know it's too long
-                                max_minutes = self.settings.max_audio_duration_seconds // 60
-                                duration_minutes = duration / 60
-                                message_text = f"[AUDIO_ERROR: Áudio muito longo - {duration_minutes:.1f} minutos, máximo permitido {max_minutes} minutos]"
-                            else:
-                                # Error determining duration or processing
-                                message_text = "[AUDIO_ERROR: Não foi possível processar o áudio]"
-                        else:
-                            logger.info("Audio duration validation PASSED: %.1fs", duration or 0)
-                            logger.info("Transcribing WhatsApp audio: media_id=%s", media_id)
+                        # Skip duration validation for WhatsApp Cloud API
+                        # WhatsApp already limits audio messages and validation requires API token
+                        # Just proceed directly to transcription
+                        logger.info("Transcribing WhatsApp audio: media_id=%s (skipping duration validation)", media_id)
+                        try:
                             message_text = await asyncio.to_thread(
                                 stt_service.transcribe_whatsapp_api_media, media_id
                             )
                             logger.debug("Transcription complete: '%s'", message_text[:100] if message_text else "empty")
+                        except requests.exceptions.HTTPError as e:
+                            if e.response and e.response.status_code == 401:
+                                logger.error("WhatsApp API authentication failed - check WHATSAPP_ACCESS_TOKEN: %s", e)
+                                message_text = "[AUDIO_ERROR: Configuração do WhatsApp API inválida - verifique o token de acesso]"
+                            else:
+                                logger.error("HTTP error transcribing WhatsApp audio: %s", e)
+                                message_text = "[AUDIO_ERROR: Não foi possível processar o áudio]"
+                        except Exception as e:
+                            logger.error("Failed to transcribe WhatsApp audio: %s", e)
+                            message_text = "[AUDIO_ERROR: Não foi possível processar o áudio]"
                     else:
                         logger.error("No media_id found in WhatsApp audio message. raw_msg=%s", raw_msg)
                         message_text = "[AUDIO_ERROR: Não foi possível processar o áudio - ID não encontrado]"
