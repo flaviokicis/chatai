@@ -44,9 +44,6 @@ class MessageList(BaseModel):
     """Validated list of WhatsApp messages."""
 
     messages: list[WhatsAppMessage] = Field(
-        ...,
-        min_items=MIN_MESSAGES_PER_TURN,
-        max_items=MAX_MESSAGES_ALLOWED,
         description="List of messages to send"
     )
 
@@ -87,9 +84,6 @@ class ToolCall(BaseModel):
 
     tool_name: str = Field(..., description="Name of the tool to execute")
     messages: list[WhatsAppMessage] = Field(
-        ...,
-        min_items=MIN_MESSAGES_PER_TURN,
-        max_items=MAX_MESSAGES_ALLOWED,
         description="WhatsApp messages to send to user"
     )
     confidence: float = Field(
@@ -157,9 +151,6 @@ class GPT5Response(BaseModel):
     """Complete response from GPT-5 including tools only."""
 
     tools: list[ToolCallUnion] = Field(
-        ..., 
-        min_items=1,
-        max_items=3,  # Allow up to 3 tool calls per turn
         description="Tools to execute in sequence"
     )
     reasoning: str = Field(..., description="Overall reasoning for the response")
@@ -181,7 +172,7 @@ class GPT5Response(BaseModel):
     
     def get_all_tools_data(self) -> list[tuple[str, dict[str, Any]]]:
         """Get all tools with their data."""
-        tools_data = []
+        tools_data: list[tuple[str, dict[str, Any]]] = []
         for tool in self.tools:
             data = tool.model_dump(exclude={"tool_name", "messages"})
             tools_data.append((tool.tool_name, dict(data) if data else {}))

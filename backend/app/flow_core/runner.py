@@ -165,7 +165,7 @@ class FlowTurnRunner:
             
             if responder_result.escalate:
                 engine_event["tool_name"] = "RequestHumanHandoff"
-                engine_event["reason"] = responder_result.metadata.get("reason", "requested")
+                engine_event["reason"] = (responder_result.metadata or {}).get("reason", "requested")
             
             if responder_result.terminal:
                 ctx.is_complete = True

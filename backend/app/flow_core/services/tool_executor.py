@@ -112,8 +112,9 @@ class ToolExecutionService:
         pending_field: str | None,
     ) -> ToolExecutionResult:
         """Handle PerformAction unified tool with sequential actions."""
-        # Create typed tool call
-        tool = PerformActionCall(**{"tool_name": "PerformAction", **tool_data})
+        # Extract actions directly from tool_data (tool already validated by responder)
+        actions = tool_data.get("actions", ["stay"])
+        reasoning = tool_data.get("reasoning", "No reasoning provided")
         
         # Initialize result that will accumulate all actions
         result = ToolExecutionResult(
@@ -121,34 +122,36 @@ class ToolExecutionService:
             navigation=None,
             escalate=False,
             terminal=False,
-            metadata={META_REASONING: tool.reasoning}
+            metadata={META_REASONING: reasoning}
         )
         
         # Process each action in sequence
-        for action in tool.actions:
+        for action in actions:
             if action == "stay":
                 # Increment clarification count if needed
-                if tool.clarification_reason == CLARIFICATION_NEEDS_EXPLANATION:
+                clarification_reason = tool_data.get("clarification_reason")
+                if clarification_reason == CLARIFICATION_NEEDS_EXPLANATION:
                     context.clarification_count += 1
-                result.metadata["clarification_reason"] = tool.clarification_reason
+                result.metadata["clarification_reason"] = clarification_reason
                 # Stay doesn't change navigation or updates
                 
             elif action == "update":
                 # Add updates to the result
-                if tool.updates:
-                    result.updates.update(tool.updates)
+                updates = tool_data.get("updates")
+                if updates:
+                    result.updates.update(updates)
                     # Also update context immediately
-                    context.answers.update(tool.updates)
+                    context.answers.update(updates)
                 
             elif action == "navigate":
                 # Set navigation target
-                result.navigation = tool.target_node_id
+                result.navigation = tool_data.get("target_node_id")
                 result.metadata[META_NAV_TYPE] = "explicit"
                 
             elif action == "handoff":
                 # Mark for escalation
                 result.escalate = True
-                result.metadata["reason"] = tool.handoff_reason or "requested"
+                result.metadata["reason"] = tool_data.get("handoff_reason") or "requested"
                 
             elif action == "complete":
                 # Mark as terminal

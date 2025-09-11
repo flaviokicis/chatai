@@ -84,7 +84,6 @@ class FlowContext:
     # Metadata
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
-    session_id: str | None = None
 
     def add_turn(
         self,

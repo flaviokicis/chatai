@@ -172,7 +172,7 @@ class RedisKeyBuilder:
                 "user_id": parts[0],
                 "session_id": parts[1],
                 "agent_type": parts[1],
-                "flow_id": None,
+                "flow_id": "unknown",
                 "redis_key": redis_key
             }
 

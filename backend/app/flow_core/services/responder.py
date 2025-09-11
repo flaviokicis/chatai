@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 from langfuse import get_client
 
 from app.core.prompt_logger import prompt_logger
-from app.core.thought_tracer import DatabaseThoughtTracer
+# Thought tracing removed - using Langfuse for observability
 
 from ..constants import (
     DEFAULT_AGENT_TYPE,
@@ -67,16 +67,13 @@ class EnhancedFlowResponder:
     def __init__(
         self,
         llm: LLMClient,
-        thought_tracer: DatabaseThoughtTracer | None = None,
     ) -> None:
         """Initialize the enhanced responder.
         
         Args:
             llm: The LLM client (GPT-5) for processing
-            thought_tracer: Optional thought tracer for debugging
         """
         self._llm = llm
-        self._thought_tracer = thought_tracer
         self._langfuse = get_client()
         self._message_service = MessageGenerationService()
         self._tool_executor = ToolExecutionService()
@@ -123,13 +120,7 @@ class EnhancedFlowResponder:
         # Select appropriate tools
         tools = self._select_contextual_tools(context, pending_field, is_admin)
 
-        # Start thought tracing if available
-        thought_id = self._start_thought_trace(
-            context=context,
-            user_message=user_message,
-            pending_field=pending_field,
-            tools=tools,
-        )
+        # Thought tracing removed - using Langfuse for observability
 
         try:
             # Call GPT-5 with enhanced schema and validation
@@ -143,13 +134,7 @@ class EnhancedFlowResponder:
                 project_context=project_context,
             )
 
-            # Complete thought tracing
-            if thought_id and self._thought_tracer:
-                self._complete_thought_trace(
-                    thought_id=thought_id,
-                    output=output,
-                    response=validated_response,
-                )
+            # Thought tracing removed - using Langfuse for observability
 
             return output
 
@@ -196,66 +181,96 @@ User message: {user_message}
 ## CONVERSATION HISTORY
 {history}
 
-## CRITICAL RULES
-1. YOU MUST GENERATE MESSAGES - Include messages in your content field as JSON array
-2. Generate 1-3 warm, conversational WhatsApp messages
-3. If user greets you (Ola, Oi, etc), ALWAYS greet back warmly before asking questions
-4. Keep conversation flowing naturally - acknowledge, respond, then continue the flow
+## CRITICAL RULES - MESSAGES ARE MANDATORY!
+1. **EVERY TOOL CALL MUST INCLUDE A 'messages' FIELD** - This is NOT optional!
+2. The 'messages' field goes INSIDE your tool arguments, NOT in content
+3. Generate 1-3 warm, conversational WhatsApp messages
+4. If user greets you (Ola, Oi, etc), ALWAYS greet back warmly before asking questions
+5. Keep conversation flowing naturally - acknowledge, respond, then continue the flow
 
-## MESSAGE FORMAT (PUT THIS IN YOUR CONTENT FIELD)
-[
-  {{"text": "First message - warm greeting or acknowledgment", "delay_ms": 0}},
-  {{"text": "Second message - continue conversation naturally", "delay_ms": 1500}},
-  {{"text": "Third message (if needed) - ask next question", "delay_ms": 1800}}
-]
+## MESSAGE FORMAT (MUST BE IN TOOL ARGUMENTS)
+Your tool call MUST include:
+```
+{
+  "name": "PerformAction",
+  "arguments": {
+    "actions": [...],
+    "messages": [
+      {"text": "First message - warm greeting or acknowledgment", "delay_ms": 0},
+      {"text": "Second message - continue conversation naturally", "delay_ms": 1500},
+      {"text": "Third message (if needed) - ask next question", "delay_ms": 1800}
+    ],
+    "reasoning": "...",
+    "confidence": 0.8
+  }
+}
+```
+
+"messages" is a list of WhatsApp messages to send to the user. It is mandatory.
 
 ## TOOL SELECTION RULES
 
-### UpdateAnswers
-Use when you can extract an answer for the current pending field.
-MANDATORY: The "updates" field must contain {{"{pending_field}": "extracted_value"}}
-MANDATORY: Generate messages that acknowledge the answer AND continue to next question
+### PerformAction (Main Tool)
+This is your primary tool that can perform multiple actions in sequence:
 
-Examples for field "{pending_field}":
-- User: "campo de futebol" → updates: {{"{pending_field}": "campo de futebol"}}
-  Messages: ["Ótimo! Uma quadra esportiva!", "Vou te ajudar com a iluminação ideal", "Qual o tamanho da quadra?"]
+**Actions Available:**
+- **"stay"**: When user needs clarification or response is unclear
+- **"update"**: When you can extract an answer for the pending field  
+- **"navigate"**: When you need to move to a different node
+- **"handoff"**: When user needs human assistance
+- **"complete"**: When flow is finished
+- **"restart"**: When user explicitly asks to start over
 
-### StayOnThisNode
-Use when response is unclear or user needs clarification
-MANDATORY: Generate warm messages that clarify and re-ask the question naturally
+**MANDATORY for ALL actions:**
+- The 'messages' field is REQUIRED - your tool call will FAIL without it!
+- Generate 1-3 warm, conversational WhatsApp messages in the messages field
+- Always acknowledge the user's input before proceeding
 
-### NavigateToNode
-Use for navigation between nodes
-MANDATORY: Generate messages that transition smoothly
-{self._format_navigation_options(available_edges)}
+**Examples:**
+
+When user provides answer:
+```
+PerformAction:
+  actions: ["update", "navigate"]
+  updates: {{"{pending_field}": "extracted_value"}}
+  target_node_id: "next_node"
+  messages: [
+    {{"text": "Perfeito! Entendi que é um campo de futebol! ⚽", "delay_ms": 0}},
+    {{"text": "Agora preciso saber as dimensões...", "delay_ms": 1500}}
+  ]
+```
+
+When user is unclear:
+```
+PerformAction:
+  actions: ["stay"]
+  messages: [
+    {{"text": "Não entendi muito bem...", "delay_ms": 0}},
+    {{"text": "Pode me explicar melhor?", "delay_ms": 1200}}
+  ]
+```
 
 ### RequestHumanHandoff
-Use when user needs human assistance
-MANDATORY: Generate empathetic messages about transferring to specialist
-
-### RestartConversation
-Use ONLY when user explicitly says "restart", "start over"
-MANDATORY: Generate fresh greeting messages
-
-### ConfirmCompletion
-Use when flow is complete
-MANDATORY: Generate completion messages thanking user
+Use only when user explicitly requests human help or situation is too complex.
 
 {self._add_allowed_values_constraint(allowed_values, pending_field)}
 
 ## EXAMPLES OF GOOD RESPONSES
 
-User: "Ola!"
-Tool: StayOnThisNode (if at beginning) or current appropriate tool
-Content: [
+User: "Olá!"
+Tool: PerformAction
+Actions: ["stay"]
+Messages: [
   {{"text": "Olá! Que bom falar com você! 😊", "delay_ms": 0}},
   {{"text": "Sou da equipe de atendimento", "delay_ms": 1200}},
   {{"text": "Como posso ajudar você hoje?", "delay_ms": 1500}}
 ]
 
-User: "Eu tenho uma quadra"
-Tool: UpdateAnswers
-Content: [
+User: "Eu tenho uma quadra"  
+Tool: PerformAction
+Actions: ["update"]
+Updates: {{"{pending_field}": "quadra esportiva"}}
+Messages: [
   {{"text": "Que legal! Uma quadra esportiva! 🏐", "delay_ms": 0}},
   {{"text": "Temos soluções perfeitas para iluminação esportiva", "delay_ms": 1500}},
   {{"text": "Qual o tamanho aproximado da sua quadra?", "delay_ms": 1800}}
@@ -495,8 +510,10 @@ Apply this style naturally while maintaining conversational flow.
         tool_data = response.get_tool_data()
 
         # Add back confidence and reasoning to tool_data for executor
-        tool_data["confidence"] = response.tool.confidence
-        tool_data["reasoning"] = response.tool.reasoning
+        primary_tool = response.tools[0] if response.tools else None
+        if primary_tool:
+            tool_data["confidence"] = primary_tool.confidence
+            tool_data["reasoning"] = primary_tool.reasoning
 
         # Execute the tool
         try:
@@ -517,14 +534,14 @@ Apply this style naturally while maintaining conversational flow.
                 metadata={"error": str(e)},
             )
 
-        # Messages are already validated by Pydantic
-        messages = response.messages
+        # Extract messages from the primary tool
+        messages = primary_tool.messages if primary_tool else [{"text": "Erro ao executar ferramenta", "delay_ms": 0}]
 
         return ResponderOutput(
             tool_name=tool_name,
             tool_result=tool_result,
             messages=messages,
-            confidence=response.tool.confidence,
+            confidence=primary_tool.confidence if primary_tool else 0.5,
             reasoning=response.reasoning,
         )
 
@@ -613,88 +630,32 @@ Please ensure:
             return f"\nIMPORTANT: Field '{pending_field}' must be one of: {', '.join(allowed_values)}"
         return ""
 
-    def _start_thought_trace(
-        self,
-        context: FlowContext,
-        user_message: str,
-        pending_field: str | None,
-        tools: list[type],
-    ) -> str | None:
-        """Start thought tracing if available."""
-        if not self._thought_tracer:
-            return None
-
-
-        tool_names = [t.__name__ for t in tools]
-        current_state = {
-            "answers": dict(context.answers),
-            "pending_field": pending_field,
-            "active_path": context.active_path,
-        }
-
-        # Extract session info
-        session_id = getattr(context, "session_id", DEFAULT_SESSION_ID)
-        user_id = getattr(context, "user_id", DEFAULT_USER_ID)
-        tenant_id = getattr(context, "tenant_id", None)
-
-        if tenant_id:
-            return self._thought_tracer.start_thought(
-                user_id=user_id,
-                session_id=session_id,
-                agent_type=DEFAULT_AGENT_TYPE,
-                user_message=user_message,
-                current_state=current_state,
-                available_tools=tool_names,
-                tenant_id=tenant_id,
-                model_name=MODEL_GPT5,
-                channel_id=getattr(context, "channel_id", None),
-            )
-
-        return None
-
-    def _complete_thought_trace(
-        self,
-        thought_id: str,
-        output: ResponderOutput,
-        response: GPT5Response,
-    ) -> None:
-        """Complete thought tracing.
-        
-        Args:
-            thought_id: ID of the thought trace
-            output: The responder output
-            response: The validated GPT-5 response
-        """
-        if not self._thought_tracer:
-            return
-
-        self._thought_tracer.complete_thought(
-            thought_id=thought_id,
-            reasoning=output.reasoning or "",
-            selected_tool=output.tool_name or "none",
-            tool_args=response.get_tool_data(),
-            tool_result=str(output.tool_result.updates) if output.tool_result.updates else None,
-            agent_response=output.messages[0]["text"] if output.messages else "",
-            errors=None,
-            extra_metadata={"message_count": len(output.messages)},
-        )
+    # Thought tracing methods removed - using Langfuse for observability
 
     def _create_direct_gpt5_response(self, langchain_response: dict[str, Any], instruction: str) -> GPT5Response:
         """Create GPT5Response directly from LangChain without unnecessary transformations."""
-        from ..types import GPT5Response, UpdateAnswersCall, StayOnThisNodeCall, NavigateToNodeCall, RequestHumanHandoffCall, ConfirmCompletionCall, RestartConversationCall
+        from ..types import GPT5Response, PerformActionCall, RequestHumanHandoffCall, ModifyFlowLiveCall
         
         tool_calls = langchain_response.get("tool_calls", [])
         content = langchain_response.get("content", "")
         
         # Extract the tool and its arguments
         if not tool_calls:
-            # Default fallback
-            tool_name = "StayOnThisNode"
-            tool_args = {"reasoning": "No tool selected", "acknowledgment": "Entendi", "clarification_reason": "unclear_response", "confidence": 0.5}
+            # Default fallback to PerformAction with stay
+            tool_name = "PerformAction"
+            tool_args = {"actions": ["stay"], "reasoning": "No tool selected", "confidence": 0.5}
         else:
             tool_call = tool_calls[0]
-            tool_name = tool_call.get("name", "StayOnThisNode")
+            tool_name = tool_call.get("name", "PerformAction")
             tool_args = tool_call.get("arguments", {})
+            
+            # DEBUG: Log the raw tool call to see what GPT-5 actually sent
+            logger.info(f"[DEBUG] Raw tool call from GPT-5: {json.dumps(tool_call, indent=2)}")
+            logger.info(f"[DEBUG] Extracted tool_args keys: {list(tool_args.keys())}")
+            if "messages" in tool_args:
+                logger.info(f"[DEBUG] Messages found in tool_args: {len(tool_args['messages'])} messages")
+            else:
+                logger.error(f"[DEBUG] NO MESSAGES in tool_args! Full tool_args: {tool_args}")
             
             # Ensure required fields
             if "reasoning" not in tool_args:
@@ -702,42 +663,46 @@ Please ensure:
             if "confidence" not in tool_args:
                 tool_args["confidence"] = 0.8
         
+        # Generate messages based on context FIRST (needed for tool model creation)
+        messages = self._extract_or_generate_messages(langchain_response, instruction, tool_name, tool_args)
+        
         # Create the appropriate tool model
         tool_args["tool_name"] = tool_name
-        tool_model: UpdateAnswersCall | StayOnThisNodeCall | NavigateToNodeCall | RequestHumanHandoffCall | ConfirmCompletionCall | RestartConversationCall
-        if tool_name == "UpdateAnswers":
-            tool_model = UpdateAnswersCall(**tool_args)
-        elif tool_name == "StayOnThisNode":
-            if "acknowledgment" not in tool_args:
-                tool_args["acknowledgment"] = "Entendi"
-            if "clarification_reason" not in tool_args:
-                tool_args["clarification_reason"] = "unclear_response"
-            tool_model = StayOnThisNodeCall(**tool_args)
-        elif tool_name == "NavigateToNode":
-            tool_model = NavigateToNodeCall(**tool_args)
+        tool_args["messages"] = messages  # Add messages to all tool calls
+        
+        tool_model: PerformActionCall | RequestHumanHandoffCall | ModifyFlowLiveCall
+        if tool_name == "PerformAction":
+            # Ensure actions field exists
+            if "actions" not in tool_args:
+                tool_args["actions"] = ["stay"]
+            tool_model = PerformActionCall(**tool_args)
         elif tool_name == "RequestHumanHandoff":
+            # Ensure required fields for handoff
+            if "reason" not in tool_args:
+                tool_args["reason"] = "explicit_request"
+            if "context_summary" not in tool_args:
+                tool_args["context_summary"] = "User requested human assistance"
             tool_model = RequestHumanHandoffCall(**tool_args)
-        elif tool_name == "ConfirmCompletion":
-            tool_model = ConfirmCompletionCall(**tool_args)
-        elif tool_name == "RestartConversation":
-            tool_model = RestartConversationCall(**tool_args)
+        elif tool_name == "ModifyFlowLive":
+            # Ensure required fields for flow modification
+            if "modification" not in tool_args:
+                tool_args["modification"] = {"action": "no_change", "data": {}}
+            if "instruction" not in tool_args:
+                tool_args["instruction"] = "No specific instruction provided"
+            tool_model = ModifyFlowLiveCall(**tool_args)
         else:
-            # Fallback to StayOnThisNode
-            tool_model = StayOnThisNodeCall(
-                tool_name="StayOnThisNode",
+            # Fallback to PerformAction with stay
+            tool_model = PerformActionCall(
+                tool_name="PerformAction",
+                actions=["stay"],
+                messages=messages,
                 reasoning=f"Unknown tool {tool_name}, staying on node",
-                acknowledgment="Entendi",
-                clarification_reason="unclear_response",
                 confidence=0.3
             )
         
-        # Generate messages based on context
-        messages = self._extract_or_generate_messages(langchain_response, instruction, tool_name, tool_args)
-        
         # Create the GPT5Response directly
         return GPT5Response(
-            tool=tool_model,
-            messages=messages,
+            tools=[tool_model],
             reasoning=str(tool_args.get("reasoning", "Processed user input"))
         )
     
@@ -746,13 +711,19 @@ Please ensure:
                                       instruction: str,
                                       tool_name: str,
                                       tool_args: dict[str, Any]) -> list[dict[str, Any]]:
-        """Extract messages from GPT-5 response - NEVER generate hardcoded messages."""
-        # CRITICAL: GPT-5 MUST generate ALL messages - no hardcoded fallbacks!
+        """Extract messages from GPT-5 response."""
         
-        # Check if the LLM included messages in its content (structured format)
+        # First, check if messages are in the tool arguments (NEW FORMAT - this is where they should be)
+        if "messages" in tool_args and isinstance(tool_args["messages"], list):
+            messages = tool_args["messages"]
+            # Ensure delay_ms is present
+            for i, msg in enumerate(messages):
+                if "delay_ms" not in msg:
+                    msg["delay_ms"] = NO_DELAY_MS if i == 0 else 1500
+            return messages[:MAX_MESSAGES_PER_TURN]
+        
+        # Fallback: Check if the LLM included messages in its content (structured format)
         content = langchain_response.get("content", "")
-        
-        # Try to parse messages from content if it looks like JSON
         if content and content.strip().startswith('['):
             try:
                 parsed_messages = json.loads(content)
@@ -767,13 +738,13 @@ Please ensure:
             except json.JSONDecodeError:
                 pass
         
-        # If GPT-5 didn't provide messages, we need to call it again with clearer instructions
-        # For now, provide a minimal message that forces continuation
-        logger.warning(f"GPT-5 didn't provide messages for tool {tool_name}. Need to improve prompt.")
+        # If we get here, something is wrong with the LLM response
+        logger.error(f"No messages found in tool_args or content for tool {tool_name}")
+        logger.error(f"tool_args keys: {list(tool_args.keys())}")
+        logger.error(f"content: {content[:100]}...")
         
-        # Return minimal message that keeps conversation going
-        # This should RARELY happen if prompt is good
-        return [{"text": "...", "delay_ms": NO_DELAY_MS}]
+        # Return error message
+        return [{"text": "Erro: Não consegui processar a resposta", "delay_ms": NO_DELAY_MS}]
 
     def _create_fallback_response(self, error: str) -> ResponderOutput:
         """Create a fallback response on error.

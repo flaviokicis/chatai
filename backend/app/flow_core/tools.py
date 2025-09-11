@@ -115,10 +115,9 @@ class PerformAction(FlowTool):
     )
     
     messages: list[dict[str, Any]] = Field(
-        ...,
-        min_items=1,
-        max_items=5,
-        description="WhatsApp messages to send to the user"
+        description="WhatsApp messages to send to the user",
+        min_length=1,
+        max_length=5
     )
     
     # Optional fields based on action

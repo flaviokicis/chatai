@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
-    from app.core.thought_tracer import DatabaseThoughtTracer
+    # Thought tracing removed - using Langfuse for observability
     from app.services.tenant_config_service import ProjectContext
 
     from .state import FlowContext
@@ -63,16 +63,14 @@ class LLMFlowResponder:
     def __init__(
         self,
         llm: LLMClient,
-        thought_tracer: DatabaseThoughtTracer | None = None,
     ) -> None:
         """
         Initialize the responder.
 
         Args:
             llm: The LLM client (GPT-5) for processing
-            thought_tracer: Optional thought tracer for debugging
         """
-        self._enhanced_responder = EnhancedFlowResponder(llm, thought_tracer)
+        self._enhanced_responder = EnhancedFlowResponder(llm)
 
     def respond(
         self,

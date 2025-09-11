@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
 
-from app.core.thought_tracer import DatabaseThoughtTracer
+# Thought tracing removed - using Langfuse for observability
 from app.db.session import create_session
 from app.flow_core.compiler import compile_flow
 from app.flow_core.ir import Flow
@@ -372,7 +372,8 @@ class FlowProcessor:
 
             # Execute with thought tracing
             with create_session() as thought_session:
-                thought_tracer = DatabaseThoughtTracer(thought_session)
+                # Thought tracing removed - using Langfuse for observability
+                pass  # Remove the DatabaseThoughtTracer instantiation
 
                 # Check if user is admin for live flow modification
                 extra_tools: list[type] = []
@@ -654,7 +655,7 @@ CRITICAL FLOW SAFETY RULES:
             handoff_data = HandoffData(
                 tenant_id=request.tenant_id,
                 reason=handoff_reason or "User requested human assistance",
-                flow_id=request.flow_id,
+                flow_id=request.flow_metadata.get("flow_id", "unknown"),
                 thread_id=getattr(request, 'thread_id', None),
                 contact_id=getattr(request, 'contact_id', None),
                 channel_instance_id=getattr(request, 'channel_instance_id', None),
@@ -679,21 +680,21 @@ CRITICAL FLOW SAFETY RULES:
                     "Handoff request saved successfully: %s (tenant: %s, flow: %s)",
                     handoff_data.id,
                     request.tenant_id,
-                    request.flow_id,
+                    request.flow_metadata.get("flow_id", "unknown"),
                 )
             else:
                 logger.error(
                     "Failed to save handoff request: %s (tenant: %s, flow: %s)",
                     handoff_data.id,
                     request.tenant_id,
-                    request.flow_id,
+                    request.flow_metadata.get("flow_id", "unknown"),
                 )
                 
         except Exception as e:
             logger.error(
                 "Exception while saving handoff request (tenant: %s, flow: %s): %s",
                 request.tenant_id,
-                request.flow_id,
+                request.flow_metadata.get("flow_id", "unknown"),
                 str(e),
                 exc_info=True,
             )

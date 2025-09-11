@@ -72,6 +72,6 @@ def build_flow_from_question_graph_params(params: dict[str, Any], flow_id: str) 
     # If already given as Flow IR under key 'flow', validate via model
     flow_raw = params.get("flow") if isinstance(params, dict) else None
     if isinstance(flow_raw, dict):
-        return Flow.model_validate(flow_raw)
+        return Flow.model_validate(flow_raw)  # type: ignore[no-any-return]
     # Fallback to empty flow
     return build_flow_from_questions([], flow_id)
