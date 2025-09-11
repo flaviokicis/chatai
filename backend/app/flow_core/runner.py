@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 from .engine import LLMFlowEngine
 from .llm_responder import FlowResponse, LLMFlowResponder, ResponseConfig
-from .state import FlowContext
+from .state import FlowContext, NodeStatus
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class FlowTurnRunner:
         # Handle escalation
         if engine_response.kind == "escalate":
             # Auto-reset on escalation
-            print("[DEBUG RUNNER] Engine escalated, marking for session reset")
+            logger.debug("Engine escalated, marking for session reset")
 
             return TurnResult(
                 assistant_message="Vamos recomeçar! Como posso te ajudar hoje?",
@@ -164,12 +164,26 @@ class FlowTurnRunner:
         # Special handling for certain tools
         if responder_result.tool_name == "PerformAction":
             # PerformAction handles everything - extract what happened
+            
+            # Check if "navigate" action was requested (advance the flow)
+            # The actions are stored in metadata by the tool executor
+            actions = responder_result.metadata.get("actions", []) if responder_result.metadata else []
+            wants_to_navigate = "navigate" in actions
+            
             if responder_result.updates:
                 for field, value in responder_result.updates.items():
                     ctx.answers[field] = value
-                    # Mark as answer event for engine
-                    if field == ctx.pending_field:
+                    # Only mark as answer event if we want to navigate (not staying)
+                    # This allows natural flow progression when LLM says ["update", "navigate"]
+                    if field == ctx.pending_field and wants_to_navigate:
                         engine_event["answer"] = value
+
+                    # If we're NOT navigating, ensure the node isn't marked as completed
+                    if not wants_to_navigate and field == ctx.pending_field:
+                        # Keep the node in pending state since we're collecting more info
+                        node_state = ctx.get_node_state(ctx.current_node_id)
+                        if node_state:
+                            node_state.status = NodeStatus.PENDING
             
             if responder_result.navigation:
                 engine_event["target_node_id"] = responder_result.navigation
@@ -186,10 +200,11 @@ class FlowTurnRunner:
             engine_event["tool_name"] = "RequestHumanHandoff"
             engine_event["reason"] = responder_result.escalate_reason or "requested"
 
-        # Process the event if needed
+        # Process the event if needed - but only if there's actual navigation or answers
+        # Don't call the engine just because there's a tool_name (e.g., PerformAction with stay)
         if engine_event and (engine_event.get("target_node_id") or
                             engine_event.get("answer") or
-                            engine_event.get("tool_name")):
+                            engine_event.get("tool_name") == "RequestHumanHandoff"):
             final_response = self._engine.process(ctx, None, engine_event)
 
             # Update metadata with final response info

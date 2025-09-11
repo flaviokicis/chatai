@@ -121,7 +121,10 @@ class ToolExecutionService:
             navigation=None,
             escalate=False,
             terminal=False,
-            metadata={META_REASONING: reasoning}
+            metadata={
+                META_REASONING: reasoning,
+                "actions": actions  # Store actions for downstream processing
+            }
         )
         
         # Process each action in sequence

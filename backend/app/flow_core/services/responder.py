@@ -261,6 +261,21 @@ LANGUAGE: Always respond in Brazilian Portuguese (português brasileiro).
 - Be helpful and professional as if you're a real customer service representative
 - NEVER mention "vamos seguir por texto" or "continue by text" when users send audio - just respond naturally
 
+## VOICE/AUDIO MESSAGE HANDLING
+If the user message starts with "[FROM_AUDIO]":
+- This indicates the message came from audio transcription - be more flexible
+- IMPORTANT: Remove "[FROM_AUDIO]" from your response - don't echo it back
+- Common audio transcription issues to handle gracefully:
+  * Repeated phrases (stuttering): "tem tem 4 metros" → understand as "tem 4 metros"
+  * Filler words: "uh", "um", "eh" → ignore these
+  * Run-on sentences without punctuation → parse meaning from context
+  * Similar sounding words/numbers: "quatro" vs "quadro", "15" vs "50"
+  * Repeated statements: "precisamos do estudo, precisamos do estudo" → understand once
+- If the transcription seems incoherent:
+  * Use ["stay"] and politely ask: "Desculpe, não consegui entender bem o áudio. Poderia repetir ou enviar por texto?"
+  * Don't guess wildly - ask for clarification
+- Your confidence should be slightly lower for audio messages due to potential transcription errors
+
 ## AUDIO ERROR HANDLING
 If the user message starts with "[AUDIO_ERROR:", this means there was a technical issue processing their audio:
 - Respond naturally and apologetically about the audio issue
@@ -277,6 +292,8 @@ If the user message starts with "[AUDIO_ERROR:", this means there was a technica
 
 ## CURRENT CONTEXT
 Current question/intent (from current node {context.current_node_id or 'unknown'}): {prompt}
+{"Pending field being collected: " + pending_field if pending_field else ""}
+{"IMPORTANT: If you just asked for missing information and the user provides a short response (like a number, 'yes', 'no', or brief text), it's likely the answer to your question!" if context.clarification_count > 0 else ""}
 
 ⚠️ CRITICAL - TWO PRIMARY RULES:
 1. **INTENT FIDELITY**: Maintain the same intention/purpose as the current node's question. The core information being requested must remain the same.
@@ -285,6 +302,37 @@ Current question/intent (from current node {context.current_node_id or 'unknown'
 - You MAY rewrite the question's wording to sound natural in the conversation context
 - If the node's text includes a greeting and you've already greeted, OMIT the redundant greeting
 - DO NOT make up questions beyond what the flow intends - follow the node's purpose
+
+⚠️ HANDLING POTENTIAL MISTAKES/TYPOS:
+- If you suspect the user made a mistake or typo in their response (e.g., unrealistic values, obvious typos, contradictory information):
+  * Use action: ["stay"] to remain at the current node
+  * Politely ask for confirmation or clarification
+  * Example: "Just to confirm, did you mean 40 meters for the height? That seems quite tall for posts."
+  * Be helpful, not condescending - frame it as ensuring accuracy
+- Common patterns to watch for:
+  * Numbers that seem off by an order of magnitude (400m vs 40m, 4m vs 40m)
+  * Mixed units without clear indication
+  * Text that doesn't match the expected response type
+  * Responses that contradict earlier answers
+
+⚠️ CORRECTION DETECTION:
+- When users explicitly correct previous answers (e.g., "Actually, I meant 4 meters not 40"):
+  * Use actions: ["update", "stay"] to update the field while staying at current node
+  * Update ANY previously collected field that needs correction, not just the current one
+  * Example: User says "Wait, I said 40m but meant 4m for height"
+    - updates: {"altura_poste_m": 4}
+    - Stay at current node and acknowledge: "Got it, I've corrected the height to 4 meters. Now about [current question]..."
+  * Don't navigate backwards - just update and continue from where you are
+
+⚠️ CONFIDENCE-BASED CONFIRMATION:
+- Adjust your response based on confidence in understanding:
+  * HIGH confidence (0.9+): Proceed without explicit confirmation
+    - Just acknowledge and move forward: "Perfect! [next question]"
+  * MEDIUM confidence (0.7-0.9): Quick inline confirmation
+    - "Got it - 4 posts, right? [continue with next question]"
+  * LOW confidence (<0.7): Full clarification before proceeding
+    - Use ["stay"] and ask for confirmation: "Just to make sure I understood correctly..."
+- Set your confidence level appropriately in the confidence field
 
 ⚠️ USE PerformAction TOOL:
 - PerformAction is your ONLY main tool for responding
@@ -937,24 +985,36 @@ As an admin, you have access to the `ModifyFlowLive` tool to edit the flow defin
             return "No conversation history yet."
 
         formatted_history = []
+        last_assistant_message = None
+        
         for turn in context.history[-MAX_HISTORY_TURNS:]:
             # Handle both dict and object formats for conversation turns
-            if hasattr(turn, 'user_message') and hasattr(turn, 'assistant_message'):
+            if hasattr(turn, "user_message") and hasattr(turn, "assistant_message"):
                 # ConversationTurn object format
                 formatted_history.append(f"User: {turn.user_message}")
                 formatted_history.append(f"Assistant: {turn.assistant_message}")
+                last_assistant_message = turn.assistant_message
             elif isinstance(turn, dict):
                 # Dictionary format (fallback)
                 formatted_history.append(f"User: {turn.get('user', '')}")
-                formatted_history.append(f"Assistant: {turn.get('assistant', '')}")
+                assistant_msg = turn.get("assistant", "")
+                formatted_history.append(f"Assistant: {assistant_msg}")
+                if assistant_msg:
+                    last_assistant_message = assistant_msg
             else:
                 # Unknown format, try to extract content
-                user_content = getattr(turn, 'content', str(turn)) if hasattr(turn, 'role') and turn.role == 'user' else ''
-                assistant_content = getattr(turn, 'content', str(turn)) if hasattr(turn, 'role') and turn.role == 'assistant' else ''
+                user_content = getattr(turn, "content", str(turn)) if hasattr(turn, "role") and turn.role == "user" else ""
+                assistant_content = getattr(turn, "content", str(turn)) if hasattr(turn, "role") and turn.role == "assistant" else ""
                 if user_content:
                     formatted_history.append(f"User: {user_content}")
                 if assistant_content:
                     formatted_history.append(f"Assistant: {assistant_content}")
+                    last_assistant_message = assistant_content
+        
+        # Add context about what the assistant is waiting for
+        if last_assistant_message and "?" in last_assistant_message:
+            formatted_history.append("[CONTEXT: The assistant just asked a question and is waiting for an answer]")
+        
         return "\n".join(formatted_history)
 
     def _add_allowed_values_constraint(self, allowed_values: list[str] | None, pending_field: str | None) -> str:

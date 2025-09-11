@@ -202,9 +202,14 @@ class WhatsAppMessageProcessor:
                             message_text = "[AUDIO_ERROR: Não foi possível processar o áudio]"
                     else:
                         logger.info("Audio duration validation passed: %.1fs", duration or 0)
-                        message_text = await asyncio.to_thread(
+                        transcribed_text = await asyncio.to_thread(
                             stt_service.transcribe_twilio_media, media_url
                         )
+                        # Mark that this came from audio for the LLM
+                        if transcribed_text:
+                            message_text = f"[FROM_AUDIO] {transcribed_text}"
+                        else:
+                            message_text = transcribed_text
                         
                 elif params.get("MessageType") == "audio":
                     raw_msg = params.get("WhatsAppRawMessage", {})
@@ -222,10 +227,15 @@ class WhatsAppMessageProcessor:
                         # Just proceed directly to transcription
                         logger.info("Transcribing WhatsApp audio: media_id=%s (skipping duration validation)", media_id)
                         try:
-                            message_text = await asyncio.to_thread(
+                            transcribed_text = await asyncio.to_thread(
                                 stt_service.transcribe_whatsapp_api_media, media_id
                             )
-                            logger.debug("Transcription complete: '%s'", message_text[:100] if message_text else "empty")
+                            logger.debug("Transcription complete: '%s'", transcribed_text[:100] if transcribed_text else "empty")
+                            # Mark that this came from audio for the LLM
+                            if transcribed_text:
+                                message_text = f"[FROM_AUDIO] {transcribed_text}"
+                            else:
+                                message_text = transcribed_text
                         except requests.exceptions.HTTPError as e:
                             if e.response and e.response.status_code == 401:
                                 logger.error("WhatsApp API authentication failed - check WHATSAPP_ACCESS_TOKEN: %s", e)
