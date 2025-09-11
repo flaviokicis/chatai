@@ -114,14 +114,25 @@ class FlowTurnRunner:
         # Build flow graph from compiled flow for the LLM
         flow_graph = {
             "nodes": [
-                {"id": node_id, "type": node.__class__.__name__} 
+                {
+                    "id": node_id,
+                    "type": node.__class__.__name__,
+                    "prompt": getattr(node, 'prompt', None),
+                    "key": getattr(node, 'key', None),
+                    "reason": getattr(node, 'reason', None),
+                    "label": getattr(node, 'label', None),
+                    "decision_type": getattr(node, 'decision_type', None),
+                    "decision_prompt": getattr(node, 'decision_prompt', None),
+                }
                 for node_id, node in self._flow.nodes.items()
             ],
             "edges": [
                 {
                     "from": source,
                     "to": edge.target,
-                    "condition": getattr(edge, 'label', None) or getattr(edge, 'condition', None)
+                    "condition": getattr(edge, 'label', None) or getattr(edge, 'condition_description', None),
+                    "priority": getattr(edge, 'priority', None),
+                    "guard": getattr(edge, 'guard', None),
                 }
                 for source, edges in self._flow.edges_from.items()
                 for edge in edges

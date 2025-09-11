@@ -104,7 +104,6 @@ class ToolExecutionService:
             )
 
 
-
     def _handle_perform_action(
         self,
         tool_data: dict[str, Any],
