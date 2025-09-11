@@ -189,7 +189,7 @@ class WhatsAppApiAdapter:
             ):  # Skip first message (already sent)
                 try:
                     delay_ms = (
-                        int(msg.get("delay_ms", 800)) if isinstance(msg, dict) else 800
+                        int(msg.get("delay_ms", 0)) if isinstance(msg, dict) else 0
                     )
                     text = str(msg.get("text", "")) if isinstance(msg, dict) else ""
                     if not text:
@@ -202,7 +202,8 @@ class WhatsAppApiAdapter:
                         text,
                     )
 
-                    time.sleep(max(0, delay_ms) / 1000.0)
+                    # Skip artificial delays - send messages immediately
+                    # time.sleep(max(0, delay_ms) / 1000.0)
 
                     # Check if this reply is still current (user hasn't sent a new message)
                     if reply_id and store:
