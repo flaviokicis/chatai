@@ -41,7 +41,7 @@ def test_build_question_graph_and_agent_handle() -> None:
     # First turn: LLM extracts the user's intention
     llm = DummyLLM(
         {
-            "__tool_name__": "UpdateAnswersFlow",
+            "__tool_name__": "UpdateAnswers",
             "updates": {"intention": "buy leds"},
             "assistant_message": "Got it!",
         }

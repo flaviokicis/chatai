@@ -173,7 +173,7 @@ class TestSpecificToolIntegration:
         print(f"Correction metadata: {result.ctx.answers}")
 
         # Should trigger PathCorrection, RevisitQuestion, or SelectFlowPath for path changes
-        assert result.tool_name in ["PathCorrection", "RevisitQuestion", "UpdateAnswersFlow", "SelectFlowPath"]
+        assert result.tool_name in ["PathCorrection", "RevisitQuestion", "UpdateAnswers", "SelectFlowPath"]
 
         # 5. Verify we get routed to correct path
         rate_limit_delay()
@@ -209,8 +209,8 @@ class TestSpecificToolIntegration:
         print(f"Tool chosen: {result.tool_name}")
         print(f"Escalate: {result.escalate}")
 
-        # LLM might choose UnknownAnswer, ClarifyQuestion, or intelligently escalate for complex cases
-        assert result.tool_name in ["UnknownAnswer", "ClarifyQuestion", "RequestHumanHandoff"]
+        # LLM might choose StayOnThisNode, ClarifyQuestion, or intelligently escalate for complex cases
+        assert result.tool_name in ["StayOnThisNode", "ClarifyQuestion", "RequestHumanHandoff"]
 
         if result.tool_name == "RequestHumanHandoff":
             print("✅ Intelligent escalation for complex unknown requests!")
@@ -281,7 +281,7 @@ class TestSpecificToolIntegration:
         print(f"Updated answers: {result.ctx.answers}")
 
         # Should trigger RevisitQuestion or PathCorrection
-        assert result.tool_name in ["RevisitQuestion", "PathCorrection", "UpdateAnswersFlow"]
+        assert result.tool_name in ["RevisitQuestion", "PathCorrection", "UpdateAnswers"]
 
         print("✅ Question revisiting working!")
 

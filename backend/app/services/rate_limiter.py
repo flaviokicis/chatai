@@ -6,7 +6,7 @@ from typing import Protocol
 
 # Optional redis import for Redis backend
 try:
-    import redis  # type: ignore
+    import redis
 except Exception:  # pragma: no cover - optional import
     redis = None  # type: ignore[assignment,unused-ignore]
 
@@ -27,7 +27,7 @@ class InMemoryRateLimiterBackend:
         # key -> (count, expires_at_epoch)
         self._store: dict[str, tuple[int, float]] = {}
 
-    def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:  # type: ignore[override]
+    def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:
         now = time.time()
         count, exp = self._store.get(key, (0, 0.0))
         if exp <= now:
@@ -41,12 +41,12 @@ class InMemoryRateLimiterBackend:
 
 class RedisRateLimiterBackend:
     def __init__(self, redis_url: str) -> None:
-        if redis is None:  # type: no cover - import guard
+        if redis is None:  # pragma: no cover
             message = "redis-py is not installed"
             raise RuntimeError(message)
         self._r = redis.from_url(redis_url)
 
-    def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:  # type: ignore[override]
+    def incr_with_ttl(self, key: str, ttl_seconds: int) -> int:
         # Use INCR and set EXPIRE on first increment within the window
         pipe = self._r.pipeline()
         pipe.incr(key)

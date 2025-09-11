@@ -3,9 +3,8 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any
 
-from langchain.chat_models import init_chat_model
+from langfuse import get_client
 
-from langfuse import get_client, observe
 from .llm import LLMClient
 
 if TYPE_CHECKING:
@@ -23,20 +22,20 @@ class LangChainToolsLLM(LLMClient):
         """Get the model name from the underlying chat model."""
         # Try to extract model name from LangChain chat model
         if hasattr(self._chat, "model_name"):
-            return self._chat.model_name
+            return str(self._chat.model_name)
         if hasattr(self._chat, "model"):
-            return self._chat.model
+            return str(self._chat.model)
         if hasattr(self._chat, "_model_name"):
-            return self._chat._model_name
+            return str(self._chat._model_name)
         # Fallback: try to get from class name or other attributes
         class_name = self._chat.__class__.__name__
         if "Gemini" in class_name:
             return "gemini-2.5-flash"
         if "OpenAI" in class_name or "GPT" in class_name:
             return "gpt-4"
-        return class_name
+        return str(class_name)
 
-    def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
+    def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:
         # Start Langfuse generation with proper cost tracking
         generation = self._langfuse.start_observation(
             name="langchain_extract",
@@ -59,7 +58,7 @@ class LangChainToolsLLM(LLMClient):
 
             # Extract token usage if available
             usage = getattr(result, "usage_metadata", None) or getattr(result, "response_metadata", {}).get("usage", {})
-            
+
             calls: list[dict[str, Any]] = []
             for tc in raw_calls:
                 name = tc.get("name")
@@ -79,10 +78,16 @@ class LangChainToolsLLM(LLMClient):
 
             out: dict[str, Any] = {"content": content, "tool_calls": calls}
 
-            # Backwards compatibility: expose first tool call's args at top level
+            # Expose a preferred tool call's args at top level for convenience
             if calls:
                 chosen = None
-                for name in ("UpdateAnswersFlow", "RequestHumanHandoff"):
+                # Prefer our simplified essential tools in this order
+                preferred = (
+                    "PerformAction",
+                    "RequestHumanHandoff",
+                    "ModifyFlowLive",
+                )
+                for name in preferred:
                     chosen = next((c for c in calls if c.get("name") == name), None)
                     if chosen:
                         break
@@ -110,7 +115,7 @@ class LangChainToolsLLM(LLMClient):
             generation.end()
 
             return out
-            
+
         except Exception as e:
             generation.update(
                 output=f"ERROR: {e}",

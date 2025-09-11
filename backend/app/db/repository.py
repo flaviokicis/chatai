@@ -886,35 +886,35 @@ def get_active_tenants_with_counts(session: Session) -> list[tuple[Tenant, int, 
     """
     # Use subqueries to count channels and flows efficiently
     from sqlalchemy import func
-    
+
     # Subquery for channel counts
     channel_counts = (
         select(
             ChannelInstance.tenant_id,
-            func.count(ChannelInstance.id).label('channel_count')
+            func.count(ChannelInstance.id).label("channel_count")
         )
         .where(ChannelInstance.deleted_at.is_(None))
         .group_by(ChannelInstance.tenant_id)
         .subquery()
     )
-    
-    # Subquery for flow counts  
+
+    # Subquery for flow counts
     flow_counts = (
         select(
             Flow.tenant_id,
-            func.count(Flow.id).label('flow_count')
+            func.count(Flow.id).label("flow_count")
         )
         .where(Flow.deleted_at.is_(None))
         .group_by(Flow.tenant_id)
         .subquery()
     )
-    
+
     # Main query with left joins to include tenants with zero counts
     result = session.execute(
         select(
             Tenant,
-            func.coalesce(channel_counts.c.channel_count, 0).label('channel_count'),
-            func.coalesce(flow_counts.c.flow_count, 0).label('flow_count')
+            func.coalesce(channel_counts.c.channel_count, 0).label("channel_count"),
+            func.coalesce(flow_counts.c.flow_count, 0).label("flow_count")
         )
         .options(selectinload(Tenant.project_config))
         .outerjoin(channel_counts, Tenant.id == channel_counts.c.tenant_id)
@@ -922,7 +922,7 @@ def get_active_tenants_with_counts(session: Session) -> list[tuple[Tenant, int, 
         .where(Tenant.deleted_at.is_(None))
         .order_by(Tenant.id)
     ).all()
-    
+
     return [(row.Tenant, int(row.channel_count), int(row.flow_count)) for row in result]
 
 

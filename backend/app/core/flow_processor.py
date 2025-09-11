@@ -18,12 +18,17 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Protocol
 
-from app.core.thought_tracer import DatabaseThoughtTracer
+# Thought tracing removed - using Langfuse for observability
 from app.db.session import create_session
 from app.flow_core.compiler import compile_flow
 from app.flow_core.ir import Flow
 from app.flow_core.runner import FlowTurnRunner
 from app.services.admin_phone_service import AdminPhoneService
+from app.services.handoff_service import HandoffService, HandoffData
+from app.services.processing_cancellation_manager import (
+    ProcessingCancellationManager,
+    ProcessingCancelledException,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -52,8 +57,8 @@ class FlowRequest:
     user_message: str
     flow_definition: dict[str, Any]
     flow_metadata: dict[str, Any]  # flow_name, flow_id, etc.
-    tenant_id: UUID  # type: ignore[name-defined]
-    project_context: ProjectContext  # type: ignore[name-defined]
+    tenant_id: UUID
+    project_context: ProjectContext
     channel_id: str | None = None  # Channel identifier for customer traceability
 
 
@@ -63,7 +68,7 @@ class FlowResponse:
 
     result: FlowProcessingResult
     message: str | None
-    context: FlowContext | None  # type: ignore[name-defined]
+    context: FlowContext | None
     metadata: dict[str, Any]
     error: str | None = None
 
@@ -96,16 +101,6 @@ class SessionManager(Protocol):
     def clear_context(self, session_id: str) -> None:
         """Clear flow context."""
         ...
-
-    def acquire_lock(self, session_id: str) -> bool:
-        """Acquire distributed lock for session."""
-        ...
-
-    def release_lock(self, session_id: str) -> None:
-        """Release distributed lock for session."""
-        ...
-
-
 
 
 
@@ -165,6 +160,9 @@ class FlowProcessor:
         self._llm = llm
         self._session_manager = session_manager
         self._thread_updater = thread_updater
+        # Pass the session manager's store to cancellation manager for Redis access
+        store = getattr(session_manager, "_store", None)
+        self._cancellation_manager = ProcessingCancellationManager(store=store)
 
     def _check_admin_status(self, request: FlowRequest) -> bool:
         """
@@ -220,13 +218,67 @@ class FlowProcessor:
                 request.flow_metadata.get("flow_id", "unknown")
             )
 
-            lock_acquired = self._session_manager.acquire_lock(session_id)
-            if not lock_acquired:
-                logger.warning("Failed to acquire lock for session %s", session_id)
+            performed_aggregation = False
+
+            # Add current message to buffer immediately to ensure cross-request visibility
+            if request.user_message:
+                self._cancellation_manager.add_message_to_buffer(session_id, request.user_message)
+
+                # Wait a very short time to catch truly rapid messages
+                # We can't wait too long or we'll delay every single message
+                import asyncio
+                initial_wait = 0.2  # Wait 200ms to catch rapid succession messages
+                logger.debug(f"Waiting {initial_wait}s for potential rapid messages...")
+                await asyncio.sleep(initial_wait)
+
+            # Check if we should cancel ongoing processing for rapid messages
+            if request.user_message and self._cancellation_manager.should_cancel_processing(session_id):
+                logger.info(f"Cancelling ongoing processing for session {session_id} due to new message")
+                # Cancel the ongoing processing
+                self._cancellation_manager.cancel_processing(session_id)
+
+                # Wait for a bit longer to allow:
+                # 1. Previous processing to stop
+                # 2. More messages to potentially arrive for aggregation
+                import asyncio
+                wait_time = 1.5  # Increased from 0.5 to allow more messages to arrive
+                logger.info(f"Waiting {wait_time}s for message aggregation...")
+                await asyncio.sleep(wait_time)
+
+                # Try to claim and get all buffered messages
+                aggregated_message = self._cancellation_manager.get_aggregated_messages(session_id)
+                if aggregated_message:
+                    # We successfully claimed the aggregation
+                    from dataclasses import replace
+                    request = replace(request, user_message=aggregated_message)
+                    logger.info(f"Processing aggregated message for session {session_id}: {aggregated_message[:100]}...")
+                    performed_aggregation = True
+                    # Clear the cancellation flag so the aggregated message can be processed
+                    self._cancellation_manager.clear_cancellation_flag(session_id)
+                else:
+                    # Either no messages or another request is handling aggregation
+                    logger.info(f"Aggregation already claimed by another request for session {session_id}, exiting")
+                    self._cancellation_manager.mark_processing_complete(session_id)
+                    return FlowResponse(
+                        result=FlowProcessingResult.ERROR,
+                        message="Processing cancelled - another request handling aggregation",
+                        context=None,
+                        metadata={"cancelled": True}
+                    )
+
+            # Add current message to buffer for future aggregation ONLY if we did not already
+            # aggregate and replace the request.user_message above. If aggregated, the buffer
+            # has been consumed; re-adding would duplicate content.
+            # If aggregation did not occur, the single message is already buffered above
 
             try:
-                # Step 2: Process through flow engine
-                flow_response = await self._execute_flow(request, session_id, app_context)
+                # Create cancellation token for this processing
+                cancellation_token = self._cancellation_manager.create_cancellation_token(session_id)
+
+                # Step 2: Process through flow engine with cancellation support
+                flow_response = await self._execute_flow(
+                    request, session_id, app_context, cancellation_token
+                )
 
                 # Step 3: Update thread status if needed
                 if (self._thread_updater and
@@ -244,14 +296,30 @@ class FlowProcessor:
                 elif flow_response.result == FlowProcessingResult.TERMINAL:
                     self._session_manager.clear_context(session_id)
 
+                # Add session_id to metadata for downstream cancellation checks
+                # Create new metadata dict since FlowResponse.metadata is read-only
+                metadata_update = dict(flow_response.metadata) if flow_response.metadata else {}
+                metadata_update["session_id"] = session_id
+                metadata_update["cancellation_manager"] = self._cancellation_manager
+                
+                # Create new FlowResponse with updated metadata
+                from dataclasses import replace
+                flow_response = replace(flow_response, metadata=metadata_update)
+
+                # DO NOT mark processing complete here - let the message_processor do it
+                # after the message is actually sent. This keeps the cancellation window open.
+
                 return flow_response
 
             finally:
-                if lock_acquired:
-                    self._session_manager.release_lock(session_id)
+                # Only clear on error/exception, not on success
+                pass
 
         except Exception as e:
             logger.exception("Flow processing failed for user %s", request.user_id)
+            # Clear processing state on error
+            if session_id:
+                self._cancellation_manager.mark_processing_complete(session_id)
             return FlowResponse(
                 result=FlowProcessingResult.ERROR,
                 message=None,
@@ -265,6 +333,7 @@ class FlowProcessor:
         request: FlowRequest,
         session_id: str,
         app_context: Any,
+        cancellation_token: Any = None,
     ) -> FlowResponse:
         """Execute the flow with the engine."""
         try:
@@ -292,7 +361,7 @@ class FlowProcessor:
 
             # Load existing context
             existing_context = self._session_manager.load_context(session_id)
-            
+
             # Debug: Log what's in the loaded context
             if existing_context and existing_context.history:
                 logger.debug(f"Loaded context has {len(existing_context.history)} history turns:")
@@ -303,28 +372,34 @@ class FlowProcessor:
 
             # Execute with thought tracing
             with create_session() as thought_session:
-                thought_tracer = DatabaseThoughtTracer(thought_session)
+                # Thought tracing removed - using Langfuse for observability
+                pass  # Remove the DatabaseThoughtTracer instantiation
 
                 # Check if user is admin for live flow modification
-                extra_tools = []
+                extra_tools: list[type] = []
                 instruction_prefix = ""
 
                 # Check admin status
                 is_admin = self._check_admin_status(request)
-                if is_admin:
-                    from app.flow_core.tool_schemas import ModifyFlowLive
-                    extra_tools.append(ModifyFlowLive)
-                    instruction_prefix = (
-                        "ADMIN MODE: You have access to live flow modification.\n"
-                        "Use ModifyFlowLive ONLY when the user gives clear instructions about changing flow behavior.\n"
-                        "Examples: 'você deveria perguntar sobre tipo de unha', 'next time ask about X first'\n"
-                        "Do NOT use this tool for regular conversation or questions about the flow.\n"
-                    )
 
                 # Track modification outcome for ModifyFlowLive and provide explicit user feedback
                 modification_intercepted = False
                 modification_message: str | None = None
                 modification_was_applied: bool = False
+
+                # Check for cancellation before processing
+                try:
+                    self._cancellation_manager.check_cancellation_and_raise(session_id, "flow_processing")
+                except ProcessingCancelledException:
+                    logger.info(f"Processing cancelled for session {session_id}")
+                    # Mark as complete to clean up state
+                    self._cancellation_manager.mark_processing_complete(session_id)
+                    return FlowResponse(
+                        result=FlowProcessingResult.ERROR,
+                        message="Processing cancelled - new message received",
+                        context=existing_context,
+                        metadata={"cancelled": True}
+                    )
 
                 # Create tool event handler for live flow modification and restart
                 def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
@@ -373,8 +448,8 @@ class FlowProcessor:
                                         tools = []
                                         for tool_config in FLOW_MODIFICATION_TOOLS:
                                             tools.append(ToolSpec(
-                                                name=tool_config["name"],
-                                                description=tool_config["description"],
+                                                name=str(tool_config["name"]),
+                                                description=str(tool_config["description"]) if tool_config.get("description") else None,
                                                 args_schema=tool_config["args_schema"],
                                                 func=tool_config["func"]
                                             ))
@@ -442,7 +517,7 @@ CRITICAL FLOW SAFETY RULES:
                                         )
 
                                         return True
-                                        
+
                                     except concurrent.futures.TimeoutError:
                                         logger.error("Live flow modification timed out")
                                         print("[DEBUG PROCESSOR] Modification timed out")
@@ -469,12 +544,8 @@ CRITICAL FLOW SAFETY RULES:
                 # Create and run flow
                 runner = FlowTurnRunner(
                     compiled_flow=compiled_flow,
-                    llm=self._llm,
-                    strict_mode=True,
-                    thought_tracer=thought_tracer,
-                    extra_tools=extra_tools,
-                    instruction_prefix=instruction_prefix,
-                    on_tool_event=on_tool_event,
+                    llm_client=self._llm,
+                    use_all_tools=True,
                 )
 
                 # Initialize context
@@ -488,17 +559,18 @@ CRITICAL FLOW SAFETY RULES:
                 result = runner.process_turn(
                     ctx=ctx,
                     user_message=request.user_message,
-                    project_context=request.project_context
+                    project_context=request.project_context,
+                    is_admin=is_admin
                 )
 
 
 
                 # If we intercepted ModifyFlowLive, return the explicit success/error message
-                if 'modification_intercepted' in locals() and modification_intercepted:
+                if "modification_intercepted" in locals() and modification_intercepted:
                     return FlowResponse(
                         result=FlowProcessingResult.CONTINUE,
                         message=modification_message or "",
-                        context=result.ctx,
+                        context=ctx,
                         metadata={
                             "tool_name": "ModifyFlowLive",
                             "flow_modified": modification_was_applied,
@@ -515,6 +587,19 @@ CRITICAL FLOW SAFETY RULES:
                     except Exception as e:
                         logger.warning(f"Failed to clear session context after auto-reset: {e}")
 
+                # Handle handoff requests - save to database/Redis for reliability
+                if result.escalate:
+                    try:
+                        await self._save_handoff_request(
+                            request=request,
+                            context=ctx,
+                            result=result,
+                            app_context=app_context,
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to save handoff request: {e}")
+                        # Don't fail the entire flow processing for handoff save failures
+                
                 # Map result to response
                 if result.escalate:
                     flow_result = FlowProcessingResult.ESCALATE
@@ -523,16 +608,93 @@ CRITICAL FLOW SAFETY RULES:
                 else:
                     flow_result = FlowProcessingResult.CONTINUE
 
+                # Build metadata including all tool metadata
+                response_metadata: dict[str, Any] = {
+                    "tool_name": result.tool_name,
+                    "answers_diff": result.answers_diff,
+                }
+
+                # Include all metadata from the turn result (including ack_message)
+                if result.metadata:
+                    response_metadata.update(result.metadata)
+
+                # Pass through messages if available
+                if hasattr(result, "messages") and result.messages:
+                    response_metadata["messages"] = result.messages
+
                 return FlowResponse(
                     result=flow_result,
                     message=result.assistant_message,
-                    context=result.ctx,
-                    metadata={
-                        "tool_name": result.tool_name,
-                        "answers_diff": result.answers_diff,
-                    },
+                    context=ctx,
+                    metadata=response_metadata,
                 )
 
         except Exception as e:
             error_msg = f"Flow execution failed: {e!s}"
             raise FlowProcessingError(error_msg, e) from e
+
+    async def _save_handoff_request(
+        self,
+        request: FlowRequest,
+        context: FlowContext,
+        result: Any,
+        app_context: Any,
+    ) -> None:
+        """Save handoff request to database/Redis with robust error handling."""
+        try:
+            # Get Redis client from app context if available
+            redis_client = getattr(app_context, 'redis_client', None)
+            handoff_service = HandoffService(redis_client=redis_client)
+            
+            # Extract handoff reason from result metadata
+            handoff_reason = None
+            if hasattr(result, 'metadata') and result.metadata:
+                handoff_reason = result.metadata.get('reason') or result.metadata.get('escalate_reason')
+            
+            # Create handoff data
+            handoff_data = HandoffData(
+                tenant_id=request.tenant_id,
+                reason=handoff_reason or "User requested human assistance",
+                flow_id=request.flow_metadata.get("flow_id", "unknown"),
+                thread_id=getattr(request, 'thread_id', None),
+                contact_id=getattr(request, 'contact_id', None),
+                channel_instance_id=getattr(request, 'channel_instance_id', None),
+                current_node_id=context.current_node_id,
+                user_message=request.user_message,
+                collected_answers=dict(context.answers) if context.answers else {},
+                session_id=getattr(context, 'session_id', None),
+                conversation_context={
+                    "turn_count": getattr(context, 'turn_count', 0),
+                    "clarification_count": getattr(context, 'clarification_count', 0),
+                    "active_path": getattr(context, 'active_path', None),
+                    "tool_name": getattr(result, 'tool_name', None),
+                    "confidence": getattr(result, 'confidence', None),
+                },
+            )
+            
+            # Save with robust retry logic
+            success = handoff_service.save_handoff_request(handoff_data)
+            
+            if success:
+                logger.info(
+                    "Handoff request saved successfully: %s (tenant: %s, flow: %s)",
+                    handoff_data.id,
+                    request.tenant_id,
+                    request.flow_metadata.get("flow_id", "unknown"),
+                )
+            else:
+                logger.error(
+                    "Failed to save handoff request: %s (tenant: %s, flow: %s)",
+                    handoff_data.id,
+                    request.tenant_id,
+                    request.flow_metadata.get("flow_id", "unknown"),
+                )
+                
+        except Exception as e:
+            logger.error(
+                "Exception while saving handoff request (tenant: %s, flow: %s): %s",
+                request.tenant_id,
+                request.flow_metadata.get("flow_id", "unknown"),
+                str(e),
+                exc_info=True,
+            )

@@ -9,7 +9,6 @@ from uuid import UUID
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
 
-from app.core.channel_adapter import CLIAdapter, ConversationalRewriter
 from app.core.langchain_adapter import LangChainToolsLLM
 from app.db.repository import get_active_tenants, get_flows_by_tenant
 from app.db.session import db_session
@@ -18,6 +17,7 @@ from app.services.tenant_config_service import ProjectContext, TenantConfigServi
 from .compiler import compile_flow
 from .ir import Flow
 from .runner import FlowTurnRunner
+from .state import FlowContext
 
 
 def _playground_flow_path() -> Path:
@@ -25,6 +25,41 @@ def _playground_flow_path() -> Path:
     # __file__ = backend/app/flow_core/cli.py -> parents[2] = backend
     backend_dir = Path(__file__).resolve().parents[2]
     return backend_dir / "playground" / "flow_example.json"
+
+
+class SimpleCLIAdapter:
+    """Simple CLI adapter to replace the deleted CLIAdapter."""
+    
+    def __init__(self):
+        pass
+    
+    def print_message(self, text: str) -> None:
+        """Print a message to the console."""
+        print(f"🤖 {text}")
+    
+    def print_messages(self, messages: list[dict[str, any]]) -> None:
+        """Print multiple messages with delays."""
+        for msg in messages:
+            delay_ms = msg.get("delay_ms", 0)
+            if delay_ms > 0:
+                print(f"   [delay: {delay_ms}ms]")
+            self.print_message(msg["text"])
+    
+    def get_user_input(self, prompt: str = "You: ") -> str:
+        """Get user input from the console."""
+        try:
+            return input(prompt).strip()
+        except KeyboardInterrupt:
+            print("\nGoodbye!")
+            exit(0)
+    
+    def print_status(self, message: str) -> None:
+        """Print a status message."""
+        print(f"📊 {message}")
+    
+    def print_error(self, message: str) -> None:
+        """Print an error message."""
+        print(f"❌ {message}")
 
 
 def run_cli() -> None:
@@ -40,238 +75,220 @@ def run_cli() -> None:
     parser.add_argument(
         "--model",
         type=str,
-        default="gemini-2.5-flash",
-        help="Chat model for tool calling (default: gemini-2.5-flash)",
+        default="gpt-5",
+        help="Chat model for tool calling (default: gpt-5)",
     )
     parser.add_argument(
         "--rewrite-model",
         type=str,
-        default="gemini-2.5-flash-lite",
+        default="gpt-5",
         help="Model used for rewrites (not used in CLI, reserved)",
     )
     parser.add_argument(
         "--no-rewrite",
         action="store_true",
-        help="Do not use rewrite LLM; show raw prompt text",
-    )
-    parser.add_argument(
-        "--no-delays",
-        action="store_true",
-        help="Disable delays between multi-messages for faster interaction",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug output showing internal flow state",
+        help="Disable conversational rewriting (raw GPT responses)",
     )
     parser.add_argument(
         "--tenant",
         type=str,
-        help="Use tenant from database. Provide tenant ID, channel identifier (e.g., 'whatsapp:+14155238886'), or 'default' for first tenant. Loads flow and communication style from database.",
+        help="Tenant ID to load flows from database",
     )
-    parser.add_argument(
-        "--flow-id",
-        type=str,
-        help="When using --tenant, select a specific flow by its flow_id. Defaults to the first active flow if omitted.",
-    )
+
     args = parser.parse_args()
 
-    # Load flow and tenant configuration
-    flow, project_context = _load_flow_and_tenant(args)
-    compiled = compile_flow(flow)
-
-    print(f"Flow: {flow.id}")
-    if project_context:
-        print(f"[tenant] Using tenant: {project_context.tenant_id}")
-        print(f"[tenant] Communication style: {'✓' if project_context.communication_style else '✗'}")
-        print(f"[tenant] Project description: {'✓' if project_context.project_description else '✗'}")
-
-    # Setup LLM and runner - LLM is always required
-    if not args.llm:
-        print("[error] LLM mode is required. Use --llm flag.")
-        return
-
-    # Ensure .env is loaded for API keys
+    # Load environment variables
     load_dotenv()
+
+    # Initialize CLI adapter
+    cli_adapter = SimpleCLIAdapter()
+
+    # Initialize LLM if requested
+    llm_client = None
+    if args.llm:
+        try:
+            # Set up API keys based on model
+            if args.model.startswith("gpt"):
+                if not os.getenv("OPENAI_API_KEY"):
+                    cli_adapter.print_error("OPENAI_API_KEY environment variable required for GPT models")
+                    return
+                chat_model = init_chat_model(args.model, model_provider="openai")
+            else:
+                if not os.getenv("GOOGLE_API_KEY"):
+                    cli_adapter.print_error("GOOGLE_API_KEY environment variable required for non-OpenAI models")
+                    return
+                chat_model = init_chat_model(args.model, model_provider="google")
+            
+            llm_client = LangChainToolsLLM(chat_model)
+            cli_adapter.print_status(f"LLM initialized: {args.model}")
+        except Exception as e:
+            cli_adapter.print_error(f"Failed to initialize LLM: {e}")
+            return
+
+    # Load flow
+    flow_json = None
+    compiled_flow = None
     
-    # Determine provider based on model name
-    if args.model.startswith(("gpt-", "o1-")):
-        provider = "openai"
-        if not os.environ.get("OPENAI_API_KEY"):
-            print("[error] OPENAI_API_KEY not set. Required for GPT models.")
+    if args.tenant:
+        # Load from database
+        cli_adapter.print_status(f"Loading flows from database for tenant: {args.tenant}")
+        try:
+            with db_session() as session:
+                tenants = get_active_tenants(session)
+                tenant_found = False
+                for tenant in tenants:
+                    if str(tenant.id) == args.tenant:
+                        tenant_found = True
+                        flows = get_flows_by_tenant(session, tenant.id)
+                        if flows:
+                            # Use the first flow for now
+                            flow_data = flows[0]
+                            flow_json = flow_data.definition
+                            cli_adapter.print_status(f"Loaded flow: {flow_data.name} (ID: {flow_data.id})")
+                        else:
+                            cli_adapter.print_error(f"No flows found for tenant {args.tenant}")
+                            return
+                        break
+                
+                if not tenant_found:
+                    cli_adapter.print_error(f"Tenant '{args.tenant}' not found")
+                    return
+        except Exception as e:
+            cli_adapter.print_error(f"Failed to load flow from database: {e}")
             return
     else:
-        provider = "google_genai"
-        if not os.environ.get("GOOGLE_API_KEY"):
-            print("[error] GOOGLE_API_KEY not set. Required for Gemini models.")
+        # Load from JSON file
+        if not args.json_path.exists():
+            cli_adapter.print_error(f"Flow file not found: {args.json_path}")
             return
 
-    # Initialize chat model with appropriate provider
-    chat = init_chat_model(args.model, model_provider=provider)
-    llm_client = LangChainToolsLLM(chat)
-    runner = FlowTurnRunner(compiled, llm_client, strict_mode=False)
-    rewrite_status = "on" if (not args.no_rewrite) else "off"
-    delay_status = "off" if args.no_delays else "on"
-    debug_status = "on" if args.debug else "off"
-    print(
-        f"[mode] LLM mode: model={args.model}, rewrite={rewrite_status}, delays={delay_status}, debug={debug_status}"
-    )
+        try:
+            with open(args.json_path, "r", encoding="utf-8") as f:
+                flow_json = json.load(f)
+            cli_adapter.print_status(f"Loaded flow from: {args.json_path}")
+        except Exception as e:
+            cli_adapter.print_error(f"Failed to load flow file: {e}")
+            return
 
-    # Setup channel adapter and rewriter with tenant context
-    from app.settings import is_development_mode
-    # Use CLI debug flag OR unified development mode
-    debug_enabled = args.debug or is_development_mode()
-    cli_adapter = CLIAdapter(enable_delays=not args.no_delays, debug_mode=debug_enabled)
-    rewriter = ConversationalRewriter(llm_client if not args.no_rewrite else None)
+    # Compile flow
+    try:
+        flow = Flow.model_validate(flow_json)
+        compiled_flow = compile_flow(flow)
+        flow_name = flow.metadata.name if flow.metadata else compiled_flow.id
+        cli_adapter.print_status(f"Flow compiled successfully: {flow_name}")
+    except Exception as e:
+        cli_adapter.print_error(f"Failed to compile flow: {e}")
+        return
 
-    # Initialize context
-    ctx = runner.initialize_context()
+    # Initialize runner
+    if not llm_client:
+        cli_adapter.print_error("LLM is required for the current flow system. Use --llm flag.")
+        return
+    
+    runner = FlowTurnRunner(compiled_flow, llm_client)
+    context = runner.initialize_context()
+    
+    # Project context (optional)
+    project_context = None
+    if args.tenant:
+        try:
+            from uuid import UUID
+            with db_session() as session:
+                config_service = TenantConfigService(session)
+                tenant_uuid = UUID(args.tenant)
+                project_context = config_service.get_project_context_by_tenant_id(tenant_uuid)
+                if project_context:
+                    cli_adapter.print_status("Loaded project context from tenant config")
+        except Exception as e:
+            cli_adapter.print_status(f"Could not load project context: {e}")
 
-    # Start like WhatsApp: wait for first user input; do not auto-prompt
+    # Main conversation loop
+    cli_adapter.print_status("Starting conversation. Type 'quit' or 'exit' to stop, Ctrl+C to interrupt.")
+    cli_adapter.print_status(f"Flow: {flow_name}")
+    if project_context:
+        cli_adapter.print_status(f"Project context loaded for tenant: {project_context.tenant_id}")
+    
+    # Show initial state
+    print("\n" + "="*60)
+    print("📊 INITIAL STATE:")
+    print(f"   Starting node: {context.current_node_id}")
+    print(f"   No answers collected yet")
+    print("="*60)
+    print()
+
+    turn_count = 0
     while True:
-        user = input("> ").strip()
-        if user == ":quit":
-            break
-        result = runner.process_turn(ctx, user)
-
-        # Handle terminal/escalate
-        if result.terminal:
-            print(f"[terminal] {result.assistant_message}")
-            break
-        if result.escalate:
-            print(f"[escalate] {result.assistant_message}")
-            break
-
-        # Display assistant message via shared rewriter system
-        display_text = result.assistant_message or ""
-        if display_text:
-            # Build chat history from flow context
-            chat_history = rewriter.build_chat_history(
-                flow_context_history=getattr(ctx, "history", None)
-            )
-
-            # Build tool context for better naturalization
-            tool_context = None
-            if getattr(result, "tool_name", None):
-                tool_context = {"tool_name": result.tool_name}
-                # Include ack_message from metadata if present
-                if result.metadata and result.metadata.get("ack_message"):
-                    tool_context["ack_message"] = result.metadata["ack_message"]
-            
-            # Get current time in same format as conversation timestamps
-            import datetime
-            current_time = datetime.datetime.now().strftime("%H:%M")
-            
-            # Rewrite into multi-message format with tenant context
-            # This ensures ALL messages (including first prompt) get tenant styling
-            messages = rewriter.rewrite_message(
-                display_text,
-                chat_history,
-                enable_rewrite=not args.no_rewrite,
-                project_context=project_context,
-                tool_context=tool_context,
-                current_time=current_time
-            )
-
-            # Update conversation history with the rewritten version for future context
-            if messages and not args.no_rewrite:
-                # Combine all rewritten messages into a single string for history
-                rewritten_content = " ".join(msg.get("text", "") for msg in messages if msg.get("text"))
-                if rewritten_content.strip():
-                    ctx.update_last_assistant_message(rewritten_content)
-
-            # Display with debug info
-            debug_info = None
-            if debug_enabled:
-                debug_info = {
-                    "node_id": ctx.current_node_id,
-                    "pending_field": getattr(ctx, "pending_field", None),
-                    "answers_count": len(getattr(ctx, "answers", {})),
-                    "turn_count": getattr(ctx, "turn_count", 0),
-                    "message_count": len(messages),
-                }
-
-            cli_adapter.display_messages(
-                messages, prefix=f"[prompt:{ctx.current_node_id}] ", debug_info=debug_info
-            )
-
-        # Next loop waits for next user input (no auto-prompt)
-
-
-def _load_flow_and_tenant(args) -> tuple[Flow, ProjectContext | None]:
-    """Load flow and tenant configuration based on CLI arguments."""
-    if not args.tenant:
-        # Use file-based flow (original behavior)
-        data = json.loads(args.json_path.read_text(encoding="utf-8"))
-        # Keep original schema version (no forced conversion)
-        flow = Flow.model_validate(data)
-        return flow, None
-
-    # Load from database using tenant
-    with db_session() as session:
-        tenant_service = TenantConfigService(session)
-        project_context = None
-
-        if args.tenant == "default":
-            # Get first tenant
-            tenants = get_active_tenants(session)
-            if not tenants:
-                print("[error] No tenants found in database. Create one first with seed_database.py")
-                exit(1)
-            project_context = tenant_service.get_project_context_by_tenant_id(tenants[0].id)
-        elif args.tenant.startswith(("whatsapp:", "instagram:")):
-            # Channel identifier
-            project_context = tenant_service.get_project_context_by_channel_identifier(args.tenant)
+        turn_count += 1
+        
+        # Get user input
+        if turn_count == 1:
+            # First turn - start the conversation
+            user_input = cli_adapter.get_user_input("Start conversation: ")
         else:
-            # Try as tenant ID
-            try:
-                tenant_id = UUID(args.tenant)
-                project_context = tenant_service.get_project_context_by_tenant_id(tenant_id)
-            except ValueError:
-                print(f"[error] Invalid tenant identifier: {args.tenant}")
-                print("Use: tenant_id, channel identifier (e.g., 'whatsapp:+14155238886'), or 'default'")
-                exit(1)
+            user_input = cli_adapter.get_user_input()
+        
+        if user_input.lower() in ["quit", "exit", "bye"]:
+            cli_adapter.print_status("Goodbye!")
+            break
+        
+        if not user_input:
+            continue
 
-        if not project_context:
-            print(f"[error] Tenant not found: {args.tenant}")
-            exit(1)
+        # Process the turn
+        try:
+            result = runner.process_turn(context, user_input, project_context)
+            
+            # Display response
+            if result.messages:
+                cli_adapter.print_messages(result.messages)
+            elif result.assistant_message:
+                cli_adapter.print_message(result.assistant_message)
+            
+            # Show debug info
+            if result.tool_name:
+                print(f"   [Tool: {result.tool_name}]")
+            if result.confidence < 1.0:
+                print(f"   [Confidence: {result.confidence:.2f}]")
+            if result.reasoning:
+                print(f"   [Reasoning: {result.reasoning}]")
+            
+            # Update context
+            context = result.ctx if hasattr(result, 'ctx') else context
+            
+            # Show current state
+            print("\n" + "="*60)
+            print("📊 CURRENT STATE:")
+            print(f"   Node: {context.current_node_id}")
+            print(f"   Answers collected: {len(context.answers)}")
+            for key, value in context.answers.items():
+                print(f"     • {key}: {value}")
+            if context.pending_field:
+                print(f"   Pending field: {context.pending_field}")
+            print("="*60 + "\n")
+            
+            # Check for completion
+            if result.terminal:
+                cli_adapter.print_status("🎉 Flow completed!")
+                if context.answers:
+                    print("\n📋 Final answers:")
+                    for key, value in context.answers.items():
+                        print(f"  {key}: {value}")
+                break
+            
+            # Check for escalation
+            if result.escalate:
+                cli_adapter.print_status("🚨 Escalated to human agent")
+                break
+                
+        except KeyboardInterrupt:
+            cli_adapter.print_status("Interrupted by user")
+            break
+        except Exception as e:
+            cli_adapter.print_error(f"Error processing turn: {e}")
+            # Continue the conversation instead of breaking
+            continue
 
-        # Get tenant's flows
-        flows = get_flows_by_tenant(session, project_context.tenant_id)
-        if not flows:
-            print(f"[error] No flows found for tenant {project_context.tenant_id}")
-            print("Create flows via the admin API or seed_database.py")
-            exit(1)
-
-        # Select flow: either by provided --flow-id or first active
-        active_flows = [f for f in flows if f.is_active]
-        if not active_flows:
-            print(f"[error] No active flows found for tenant {project_context.tenant_id}")
-            exit(1)
-
-        selected_flow = None
-        if getattr(args, "flow_id", None):
-            for f in active_flows:
-                if f.flow_id == args.flow_id:
-                    selected_flow = f
-                    break
-            if not selected_flow:
-                print(
-                    f"[error] Flow with flow_id='{args.flow_id}' not found for tenant {project_context.tenant_id}"
-                )
-                print("Available active flows:")
-                for f in active_flows:
-                    print(f" - {f.flow_id} ({f.name})")
-                exit(1)
-        else:
-            selected_flow = active_flows[0]
-
-        flow_data = selected_flow.definition
-        # Keep original schema version (no forced conversion)
-
-        flow = Flow.model_validate(flow_data)
-        print(f"[database] Loaded flow '{selected_flow.name}' (flow_id='{selected_flow.flow_id}') from database")
-        return flow, project_context
+    cli_adapter.print_status("Session ended")
 
 
 if __name__ == "__main__":

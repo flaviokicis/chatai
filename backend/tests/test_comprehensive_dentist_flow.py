@@ -86,10 +86,10 @@ class TestComprehensiveDentistFlow:
 
         # Track which tools are actually called
         required_tools = {
-            "UpdateAnswersFlow",
+            "UpdateAnswers",
             "ClarifyQuestion",
             "SelectFlowPath",
-            "UnknownAnswer",
+            "StayOnThisNode",
             "RequestHumanHandoff"
         }
         # These tools are nice-to-have but not required for test to pass
@@ -358,7 +358,7 @@ class TestComprehensiveDentistFlow:
             validation_prompt = f"""You are validating a CONVERSATIONAL AI TOOL SYSTEM TEST for "{flow_desc}".
 
 CONTEXT: This is NOT a real user conversation. This is a COMPREHENSIVE INTEGRATION TEST that:
-1. Tests multiple conversation tools (UnknownAnswer, SelectFlowPath, RevisitQuestion, etc.)
+1. Tests multiple conversation tools (StayOnThisNode, SelectFlowPath, RevisitQuestion, etc.)
 2. Tests path switching and corrections
 3. Tests confusion handling and escalation
 4. Tests conversation restart and completion
@@ -451,7 +451,7 @@ Analyze the test results:"""
         assert tools_used_count >= min_required_tools, f"Only {tools_used_count} required tools used, need at least {min_required_tools}. Used: {sorted(tools_used & required_tools)}"
 
         # Verify specific critical tools are working
-        assert "UpdateAnswersFlow" in tools_used, "UpdateAnswersFlow is critical and should always be used"
+        assert "UpdateAnswers" in tools_used, "UpdateAnswers is critical and should always be used"
         assert "SelectFlowPath" in tools_used, "SelectFlowPath is critical for routing and should be used"
 
         print("\\n✅ COMPREHENSIVE INTEGRATION TEST PASSED!")

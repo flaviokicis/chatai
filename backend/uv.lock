@@ -164,6 +164,15 @@ wheels = [
 ]
 
 [[package]]
+name = "audioread"
+version = "3.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/db/d2/87016ca9f083acadffb2d8da59bfa3253e4da7eeb9f71fb8e7708dc97ecd/audioread-3.0.1.tar.gz", hash = "sha256:ac5460a5498c48bdf2e8e767402583a4dcd13f4414d286f42ce4379e8b35066d", size = 116513, upload-time = "2023-09-27T19:27:53.084Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/57/8d/30aa32745af16af0a9a650115fbe81bde7c610ed5c21b381fca0196f3a7f/audioread-3.0.1-py3-none-any.whl", hash = "sha256:4cdce70b8adc0da0a3c9e0d85fb10b3ace30fbdf8d1670fd443929b61d117c33", size = 23492, upload-time = "2023-09-27T19:27:51.334Z" },
+]
+
+[[package]]
 name = "backoff"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -298,6 +307,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
+    { name = "audioread" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "itsdangerous" },
@@ -313,6 +323,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "redis" },
     { name = "sqlalchemy" },
+    { name = "tenacity" },
     { name = "twilio" },
     { name = "uuid-v7" },
     { name = "uvicorn", extra = ["standard"] },
@@ -325,11 +336,13 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "types-setuptools" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.16.4" },
+    { name = "audioread", specifier = ">=3.0.0" },
     { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi" },
     { name = "itsdangerous", specifier = ">=2.2.0" },
@@ -345,6 +358,7 @@ requires-dist = [
     { name = "python-multipart" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.29" },
+    { name = "tenacity", specifier = ">=9.0.0" },
     { name = "twilio" },
     { name = "uuid-v7", specifier = ">=1.0.0" },
     { name = "uvicorn", extras = ["standard"] },
@@ -357,6 +371,7 @@ dev = [
     { name = "pre-commit", specifier = ">=4.3.0" },
     { name = "pytest" },
     { name = "ruff" },
+    { name = "types-setuptools", specifier = ">=80.9.0.20250822" },
 ]
 
 [[package]]
@@ -2241,6 +2256,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/a9/b6/d630e6558bf05fe2bb5d5201a769adf837c129b61f4e8ae57c54779095e1/twilio-9.7.0.tar.gz", hash = "sha256:d189606d5689772f91cabc9f16ed0e53800601ba0b547296678eb8faa00066b9", size = 1038451, upload-time = "2025-07-24T08:12:11.122Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ce/55/39d9cb47b63d1450086812d2b78ab9f42c221ddad61676d3baf43fafd3f4/twilio-9.7.0-py2.py3-none-any.whl", hash = "sha256:bf5672156febad2de65b68c32e9a415bb91e025ff801ac1499cb8ba5f1b055d2", size = 1895596, upload-time = "2025-07-24T08:12:09.238Z" },
+]
+
+[[package]]
+name = "types-setuptools"
+version = "80.9.0.20250822"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/19/bd/1e5f949b7cb740c9f0feaac430e301b8f1c5f11a81e26324299ea671a237/types_setuptools-80.9.0.20250822.tar.gz", hash = "sha256:070ea7716968ec67a84c7f7768d9952ff24d28b65b6594797a464f1b3066f965", size = 41296, upload-time = "2025-08-22T03:02:08.771Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b6/2d/475bf15c1cdc172e7a0d665b6e373ebfb1e9bf734d3f2f543d668b07a142/types_setuptools-80.9.0.20250822-py3-none-any.whl", hash = "sha256:53bf881cb9d7e46ed12c76ef76c0aaf28cfe6211d3fab12e0b83620b1a8642c3", size = 63179, upload-time = "2025-08-22T03:02:07.643Z" },
 ]
 
 [[package]]

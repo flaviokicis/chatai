@@ -88,7 +88,7 @@ UPDATE tenants SET admin_phone_numbers = '["+5511999887766", "+5511888777666"]':
 # In FlowProcessor._execute_flow()
 is_admin = self._check_admin_status(request)
 if is_admin:
-    from app.flow_core.tool_schemas import ModifyFlowLive
+    # ModifyFlowLive tool is part of the live editing system (admin tools)
     extra_tools.append(ModifyFlowLive)
     instruction_prefix = "ADMIN MODE: You have access to live flow modification..."
 
@@ -145,7 +145,7 @@ Tenant observations are stored in node metadata:
    - Checks admin status during conversations
    - Handles phone normalization (removes `whatsapp:` prefix)
 
-2. **`ModifyFlowLive` Tool** (`app/flow_core/tool_schemas.py`)
+2. **`ModifyFlowLive` Tool** (admin-only tool)
    - Available only to admin users
    - Triggers live flow modification
    - Stores tenant instructions

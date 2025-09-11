@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from app.core.flow_processor import FlowAgent
+    # FlowAgent removed - using FlowProcessor directly
 
 
 class SalesQualificationAgentWrapper:

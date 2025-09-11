@@ -45,7 +45,7 @@ class MockLLM(LLMClient):
 
         # Default response
         return {
-            "__tool_name__": "UpdateAnswersFlow",
+            "__tool_name__": "UpdateAnswers",
             "updates": {},
             "assistant_message": "I understand.",
         }
@@ -401,13 +401,13 @@ class TestLLMFlowEngine:
         compiler = FlowCompiler()
         compiled = compiler.compile(simple_flow)
 
-        # Create a contextual mock that handles clarification requests via UnknownAnswer
+        # Create a contextual mock that handles clarification requests via StayOnThisNode
         class ClarificationMockLLM(MockLLM):
             def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
                 # Check if user is asking for clarification
                 if "what do you mean" in prompt.lower():
                     return {
-                        "__tool_name__": "UnknownAnswer",
+                        "__tool_name__": "StayOnThisNode",
                         "reason": "clarification_needed",
                         "reasoning": "User is asking for clarification about the question"
                     }
@@ -433,7 +433,7 @@ class TestLLMFlowEngine:
         )
 
         # Should detect clarification request
-        assert clarification_response.tool_name == "UnknownAnswer"
+        assert clarification_response.tool_name == "StayOnThisNode"
         assert clarification_response.metadata is not None
         assert clarification_response.metadata.get("reason") == "clarification_needed"
 
@@ -470,7 +470,7 @@ class TestLLMFlowResponder:
         mock_llm = MockLLM(
             [
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"name": "Alice"},
                     "validated": True,
                 }
@@ -488,7 +488,7 @@ class TestLLMFlowResponder:
         )
 
         assert response.updates == {"name": "Alice"}
-        assert response.tool_name == "UpdateAnswersFlow"
+        assert response.tool_name == "UpdateAnswers"
         assert response.metadata is not None
         assert response.metadata.get("validated") is True
 
@@ -497,7 +497,7 @@ class TestLLMFlowResponder:
         mock_llm = MockLLM(
             [
                 {
-                    "__tool_name__": "UnknownAnswer",
+                    "__tool_name__": "StayOnThisNode",
                     "reason": "clarification_needed",
                 }
             ]
@@ -514,7 +514,7 @@ class TestLLMFlowResponder:
         )
 
         assert response.updates == {}
-        assert response.tool_name == "UnknownAnswer"
+        assert response.tool_name == "StayOnThisNode"
         assert response.metadata is not None
         assert response.metadata.get("reason") == "clarification_needed"
         assert ctx.clarification_count == 1
@@ -554,7 +554,7 @@ class TestLLMFlowResponder:
         mock_llm = MockLLM(
             [
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"color": "blue"},
                     "assistant_message": "Great choice!",
                 }
@@ -609,17 +609,17 @@ class TestEndToEndFlows:
         mock_llm = MockLLM(
             [
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"name": "Bob"},
                     "assistant_message": "Nice to meet you, Bob!",
                 },
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"age": "25"},
                     "assistant_message": "Got it, you're 25.",
                 },
                 {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"email": "bob@example.com"},
                     "assistant_message": "Thanks for your email!",
                 },
@@ -675,7 +675,7 @@ class TestEndToEndFlows:
             def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
                 if "Why do you need this?" in prompt:
                     return {
-                        "__tool_name__": "UnknownAnswer",
+                        "__tool_name__": "StayOnThisNode",
                         "reason": "clarification_needed",
                         "reasoning": "User is asking for clarification about purpose"
                     }
@@ -687,14 +687,14 @@ class TestEndToEndFlows:
                     }
                 if "Here's my answer to question 2" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"question2": "answer2"},
                         "validated": True,
                         "reasoning": "User provided answer for question2"
                     }
 
                 return {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {},
                     "validated": False,
                     "reasoning": "Default response"
@@ -709,7 +709,7 @@ class TestEndToEndFlows:
                 "reason": "prefer_not_to_answer",
             },
             {
-                "__tool_name__": "UpdateAnswersFlow",
+                "__tool_name__": "UpdateAnswers",
                 "updates": {"question2": "answer2"},
             },
         ])
@@ -732,7 +732,7 @@ class TestEndToEndFlows:
         )
 
         # The LLM should return an unknown answer with clarification needed reason
-        assert llm_response.tool_name == "UnknownAnswer"
+        assert llm_response.tool_name == "StayOnThisNode"
         assert llm_response.metadata is not None
         assert llm_response.metadata.get("reason") == "clarification_needed"
         assert llm_response.metadata.get("is_clarification") is True
@@ -753,7 +753,7 @@ class TestEndToEndFlows:
         )
 
         # The LLM should extract the answer
-        assert final_response.tool_name == "UpdateAnswersFlow"
+        assert final_response.tool_name == "UpdateAnswers"
         assert final_response.updates == {"question2": "answer2"}
 
         # Apply the updates to context (like the agent does)
@@ -785,28 +785,28 @@ class TestFlowTurnRunnerEndToEnd:
                 # Extract the field to fill from the prompt
                 if "Field to fill: name" in prompt and "Alice" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"name": "Alice"},
                         "validated": True,
                         "reasoning": "User provided their name"
                     }
                 if "Field to fill: age" in prompt and "30" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"age": "30"},
                         "validated": True,
                         "reasoning": "User provided their age"
                     }
                 if "Field to fill: email" in prompt and "alice@example.com" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"email": "alice@example.com"},
                         "validated": True,
                         "reasoning": "User provided their email"
                     }
                 # Default response for unknown cases
                 return {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {},
                     "validated": False,
                     "reasoning": "Could not parse input"
@@ -863,21 +863,21 @@ class TestFlowTurnRunnerEndToEnd:
                 # Check for current user message - look at the most recent message
                 if "User's message: Why do you need my name?" in prompt:
                     return {
-                        "__tool_name__": "UnknownAnswer",
+                        "__tool_name__": "StayOnThisNode",
                         "reason": "clarification_needed",
                         "reasoning": "User is asking for clarification about purpose"
                     }
                 # Check for name response
                 if "User's message: Bob" in prompt and "Field to fill: name" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"name": "Bob"},
                         "validated": True,
                         "reasoning": "User provided their name"
                     }
 
                 return {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {},
                     "validated": False,
                     "reasoning": "Could not parse input"
@@ -894,12 +894,12 @@ class TestFlowTurnRunnerEndToEnd:
 
         # User asks for clarification
         result = runner.process_turn(ctx, "Why do you need my name?")
-        assert result.tool_name == "UnknownAnswer"
+        assert result.tool_name == "StayOnThisNode"
         assert not result.terminal
 
         # User provides answer after clarification
         result = runner.process_turn(ctx, "Bob")
-        assert result.tool_name == "UpdateAnswersFlow"
+        assert result.tool_name == "UpdateAnswers"
         assert ctx.answers.get("name") == "Bob"
 
     def test_conversation_with_revisit(self, simple_flow: Flow) -> None:
@@ -929,21 +929,21 @@ class TestFlowTurnRunnerEndToEnd:
                 # Check field-specific updates
                 if "Field to fill: name" in prompt and "John" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"name": "John"},
                         "validated": True,
                         "reasoning": "User provided name John"
                     }
                 if "Field to fill: age" in prompt and "25" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"age": "25"},
                         "validated": True,
                         "reasoning": "User provided age 25"
                     }
 
                 return {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {},
                     "validated": False,
                     "reasoning": "Could not parse input"
@@ -982,14 +982,14 @@ class TestFlowTurnRunnerEndToEnd:
             def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
                 if "I don't know" in prompt or "don't know" in prompt.lower():
                     return {
-                        "__tool_name__": "UnknownAnswer",
+                        "__tool_name__": "StayOnThisNode",
                         "reason": "user_doesnt_know",
                         "field": "age",
                         "reasoning": "User explicitly said they don't know"
                     }
 
                 return {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {},
                     "validated": False,
                     "reasoning": "Could not parse input"
@@ -1010,7 +1010,7 @@ class TestFlowTurnRunnerEndToEnd:
 
         # User doesn't know
         result = runner.process_turn(ctx, "I don't know")
-        assert result.tool_name == "UnknownAnswer"
+        assert result.tool_name == "StayOnThisNode"
 
         # Should continue to next question since age is not required
         result = runner.process_turn(ctx)
@@ -1036,7 +1036,7 @@ class TestFlowTurnRunnerEndToEnd:
                     }
 
                 return {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {},
                     "validated": False,
                     "reasoning": "Default response"
@@ -1069,21 +1069,21 @@ class TestFlowTurnRunnerEndToEnd:
             def extract(self, prompt: str, tools: list[type]) -> dict[str, Any]:
                 if "User's message: new" in prompt and "Field to fill: user_type" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"user_type": "new"},
                         "validated": True,
                         "reasoning": "User specified they are a new customer"
                     }
                 if "exploring options" in prompt and "signup_reason" in prompt:
                     return {
-                        "__tool_name__": "UpdateAnswersFlow",
+                        "__tool_name__": "UpdateAnswers",
                         "updates": {"signup_reason": "exploring options"},
                         "validated": True,
                         "reasoning": "User provided signup reason"
                     }
 
                 return {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {},
                     "validated": False,
                     "reasoning": "Default response"

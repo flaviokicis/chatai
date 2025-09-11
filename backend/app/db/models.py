@@ -398,78 +398,43 @@ class FlowChatSession(Base, TimestampMixin):
     cleared_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-# --- Agent Thought Tracing Models ---
+class HandoffRequest(Base, TimestampMixin):
+    """Tracks human handoff requests for reliable processing and acknowledgment."""
 
-
-class AgentConversationTrace(Base, TimestampMixin):
-    """Tracks conversation-level metadata for agent thought tracing."""
-
-    __tablename__ = "agent_conversation_traces"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "user_id", "agent_type", name="uq_trace_per_user_agent"),
-        Index("ix_trace_tenant_user", "tenant_id", "user_id"),
-        Index("ix_trace_last_activity", "last_activity_at"),
-    )
+    __tablename__ = "handoff_requests"
 
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    flow_id: Mapped[UUID | None] = mapped_column(ForeignKey("flows.id", ondelete="SET NULL"))
+    thread_id: Mapped[UUID | None] = mapped_column(ForeignKey("chat_threads.id", ondelete="SET NULL"))
+    contact_id: Mapped[UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
+    channel_instance_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("channel_instances.id", ondelete="SET NULL")
+    )
 
-    # GDPR/LGPD: User ID could contain PII (e.g., phone numbers), encrypt it
-    user_id: Mapped[str] = mapped_column(EncryptedString, nullable=False)
-    session_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    agent_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    channel_id: Mapped[str | None] = mapped_column(String(255), nullable=True)  # Channel identifier for customer traceability
-
-    # Metadata
-    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    total_thoughts: Mapped[int] = mapped_column(Integer, default=0)
-
+    # Request details
+    reason: Mapped[str | None] = mapped_column(EncryptedString)  # Why handoff was requested
+    current_node_id: Mapped[str | None] = mapped_column(String(255))  # Where in flow
+    user_message: Mapped[str | None] = mapped_column(EncryptedString)  # Last user message
+    collected_answers: Mapped[dict | None] = mapped_column(JSONB)  # Flow progress so far
+    
+    # Status tracking
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    
+    # Context preservation
+    session_id: Mapped[str | None] = mapped_column(String(255))  # Flow session
+    conversation_context: Mapped[dict | None] = mapped_column(JSONB)  # Additional context
+    
     # Relationships
     tenant: Mapped[Tenant] = relationship()
-    thoughts: Mapped[list[AgentThought]] = relationship(
-        back_populates="conversation_trace",
-        cascade="all, delete-orphan",
-        order_by="AgentThought.created_at"
-    )
+    flow: Mapped[Flow | None] = relationship()
+    thread: Mapped[ChatThread | None] = relationship()
+    contact: Mapped[Contact | None] = relationship()
+    channel_instance: Mapped[ChannelInstance | None] = relationship()
 
 
-class AgentThought(Base, TimestampMixin):
-    """Stores individual agent reasoning steps and tool selections."""
+# --- Agent Thought Tracing Models ---
 
-    __tablename__ = "agent_thoughts"
-    __table_args__ = (
-        Index("ix_thought_trace_timestamp", "conversation_trace_id", "created_at"),
-        Index("ix_thought_tool_name", "selected_tool"),
-    )
 
-    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
-    conversation_trace_id: Mapped[UUID] = mapped_column(
-        ForeignKey("agent_conversation_traces.id", ondelete="CASCADE")
-    )
-
-    # Context - GDPR/LGPD: User messages contain PII, must be encrypted
-    user_message: Mapped[str] = mapped_column(EncryptedString, nullable=False)
-    current_state: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    available_tools: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-
-    # Agent Decision Making
-    reasoning: Mapped[str] = mapped_column(Text, nullable=False)
-    selected_tool: Mapped[str] = mapped_column(String(100), nullable=False)
-    tool_args: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    confidence: Mapped[float | None] = mapped_column(nullable=True)
-
-    # Results - GDPR/LGPD: Agent responses may contain PII, encrypt them
-    tool_result: Mapped[str | None] = mapped_column(Text, nullable=True)
-    agent_response: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
-    errors: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
-
-    # Performance Metrics
-    processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    model_name: Mapped[str] = mapped_column(String(100), nullable=False, default="unknown")
-
-    # Additional Metadata
-    extra_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-
-    # Relationships
-    conversation_trace: Mapped[AgentConversationTrace] = relationship(back_populates="thoughts")
+# Thought tracing models removed - using Langfuse for observability instead

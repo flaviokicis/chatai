@@ -172,11 +172,21 @@ class RedisKeyBuilder:
                 "user_id": parts[0],
                 "session_id": parts[1],
                 "agent_type": parts[1],
-                "flow_id": None,
+                "flow_id": "unknown",
                 "redis_key": redis_key
             }
 
         return None
+
+    @staticmethod
+    def handoff_request_key(handoff_id: str) -> str:
+        """Redis key for storing a specific handoff request."""
+        return f"chatai:handoff:request:{handoff_id}"
+
+    @staticmethod
+    def tenant_handoffs_key(tenant_id: str) -> str:
+        """Redis key for storing list of handoff IDs for a tenant."""
+        return f"chatai:handoff:tenant:{tenant_id}"
 
 
 # Global instance

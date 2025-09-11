@@ -54,7 +54,7 @@ def test_whatsapp_like_flow(monkeypatch):
     # Setup app context with deterministic LLM
     ctx = get_app_context(app)
     ctx.llm = SeqLLM([
-        {"__tool_name__": "UpdateAnswersFlow", "updates": {"intention": "buy leds"}},
+        {"__tool_name__": "UpdateAnswers", "updates": {"intention": "buy leds"}},
     ])
 
     headers = {"X-Twilio-Signature": "test"}
@@ -105,11 +105,11 @@ def test_ambiguous_paths_escalate_to_human(monkeypatch):
                 return {"__tool_name__": "SelectFlowPath", "path": None}
             self._i += 1
             if self._i == 1:
-                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"intention": "buy leds"}}
+                return {"__tool_name__": "UpdateAnswers", "updates": {"intention": "buy leds"}}
             if self._i == 2:
-                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"budget": "10k"}}
+                return {"__tool_name__": "UpdateAnswers", "updates": {"budget": "10k"}}
             if self._i == 3:
-                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"timeframe": "3 months"}}
+                return {"__tool_name__": "UpdateAnswers", "updates": {"timeframe": "3 months"}}
             return {}
 
     ctx = get_app_context(app)
@@ -177,11 +177,11 @@ def test_paths_selection_and_questions_flow(monkeypatch):
             self._i += 1
             if self._i == 1:
                 return {
-                    "__tool_name__": "UpdateAnswersFlow",
+                    "__tool_name__": "UpdateAnswers",
                     "updates": {"intention": "tennis court"},
                 }
             if self._i == 2:
-                return {"__tool_name__": "UpdateAnswersFlow", "updates": {"court_type": "indoor"}}
+                return {"__tool_name__": "UpdateAnswers", "updates": {"court_type": "indoor"}}
             return {}
 
     ctx = get_app_context(app)
