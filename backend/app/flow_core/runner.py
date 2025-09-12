@@ -184,9 +184,10 @@ class FlowTurnRunner:
                     # If we're NOT navigating, ensure the node isn't marked as completed
                     if not wants_to_navigate and field == ctx.pending_field:
                         # Keep the node in pending state since we're collecting more info
-                        node_state = ctx.get_node_state(ctx.current_node_id)
-                        if node_state:
-                            node_state.status = NodeStatus.IN_PROGRESS
+                        if ctx.current_node_id:
+                            node_state = ctx.get_node_state(ctx.current_node_id)
+                            if node_state:
+                                node_state.status = NodeStatus.IN_PROGRESS
             
             if responder_result.navigation:
                 engine_event["target_node_id"] = responder_result.navigation

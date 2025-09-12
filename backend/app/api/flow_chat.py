@@ -20,6 +20,7 @@ from app.services.flow_chat_service import FlowChatService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/flows/{flow_id}/chat", tags=["flow-chat"])
+router_versions = APIRouter(prefix="/flows/{flow_id}/versions", tags=["flow-versions"])
 
 
 class SendMessageRequest(BaseModel):
@@ -152,3 +153,50 @@ async def send_message(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+# Flow version endpoints
+@router_versions.get("", response_model=list[dict])
+def list_flow_versions(
+    flow_id: UUID = Path(...),
+    limit: int = 20,
+    session: Session = Depends(get_db_session)
+) -> list[dict]:
+    """List version history for a flow."""
+    from app.db.repository import get_flow_versions
+    
+    versions = get_flow_versions(session, flow_id, limit=limit)
+    return [
+        {
+            "id": str(v.id),
+            "version_number": v.version_number,
+            "definition": v.definition,
+            "change_description": v.change_description,
+            "created_by": v.created_by,
+            "created_at": v.created_at.isoformat() if v.created_at else None
+        }
+        for v in versions
+    ]
+
+
+@router_versions.get("/{version_number}", response_model=dict)
+def get_flow_version(
+    flow_id: UUID = Path(...),
+    version_number: int = Path(...),
+    session: Session = Depends(get_db_session)
+) -> dict:
+    """Get a specific version of a flow."""
+    from app.db.repository import get_flow_version_by_number
+    
+    version = get_flow_version_by_number(session, flow_id, version_number)
+    if not version:
+        raise HTTPException(status_code=404, detail="Version not found")
+    
+    return {
+        "id": str(version.id),
+        "version_number": version.version_number,
+        "definition": version.definition,
+        "change_description": version.change_description,
+        "created_by": version.created_by,
+        "created_at": version.created_at.isoformat() if version.created_at else None
+    }

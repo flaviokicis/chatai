@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     # FlowAgent removed - using FlowProcessor directly
+    pass
 
 
 class SalesQualificationAgentWrapper:
