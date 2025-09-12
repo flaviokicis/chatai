@@ -69,10 +69,10 @@ class EnhancedFlowResponder:
         self._llm = llm
         self._langfuse = get_client()
         self._message_service = MessageGenerationService()
-        self._tool_executor = ToolExecutionService()
+        # Tool executor will be created when needed with action registry
         self._llm_call_count = 0  # Track LLM calls
 
-    def respond(
+    async def respond(
         self,
         prompt: str,
         pending_field: str | None,
@@ -129,7 +129,7 @@ class EnhancedFlowResponder:
             )
 
             # Process the validated response
-            output = self._process_gpt5_response(
+            output = await self._process_gpt5_response(
                 response=validated_response,
                 context=context,
                 pending_field=pending_field,
@@ -944,7 +944,7 @@ When an admin requests flow changes:
             validation_errors=[str(last_exception)] if last_exception else []
         ) from last_exception
 
-    def _process_gpt5_response(
+    async def _process_gpt5_response(
         self,
         response: GPT5Response,
         context: FlowContext,
@@ -964,7 +964,12 @@ When an admin requests flow changes:
         tool_data = primary_tool.model_dump()
 
         # Execute the tool
-        tool_result = self._tool_executor.execute_tool(
+        # Create tool executor with action registry when needed
+        from ..actions import ActionRegistry
+        action_registry = ActionRegistry(self._llm)
+        tool_executor = ToolExecutionService(action_registry)
+        
+        tool_result = await tool_executor.execute_tool(
             tool_name=tool_name,
             tool_data=tool_data,
             context=context,

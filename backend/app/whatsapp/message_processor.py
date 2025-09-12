@@ -17,7 +17,9 @@ from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
 
 from app.core.app_context import get_app_context
-from app.core.flow_processor import FlowProcessingResult, FlowProcessor, FlowRequest
+from app.core.flow_processor import FlowProcessor
+from app.core.flow_request import FlowRequest
+from app.core.flow_response import FlowProcessingResult
 from app.db.models import MessageDirection, MessageStatus
 from app.services.deduplication_service import MessageDeduplicationService
 from app.services.message_logging_service import message_logging_service
@@ -452,13 +454,13 @@ class WhatsAppMessageProcessor:
         session_manager = RedisSessionManager(app_context.store)
         thread_updater = WhatsAppThreadStatusUpdater()
 
-        # Create flow processor with injected dependencies
-        # Note: Each request creates its own processor, but they share Redis state via cancellation manager
+        # Create clean flow processor with injected dependencies
+        from app.core.flow_processor import FlowProcessor
+        
         flow_processor = FlowProcessor(
-            llm=app_context.llm,
+            llm_client=app_context.llm,
             session_manager=session_manager,
-            training_handler=None,
-            thread_updater=thread_updater,
+            cancellation_manager=app_context.cancellation_manager,
         )
 
         # Process through flow processor
