@@ -15,7 +15,6 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.core.llm import LLMClient
-from app.db.repository import get_flow_by_id
 from app.services.flow_modification_service import (
     BatchFlowActionsRequest,
     FlowModificationService,
@@ -33,7 +32,7 @@ LLM_TIMEOUT = 60
 
 class FlowChatResponse(NamedTuple):
     """Response from the flow chat agent."""
-    
+
     messages: list[str]
     flow_was_modified: bool
     modification_summary: str | None = None
@@ -48,11 +47,11 @@ class FlowChatAgentV2:
     - Provides comprehensive error handling and retries
     - Logs everything important for debugging in production
     """
-    
+
     def __init__(self, llm: LLMClient):
         """Initialize the agent with an LLM client."""
         self.llm = llm
-    
+
     async def process(
         self,
         flow: dict[str, Any],
@@ -84,62 +83,62 @@ class FlowChatAgentV2:
         logger.info(f"Active path: {active_path}")
         if history:
             last_msg = history[-1]
-            logger.info(f"Last message ({last_msg['role']}): {last_msg['content'][:200]}..." if len(last_msg['content']) > 200 else f"Last message ({last_msg['role']}): {last_msg['content']}")
+            logger.info(f"Last message ({last_msg['role']}): {last_msg['content'][:200]}..." if len(last_msg["content"]) > 200 else f"Last message ({last_msg['role']}): {last_msg['content']}")
         logger.info("=" * 80)
-        
+
         # Build the prompt
         prompt = self._build_prompt(flow, history, simplified_view_enabled, active_path)
-        
+
         # Log prompt in development mode
         if is_development_mode():
             self._log_prompt_debug(prompt, "initial")
-        
+
         # Try to get response from LLM with retries
         result = None
         last_error = None
-        
+
         for attempt in range(MAX_LLM_RETRIES):
             try:
                 logger.info(f"LLM call attempt {attempt + 1}/{MAX_LLM_RETRIES}")
-                
+
                 # Make the LLM call with timeout
                 result = await self._call_llm_with_timeout(prompt)
-                
+
                 if result:
                     logger.info(f"LLM call successful on attempt {attempt + 1}")
                     break
-                    
-            except asyncio.TimeoutError:
+
+            except TimeoutError:
                 last_error = "LLM call timed out"
                 logger.error(f"Attempt {attempt + 1} timed out after {LLM_TIMEOUT}s")
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Attempt {attempt + 1} failed: {e}", exc_info=True)
-            
+
             if attempt < MAX_LLM_RETRIES - 1:
                 await asyncio.sleep(2 ** attempt)  # Exponential backoff
-        
+
         if not result:
             error_msg = f"Failed after {MAX_LLM_RETRIES} attempts: {last_error}"
             logger.error(error_msg)
             return FlowChatResponse(
-                messages=[f"Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."],
+                messages=["Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."],
                 flow_was_modified=False,
                 modification_summary=None
             )
-        
+
         # Process the LLM response
         return await self._process_llm_response(
             result, flow, flow_id, session, history
         )
-    
+
     async def _call_llm_with_timeout(self, prompt: str) -> dict[str, Any] | None:
         """Call LLM with timeout protection."""
         loop = asyncio.get_event_loop()
-        
+
         # Define the tool schema for batch actions
         tool_schema = BatchFlowActionsRequest
-        
+
         # Run LLM call in executor with timeout
         try:
             result = await asyncio.wait_for(
@@ -147,12 +146,12 @@ class FlowChatAgentV2:
                 timeout=LLM_TIMEOUT
             )
             return result
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise
         except Exception as e:
             logger.error(f"LLM call failed: {e}", exc_info=True)
             raise
-    
+
     async def _process_llm_response(
         self,
         llm_result: dict[str, Any],
@@ -164,12 +163,12 @@ class FlowChatAgentV2:
         """Process the LLM response and execute actions."""
         content = llm_result.get("content", "")
         tool_calls = llm_result.get("tool_calls", [])
-        
+
         logger.info(
             f"LLM response: content_len={len(content)}, "
             f"tool_calls={len(tool_calls)}"
         )
-        
+
         # If no tool calls, just return the content
         if not tool_calls:
             if content:
@@ -178,17 +177,16 @@ class FlowChatAgentV2:
                     flow_was_modified=False,
                     modification_summary=None
                 )
-            else:
-                return FlowChatResponse(
-                    messages=["Como posso ajudar você com o fluxo?"],
-                    flow_was_modified=False,
-                    modification_summary=None
-                )
-        
+            return FlowChatResponse(
+                messages=["Como posso ajudar você com o fluxo?"],
+                flow_was_modified=False,
+                modification_summary=None
+            )
+
         # Execute the batch actions
         tool_call = tool_calls[0]  # We expect only one tool call
         actions = tool_call.get("arguments", {}).get("actions", [])
-        
+
         if not actions:
             logger.warning("Tool call had no actions")
             return FlowChatResponse(
@@ -196,29 +194,29 @@ class FlowChatAgentV2:
                 flow_was_modified=False,
                 modification_summary=None
             )
-        
+
         logger.info("=" * 80)
         logger.info(f"🔧 EXECUTING BATCH OF {len(actions)} ACTIONS")
         logger.info("=" * 80)
-        
+
         # Log actions for debugging
         for i, action in enumerate(actions):
             action_type = action.get("action", "unknown")
             node_id = action.get("node_id", "")
             source = action.get("source", "")
             target = action.get("target", "")
-            
+
             logger.info(
                 f"Action {i+1}/{len(actions)}: {action_type} "
                 f"node={node_id} edge={source}->{target}"
             )
-        
+
         logger.info("=" * 80)
-        
+
         # Execute actions using the service
         logger.info("🚀 Calling FlowModificationService.execute_batch_actions")
         service = FlowModificationService(session)
-        
+
         try:
             result = service.execute_batch_actions(
                 flow=flow,
@@ -230,55 +228,54 @@ class FlowChatAgentV2:
             logger.error("❌ FLOW MODIFICATION SERVICE FAILED")
             logger.error(f"Error: {e}", exc_info=True)
             raise
-        
+
         if result.success:
             logger.info("=" * 80)
             logger.info("✅ FLOW MODIFICATION SUCCESSFUL")
             logger.info("=" * 80)
             logger.info(f"Actions executed: {len(actions)}")
             logger.info(f"Flow modified: {result.modified_flow is not None}")
-            
+
             # Build modification summary
             summary_parts = []
             for action_result in result.action_results:
                 if action_result.success:
                     summary_parts.append(action_result.message)
-            
+
             modification_summary = "; ".join(summary_parts) if summary_parts else None
-            
+
             # Get a meaningful message for the user
             if content and len(content) < 500:
                 message = content
             else:
                 message = f"✅ Fluxo modificado com sucesso! ({len(actions)} alterações aplicadas)"
-            
+
             return FlowChatResponse(
                 messages=[message],
                 flow_was_modified=True,
                 modification_summary=modification_summary
             )
-        else:
-            logger.error("=" * 80)
-            logger.error("❌ FLOW MODIFICATION FAILED")
-            logger.error("=" * 80)
-            logger.error(f"Error: {result.error}")
-            
-            # Log individual action results for debugging
-            for i, action_result in enumerate(result.action_results):
-                if not action_result.success:
-                    logger.error(
-                        f"Action {i+1} failed: {action_result.action_type} - {action_result.error}"
-                    )
-            logger.error("=" * 80)
-            
-            error_message = f"❌ Erro ao modificar o fluxo: {result.error}"
-            
-            return FlowChatResponse(
-                messages=[error_message],
-                flow_was_modified=False,
-                modification_summary=None
-            )
-    
+        logger.error("=" * 80)
+        logger.error("❌ FLOW MODIFICATION FAILED")
+        logger.error("=" * 80)
+        logger.error(f"Error: {result.error}")
+
+        # Log individual action results for debugging
+        for i, action_result in enumerate(result.action_results):
+            if not action_result.success:
+                logger.error(
+                    f"Action {i+1} failed: {action_result.action_type} - {action_result.error}"
+                )
+        logger.error("=" * 80)
+
+        error_message = f"❌ Erro ao modificar o fluxo: {result.error}"
+
+        return FlowChatResponse(
+            messages=[error_message],
+            flow_was_modified=False,
+            modification_summary=None
+        )
+
     def _build_prompt(
         self,
         flow: dict[str, Any],
@@ -288,7 +285,7 @@ class FlowChatAgentV2:
     ) -> str:
         """Build the prompt for the LLM."""
         lines = []
-        
+
         # System instructions
         lines.extend([
             "You are an expert flow editing assistant that modifies conversation flows.",
@@ -377,21 +374,21 @@ class FlowChatAgentV2:
             "- source: Source node ID",
             "- target: Target node ID",
             "- priority: Lower numbers = higher priority (default 0)",
-            "- guard: Condition object (e.g., {\"fn\": \"answers_has\", \"args\": {\"key\": \"field\"}})",
+            '- guard: Condition object (e.g., {"fn": "answers_has", "args": {"key": "field"}})',
             "- condition_description: Human-readable description",
             "",
         ])
-        
+
         # Add simplified view context if enabled
         if simplified_view_enabled and active_path:
             lines.extend([
-                f"## 🎯 VIEW CONTEXT:",
+                "## 🎯 VIEW CONTEXT:",
                 f"- User is viewing the '{active_path}' path only",
-                f"- Focus modifications on nodes related to this path",
-                f"- Don't modify nodes from other conversation paths",
+                "- Focus modifications on nodes related to this path",
+                "- Don't modify nodes from other conversation paths",
                 "",
             ])
-        
+
         # Add current flow
         lines.extend([
             "## Current Flow Definition:",
@@ -400,7 +397,7 @@ class FlowChatAgentV2:
             "```",
             "",
         ])
-        
+
         # Add conversation history
         if history:
             lines.extend([
@@ -411,7 +408,7 @@ class FlowChatAgentV2:
                 content = msg.get("content", "")
                 lines.append(f"{role.title()}: {content}")
             lines.append("")
-        
+
         # Final instruction
         lines.extend([
             "## Complex Transformation Examples:",
@@ -441,27 +438,27 @@ class FlowChatAgentV2:
             "Be helpful, make smart decisions, and ensure the flow remains valid.",
             "For complex transformations, think step-by-step about all required changes.",
         ])
-        
+
         return "\n".join(lines)
-    
+
     def _log_prompt_debug(self, prompt: str, stage: str) -> None:
         """Log prompt to file in development mode."""
         try:
+            import os
             import tempfile
             from datetime import datetime
-            import os
-            
+
             temp_dir = tempfile.gettempdir()
             debug_dir = os.path.join(temp_dir, "chatai_debug")
             os.makedirs(debug_dir, exist_ok=True)
-            
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"llm_prompt_v2_{stage}_{timestamp}.txt"
             filepath = os.path.join(debug_dir, filename)
-            
+
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(prompt)
-            
+
             logger.info(f"Debug prompt written to {filename}")
         except Exception as e:
             logger.warning(f"Failed to write debug prompt: {e}")

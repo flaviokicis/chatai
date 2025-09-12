@@ -27,7 +27,6 @@ from ..constants import (
     MAX_MESSAGES_PER_TURN,
     MAX_SCHEMA_VALIDATION_RETRIES,
     MIN_MESSAGES_PER_TURN,
-    MODEL_GPT5,
     NO_DELAY_MS,
 )
 from ..types import (
@@ -119,7 +118,7 @@ class EnhancedFlowResponder:
         try:
             # Call GPT-5 with enhanced schema and validation
             validated_response = self._call_gpt5(
-                instruction, 
+                instruction,
                 tools,
                 context=context,
                 pending_field=pending_field,
@@ -147,7 +146,7 @@ class EnhancedFlowResponder:
         """Format available paths visualization, skipping routing nodes."""
         if not available_edges:
             return "No navigation paths available from current node."
-        
+
         # Build edge lookup from flow graph
         edge_lookup: dict[str, Any] = {}
         if flow_graph and "edges" in flow_graph:
@@ -155,7 +154,7 @@ class EnhancedFlowResponder:
                 if edge["from"] not in edge_lookup:
                     edge_lookup[edge["from"]] = []
                 edge_lookup[edge["from"]].append(edge["to"])
-        
+
         # Build node type and prompt lookup
         node_types = {}
         node_prompts = {}
@@ -164,14 +163,14 @@ class EnhancedFlowResponder:
                 node_types[node["id"]] = node["type"]
                 # Get the prompt or reason for display
                 node_prompts[node["id"]] = node.get("prompt") or node.get("reason") or node.get("label") or node["id"]
-        
+
         paths = []
         for edge in available_edges:
             # Fix: available_edges uses "target_node_id" not "target"
             target = edge.get("target_node_id", edge.get("target", "unknown"))
             target_type = node_types.get(target, "unknown")
             target_prompt = node_prompts.get(target, target)
-            
+
             # If target is a routing/decision node, show what's beyond it
             if target_type == "DecisionNode":
                 # Show paths through the decision node
@@ -182,17 +181,17 @@ class EnhancedFlowResponder:
                     if next_type != "DecisionNode":  # Skip nested routers
                         # Show a preview of the question/terminal
                         preview = next_prompt[:50] + "..." if len(next_prompt) > 50 else next_prompt
-                        paths.append(f"→ {next_node} ({next_type}): \"{preview}\"")
+                        paths.append(f'→ {next_node} ({next_type}): "{preview}"')
             else:
                 # Direct path to non-router node
                 preview = target_prompt[:50] + "..." if len(target_prompt) > 50 else target_prompt
-                paths.append(f"→ {target} ({target_type}): \"{preview}\"")
-        
+                paths.append(f'→ {target} ({target_type}): "{preview}"')
+
         if not paths:
             return "No navigation paths available from current node."
-        
+
         return "Available navigation paths:\n" + "\n".join(paths)
-    
+
     def _build_gpt5_instruction(
         self,
         prompt: str,
@@ -240,7 +239,7 @@ class EnhancedFlowResponder:
             if "edges" in flow_graph:
                 for edge in flow_graph["edges"]:
                     nodes_with_outgoing_edges.add(edge["from"])
-            
+
             # Check if any of our available targets is a terminal (no outgoing edges)
             for edge in available_edges:
                 target = edge.get("target_node_id", "")
@@ -708,7 +707,7 @@ REMEMBER: ALWAYS include messages in your tool arguments!"""
 
 Use this information to answer questions about what we do/sell and provide relevant context.
 """)
-            
+
             if project_context.communication_style:
                 instructions.append(f"""
 ### Communication Style
@@ -862,7 +861,7 @@ When an admin requests flow changes:
         """Select appropriate tools based on context."""
         # Use PerformAction as the main tool - it can handle multiple actions
         from ..tools import PerformAction, RequestHumanHandoff
-        
+
         tools: list[type] = [
             PerformAction,  # This can do everything including flow modification for admins
             RequestHumanHandoff,  # For escalation
@@ -918,16 +917,16 @@ When an admin requests flow changes:
         for i in range(max_retries):
             try:
                 self._llm_call_count += 1
-                
+
                 # Use the existing LLM interface - just call extract directly
                 result = self._llm.extract(instruction, tools)
-                
+
                 # Convert the result to GPT5Response format if needed
                 if isinstance(result, dict):
                     return self._convert_langchain_to_gpt5_response(result)
                 # If it's already the right format, return it
                 return result  # type: ignore[unreachable]
-                
+
             except Exception as e:
                 last_exception = e
                 logger.warning(
@@ -957,9 +956,9 @@ When an admin requests flow changes:
         if not primary_tool:
             # Fallback if no tools
             return self._create_fallback_response("No tools found in GPT-5 response")
-        
+
         tool_name = primary_tool.tool_name
-        
+
         # Convert tool to dict for the executor
         tool_data = primary_tool.model_dump()
 
@@ -968,7 +967,7 @@ When an admin requests flow changes:
         from ..actions import ActionRegistry
         action_registry = ActionRegistry(self._llm)
         tool_executor = ToolExecutionService(action_registry)
-        
+
         tool_result = await tool_executor.execute_tool(
             tool_name=tool_name,
             tool_data=tool_data,
@@ -978,7 +977,7 @@ When an admin requests flow changes:
 
         # Extract messages from the tool (messages should be in the tool data)
         messages = tool_data.get("messages", [{"text": "Erro ao processar mensagens", "delay_ms": 0}])
-        
+
         # Extract common fields from tool data for the final output
         reasoning = tool_data.get("reasoning", response.reasoning)
         confidence = tool_data.get("confidence", 0.8)
@@ -1004,17 +1003,17 @@ When an admin requests flow changes:
     def _convert_langchain_to_gpt5_response(self, langchain_result: dict[str, Any]) -> GPT5Response:
         """Convert LangChain tool result to GPT5Response format."""
         from ..types import PerformActionCall, RequestHumanHandoffCall
-        
+
         # DEBUG: Log what we received from LangChain
         logger.info(f"[DEBUG] LangChain result: {json.dumps(langchain_result, indent=2)}")
-        
+
         # Extract tool calls from LangChain result
         tool_calls = langchain_result.get("tool_calls", [])
         content = langchain_result.get("content", "")
-        
+
         logger.info(f"[DEBUG] Extracted tool_calls: {tool_calls}")
         logger.info(f"[DEBUG] Extracted content: {content}")
-        
+
         if not tool_calls:
             # Default to PerformAction with stay if no tool calls
             tool_call = PerformActionCall(
@@ -1028,15 +1027,15 @@ When an admin requests flow changes:
                 tools=[tool_call],
                 reasoning="Processed user input without specific tool"
             )
-        
+
         # Process the first tool call
         first_tool = tool_calls[0]
         tool_name = first_tool.get("name", "PerformAction")
         tool_args = first_tool.get("arguments", {})  # Changed from "args" to "arguments"
-        
+
         logger.info(f"[DEBUG] Tool name: {tool_name}")
         logger.info(f"[DEBUG] Tool args: {json.dumps(tool_args, indent=2)}")
-        
+
         # Ensure required fields are present
         if "reasoning" not in tool_args:
             tool_args["reasoning"] = f"Selected {tool_name}"
@@ -1044,11 +1043,11 @@ When an admin requests flow changes:
             tool_args["confidence"] = 0.8
         if "messages" not in tool_args:
             # Generate default messages based on content
-            logger.warning(f"[DEBUG] No messages found in tool_args! Using fallback.")
+            logger.warning("[DEBUG] No messages found in tool_args! Using fallback.")
             tool_args["messages"] = [{"text": content or "Entendi!", "delay_ms": 0}]
         else:
             logger.info(f"[DEBUG] Found {len(tool_args['messages'])} messages in tool_args")
-        
+
         # Create the appropriate tool call object
         if tool_name == "PerformAction":
             if "actions" not in tool_args:
@@ -1069,7 +1068,7 @@ When an admin requests flow changes:
                 reasoning=tool_args.get("reasoning", f"Unknown tool {tool_name}, staying on node"),
                 confidence=tool_args.get("confidence", 0.3)
             )
-        
+
         return GPT5Response(
             tools=[tool_call],
             reasoning=tool_args.get("reasoning", "Processed user input")
@@ -1082,7 +1081,7 @@ When an admin requests flow changes:
 
         formatted_history = []
         last_assistant_message = None
-        
+
         for turn in context.history[-MAX_HISTORY_TURNS:]:
             # Handle both dict and object formats for conversation turns
             if hasattr(turn, "user_message") and hasattr(turn, "assistant_message"):
@@ -1106,11 +1105,11 @@ When an admin requests flow changes:
                 if assistant_content:
                     formatted_history.append(f"Assistant: {assistant_content}")
                     last_assistant_message = assistant_content
-        
+
         # Add context about what the assistant is waiting for
         if last_assistant_message and "?" in last_assistant_message:
             formatted_history.append("[CONTEXT: The assistant just asked a question and is waiting for an answer]")
-        
+
         return "\n".join(formatted_history)
 
     def _add_allowed_values_constraint(self, allowed_values: list[str] | None, pending_field: str | None) -> str:
@@ -1127,7 +1126,7 @@ Map the user's response to one of these exact values.
         """Create a fallback response in case of an unrecoverable error."""
         error_msg = f"Creating fallback response due to error: {error_message}"
         logger.error(error_msg)
-        
+
         fallback_message: WhatsAppMessage = {
             "text": DEFAULT_ERROR_MESSAGE,
             "delay_ms": NO_DELAY_MS

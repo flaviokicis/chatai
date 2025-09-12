@@ -11,22 +11,16 @@ from typing import Any, Literal, TypedDict
 from pydantic import BaseModel, Field, field_validator
 
 from .constants import (
-    DEFAULT_COMPLETION_TYPE,
     DEFAULT_CONFIDENCE,
     DEFAULT_URGENCY,
-    MAX_ACKNOWLEDGMENT_LENGTH,
     MAX_CONFIDENCE,
     MAX_CONTEXT_SUMMARY_LENGTH,
     MAX_FOLLOWUP_DELAY_MS,
     MAX_MESSAGE_LENGTH,
-    MAX_MESSAGES_ALLOWED,
-    MAX_MESSAGES_PER_TURN,
-    MAX_NEXT_STEPS,
     MAX_VALIDATION_ERRORS_TO_SHOW,
     MESSAGE_TRUNCATION_LENGTH,
     MIN_CONFIDENCE,
     MIN_FOLLOWUP_DELAY_MS,
-    MIN_MESSAGES_PER_TURN,
     NO_DELAY_MS,
     TRUNCATION_SUFFIX,
 )
@@ -113,7 +107,7 @@ class RequestHumanHandoffCall(ToolCall):
 
 class PerformActionCall(ToolCall):
     """Tool call for unified PerformAction."""
-    
+
     tool_name: Literal["PerformAction"] = "PerformAction"
     actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow"]] = Field(
         ...,
@@ -149,7 +143,7 @@ class GPT5Response(BaseModel):
     def get_tool_name(self) -> str:
         """Get the primary tool name from the response (first tool)."""
         return self.tools[0].tool_name if self.tools else "PerformAction"
-    
+
     def get_all_tool_names(self) -> list[str]:
         """Get all tool names from the response."""
         return [tool.tool_name for tool in self.tools]
@@ -160,7 +154,7 @@ class GPT5Response(BaseModel):
             return {}
         result = self.tools[0].model_dump(exclude={"tool_name", "messages"})
         return dict(result) if result is not None else {}
-    
+
     def get_all_tools_data(self) -> list[tuple[str, dict[str, Any]]]:
         """Get all tools with their data."""
         tools_data: list[tuple[str, dict[str, Any]]] = []
@@ -261,7 +255,7 @@ def validate_gpt5_response(raw_response: dict[str, Any]) -> GPT5Response:
     try:
         # Handle both single tool (legacy) and multiple tools
         tools_list = []
-        
+
         # Check for new format (multiple tools)
         if "tools" in raw_response:
             for tool_data in raw_response["tools"]:

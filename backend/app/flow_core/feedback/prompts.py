@@ -11,10 +11,10 @@ from ..actions import ActionResult
 
 class FeedbackPromptBuilder:
     """Builds prompts for LLM feedback based on external action results."""
-    
+
     def build_action_result_prompt(
-        self, 
-        action_name: str, 
+        self,
+        action_name: str,
         result: ActionResult,
         original_instruction: str | None = None
     ) -> str:
@@ -33,12 +33,12 @@ class FeedbackPromptBuilder:
             f"Action: {action_name}",
             f"Status: {'SUCCESS' if result.is_success else 'FAILED'}",
         ]
-        
+
         if original_instruction:
             lines.extend([
                 f"Original instruction: {original_instruction[:200]}{'...' if len(original_instruction) > 200 else ''}",
             ])
-        
+
         if result.is_success:
             lines.extend([
                 f"Result: {result.message}",
@@ -51,7 +51,7 @@ class FeedbackPromptBuilder:
             ])
             if result.error:
                 lines.append(f"Technical details: {result.error}")
-        
+
         lines.extend([
             "",
             "IMPORTANT: You MUST acknowledge this actual result in your response.",
@@ -60,9 +60,9 @@ class FeedbackPromptBuilder:
             "Base your response on the ACTUAL result shown above.",
             "========================================",
         ])
-        
+
         return "\n".join(lines)
-    
+
     def build_action_feedback_instruction(self, action_name: str, result: ActionResult) -> str:
         """Build instruction for how the LLM should handle the result.
         
@@ -82,17 +82,15 @@ class FeedbackPromptBuilder:
                     "3. Continue with the flow as normal\n"
                     "4. Be truthful about what actually happened"
                 )
-            else:
-                return (
-                    f"The {action_name} action completed successfully. "
-                    "Acknowledge this success to the user and proceed accordingly."
-                )
-        else:
             return (
-                f"The {action_name} action FAILED. You MUST:\n"
-                "1. Inform the user that the action failed\n"
-                "2. Explain what went wrong (using the error message)\n"
-                "3. Suggest alternative approaches if possible\n"
-                "4. Do NOT pretend the action succeeded\n"
-                "5. Do NOT make promises about changes that didn't happen"
+                f"The {action_name} action completed successfully. "
+                "Acknowledge this success to the user and proceed accordingly."
             )
+        return (
+            f"The {action_name} action FAILED. You MUST:\n"
+            "1. Inform the user that the action failed\n"
+            "2. Explain what went wrong (using the error message)\n"
+            "3. Suggest alternative approaches if possible\n"
+            "4. Do NOT pretend the action succeeded\n"
+            "5. Do NOT make promises about changes that didn't happen"
+        )

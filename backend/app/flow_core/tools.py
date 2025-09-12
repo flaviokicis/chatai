@@ -11,15 +11,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from .constants import (
-    DEFAULT_COMPLETION_TYPE,
     DEFAULT_CONFIDENCE,
     DEFAULT_URGENCY,
-    MAX_ACKNOWLEDGMENT_LENGTH,
     MAX_CONFIDENCE,
     MAX_CONTEXT_SUMMARY_LENGTH,
-    MAX_NEXT_STEPS,
     MIN_CONFIDENCE,
-    MIN_DICT_ITEMS,
 )
 
 
@@ -83,55 +79,55 @@ class PerformAction(FlowTool):
     
     ALWAYS use this tool for any response.
     """
-    
+
     actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow"]] = Field(
         ...,
         description="Actions to take in sequence (e.g., ['update', 'navigate'] to save answer then navigate)"
     )
-    
+
     messages: list[dict[str, Any]] = Field(
         description="WhatsApp messages to send to the user",
         min_length=1,
         max_length=5
     )
-    
+
     # Optional fields based on action
     updates: dict[str, Any] | None = Field(
         default=None,
         description="Field updates when action is 'update'"
     )
-    
+
     target_node_id: str | None = Field(
         default=None,
         description="Target node when action is 'navigate'"
     )
-    
+
     clarification_reason: str | None = Field(
         default=None,
         description="Reason when action is 'stay'"
     )
-    
+
     handoff_reason: str | None = Field(
         default=None,
         description="Reason when action is 'handoff'"
     )
-    
+
     # Flow modification fields (admin only)
     flow_modification_instruction: str | None = Field(
         default=None,
         description="Instruction for modifying the flow when action is 'modify_flow' (admin only)"
     )
-    
+
     flow_modification_target: str | None = Field(
         default=None,
         description="Target node for flow modification (optional)"
     )
-    
+
     flow_modification_type: Literal["prompt", "routing", "validation", "general"] | None = Field(
         default=None,
         description="Type of flow modification (optional)"
     )
-    
+
     @field_validator("messages")  # type: ignore[misc]
     @classmethod
     def validate_messages(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:

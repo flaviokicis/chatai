@@ -14,11 +14,11 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.db.models import HandoffRequest, Tenant
+from app.db.models import HandoffRequest
 from app.db.session import get_db_session
 from app.services.handoff_service import HandoffService
 
@@ -29,28 +29,28 @@ router = APIRouter(prefix="/api/handoffs", tags=["handoffs"])
 
 class HandoffRequestResponse(BaseModel):
     """Response model for handoff requests."""
-    
+
     id: UUID
     tenant_id: UUID
     flow_id: UUID | None
     thread_id: UUID | None
     contact_id: UUID | None
     channel_instance_id: UUID | None
-    
+
     # Request details
     reason: str | None
     current_node_id: str | None
     user_message: str | None
     collected_answers: dict[str, Any] | None
-    
+
     # Status tracking
     acknowledged_at: datetime | None
     resolved_at: datetime | None
-    
+
     # Context
     session_id: str | None
     conversation_context: dict[str, Any] | None
-    
+
     # Timestamps
     created_at: datetime
     updated_at: datetime
@@ -61,13 +61,13 @@ class HandoffRequestResponse(BaseModel):
 
 class AcknowledgeHandoffRequest(BaseModel):
     """Request model for acknowledging a handoff."""
-    
+
     handoff_id: UUID = Field(..., description="ID of the handoff request to acknowledge")
 
 
 class HandoffListResponse(BaseModel):
     """Response model for handoff list with pagination."""
-    
+
     handoffs: list[HandoffRequestResponse]
     total: int
     offset: int
@@ -79,7 +79,7 @@ class HandoffListResponse(BaseModel):
 async def get_handoff_requests(
     tenant_id: UUID = Path(..., description="Tenant ID"),
     acknowledged: bool | None = Query(
-        None, 
+        None,
         description="Filter by acknowledgment status. None=all, True=acknowledged, False=pending"
     ),
     limit: int = Query(50, ge=1, le=200, description="Number of handoffs to return"),
@@ -93,7 +93,7 @@ async def get_handoff_requests(
     """
     try:
         handoff_service = HandoffService()
-        
+
         # Get handoffs with filters
         handoffs = handoff_service.get_handoff_requests(
             tenant_id=tenant_id,
@@ -101,21 +101,21 @@ async def get_handoff_requests(
             limit=limit + 1,  # Get one extra to check if there are more
             offset=offset,
         )
-        
+
         # Check if there are more results
         has_more = len(handoffs) > limit
         if has_more:
             handoffs = handoffs[:-1]  # Remove the extra item
-        
+
         # Convert to response models
         handoff_responses = [
-            HandoffRequestResponse.from_orm(handoff) 
+            HandoffRequestResponse.from_orm(handoff)
             for handoff in handoffs
         ]
-        
+
         # For total count, we'd need a separate query, but for now estimate
         total = offset + len(handoff_responses) + (1 if has_more else 0)
-        
+
         return HandoffListResponse(
             handoffs=handoff_responses,
             total=total,
@@ -123,7 +123,7 @@ async def get_handoff_requests(
             limit=limit,
             has_more=has_more,
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to fetch handoff requests for tenant {tenant_id}: {e}")
         raise HTTPException(
@@ -144,42 +144,41 @@ async def acknowledge_handoff(
     """
     try:
         handoff_service = HandoffService()
-        
+
         # Verify the handoff belongs to this tenant
         with next(get_db_session()) as session:
             handoff = session.query(HandoffRequest).filter(
                 HandoffRequest.id == request.handoff_id,
                 HandoffRequest.tenant_id == tenant_id,
             ).first()
-            
+
             if not handoff:
                 raise HTTPException(
                     status_code=404,
                     detail="Handoff request not found"
                 )
-            
+
             if handoff.acknowledged_at is not None:
                 return {
                     "success": True,
                     "message": "Handoff was already acknowledged",
                     "acknowledged_at": handoff.acknowledged_at.isoformat(),
                 }
-        
+
         # Acknowledge the handoff
         success = handoff_service.acknowledge_handoff(request.handoff_id)
-        
+
         if success:
             return {
                 "success": True,
                 "message": "Handoff acknowledged successfully",
                 "acknowledged_at": datetime.utcnow().isoformat(),
             }
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to acknowledge handoff"
-            )
-            
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to acknowledge handoff"
+        )
+
     except HTTPException:
         raise
     except Exception as e:
@@ -199,7 +198,7 @@ async def get_handoff_stats(
     """
     try:
         handoff_service = HandoffService()
-        
+
         # Get counts for different statuses
         total_handoffs = handoff_service.get_handoff_requests(
             tenant_id=tenant_id,
@@ -207,21 +206,21 @@ async def get_handoff_stats(
             limit=1000,  # Large number to get rough count
             offset=0,
         )
-        
+
         pending_handoffs = handoff_service.get_handoff_requests(
             tenant_id=tenant_id,
             acknowledged=False,
             limit=1000,
             offset=0,
         )
-        
+
         acknowledged_handoffs = handoff_service.get_handoff_requests(
             tenant_id=tenant_id,
             acknowledged=True,
             limit=1000,
             offset=0,
         )
-        
+
         return {
             "total": len(total_handoffs),
             "pending": len(pending_handoffs),
@@ -231,7 +230,7 @@ async def get_handoff_stats(
                 if total_handoffs else 0
             ),
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to fetch handoff stats for tenant {tenant_id}: {e}")
         raise HTTPException(

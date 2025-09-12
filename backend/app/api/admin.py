@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.app_context import get_app_context
 from app.core.redis_keys import redis_keys
 from app.core.state import RedisStore
+
 # Thought tracing removed - using Langfuse for observability
 from app.db.models import ChannelType
 from app.db.repository import (

@@ -10,8 +10,8 @@ if TYPE_CHECKING:
     from app.core.llm import LLMClient
     from app.core.session import SessionPolicy
     from app.core.state import ConversationStore
-    from app.services.rate_limiter import RateLimiter
     from app.services.processing_cancellation_manager import ProcessingCancellationManager
+    from app.services.rate_limiter import RateLimiter
 
 
 @dataclass(slots=True)

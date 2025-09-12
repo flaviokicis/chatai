@@ -51,13 +51,13 @@ def test_build_question_graph_and_agent_handle() -> None:
     agent = build_sales_qualifier_agent("user-1", deps, instance)
 
     # First interaction - should ask the first question
-    res1 = agent.handle(InboundMessage(user_id="user-1", text="hello", channel="test", metadata={}))
+    res1 = agent.handle(InboundMessage(user_id="user-1", text="hello", channel="test"))
     assert res1.outbound is not None
     assert "what is your intention" in res1.outbound.text.lower()
 
     # Second interaction - user provides intention, should progress to next question
     res2 = agent.handle(
-        InboundMessage(user_id="user-1", text="I want to buy LEDs", channel="test", metadata={})
+        InboundMessage(user_id="user-1", text="I want to buy LEDs", channel="test")
     )
     assert res2.outbound is not None
     assert "sports court" in res2.outbound.text.lower()

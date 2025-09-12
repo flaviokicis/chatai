@@ -50,10 +50,10 @@ def build_flow_from_question_graph_params(params: dict[str, Any], flow_id: str) 
     flow_id_param = params.get("flow_id", flow_id)
     if not isinstance(flow_id_param, str):
         flow_id_param = str(flow_id_param)
-    
+
     # Handle different question formats
     questions_data = []
-    
+
     # Check for question_graph format
     question_graph = params.get("question_graph")
     if isinstance(question_graph, dict):
@@ -69,13 +69,13 @@ def build_flow_from_question_graph_params(params: dict[str, Any], flow_id: str) 
         questions_raw = params.get("questions", [])
         if isinstance(questions_raw, list):
             questions_data = questions_raw
-    
+
     # Convert to QuestionConfig objects
     questions = []
     for q_data in questions_data:
         if not isinstance(q_data, dict):
             continue
-        
+
         try:
             question = QuestionConfig(
                 key=str(q_data.get("key", "")).strip(),
@@ -94,12 +94,12 @@ def build_flow_from_question_graph_params(params: dict[str, Any], flow_id: str) 
         except (ValueError, TypeError):
             # Skip invalid questions
             continue
-    
+
     # If already given as Flow IR under key 'flow', validate via model
     flow_raw = params.get("flow") if isinstance(params, dict) else None
     if isinstance(flow_raw, dict):
         return Flow.model_validate(flow_raw)  # type: ignore[no-any-return]
-    
+
     # Create typed config and build
     config = FlowBuildConfig(
         flow_id=flow_id_param,
@@ -111,5 +111,5 @@ def build_flow_from_question_graph_params(params: dict[str, Any], flow_id: str) 
         require_all_answers=bool(params.get("require_all_answers", True)),
         completion_message=params.get("completion_message")
     )
-    
+
     return build_flow_from_config(config)

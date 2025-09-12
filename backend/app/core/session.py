@@ -15,11 +15,10 @@ if TYPE_CHECKING:
 
 class SessionPolicy(ABC):
     """Policy for determining session boundaries."""
-    
+
     @abstractmethod
     def session_id(self, app_context: AppContext, agent: Agent, inbound: InboundMessage) -> str:
         """Generate session ID for the given context."""
-        pass
 
 
 class _WindowMeta(TypedDict):
@@ -29,14 +28,14 @@ class _WindowMeta(TypedDict):
 
 class StableSessionPolicy(SessionPolicy):
     """Simple stable session policy."""
-    
+
     def session_id(self, app_context: AppContext, agent: Agent, inbound: InboundMessage) -> str:
         return f"{inbound.channel}:{inbound.user_id}:stable"
 
 
 class WindowedSessionPolicy(SessionPolicy):
     """Windowed session policy that creates new sessions after periods of inactivity."""
-    
+
     def __init__(self, window_minutes: int = 30):
         self.window_minutes = window_minutes
 
@@ -52,7 +51,7 @@ class WindowedSessionPolicy(SessionPolicy):
                 window_start_str = str(existing.get("window_start_ts", ""))
                 last_ts = datetime.fromisoformat(last_ts_str)
                 window_start_ts = datetime.fromisoformat(window_start_str)
-                
+
                 # Check if we're within the window
                 if (now - last_ts).total_seconds() < self.window_minutes * 60:
                     # Update last timestamp but keep window
@@ -85,18 +84,15 @@ class WindowedSessionPolicy(SessionPolicy):
 
 class SessionManager(ABC):
     """Abstract interface for session management."""
-    
+
     @abstractmethod
     def get_context(self, session_id: str) -> FlowContext | None:
         """Get flow context for a session."""
-        pass
-    
+
     @abstractmethod
     def save_context(self, session_id: str, context: FlowContext) -> None:
         """Save flow context for a session."""
-        pass
-    
+
     @abstractmethod
     def clear_context(self, session_id: str) -> None:
         """Clear flow context for a session."""
-        pass

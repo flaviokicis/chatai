@@ -7,7 +7,6 @@ ensuring clean separation of concerns and easy extensibility.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from app.core.llm import LLMClient
 
@@ -23,7 +22,7 @@ class ActionRegistry:
     This class manages all available action executors and provides
     a clean interface for executing actions by name.
     """
-    
+
     def __init__(self, llm_client: LLMClient):
         """Initialize the action registry.
         
@@ -32,7 +31,7 @@ class ActionRegistry:
         """
         self._executors: dict[str, ActionExecutor] = {}
         self._register_default_executors(llm_client)
-    
+
     def _register_default_executors(self, llm_client: LLMClient) -> None:
         """Register the default set of action executors.
         
@@ -42,9 +41,9 @@ class ActionRegistry:
         # Register flow modification executor
         flow_mod_executor = FlowModificationExecutor(llm_client)
         self.register(flow_mod_executor)
-        
+
         logger.info(f"Registered {len(self._executors)} action executors")
-    
+
     def register(self, executor: ActionExecutor) -> None:
         """Register an action executor.
         
@@ -57,10 +56,10 @@ class ActionRegistry:
         action_name = executor.action_name
         if action_name in self._executors:
             raise ValueError(f"Action executor '{action_name}' is already registered")
-        
+
         self._executors[action_name] = executor
         logger.debug(f"Registered action executor: {action_name}")
-    
+
     def get_executor(self, action_name: str) -> ActionExecutor | None:
         """Get an action executor by name.
         
@@ -71,7 +70,7 @@ class ActionRegistry:
             The executor if found, None otherwise
         """
         return self._executors.get(action_name)
-    
+
     def has_executor(self, action_name: str) -> bool:
         """Check if an executor is registered for the given action.
         
@@ -82,7 +81,7 @@ class ActionRegistry:
             True if an executor is registered, False otherwise
         """
         return action_name in self._executors
-    
+
     def list_actions(self) -> list[str]:
         """Get a list of all registered action names.
         

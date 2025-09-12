@@ -11,13 +11,16 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
+
     # Thought tracing removed - using Langfuse for observability
     from app.services.tenant_config_service import ProjectContext
 
     from .state import FlowContext
 
+from app.core.flow_response import FlowProcessingResult
+from app.core.flow_response import FlowResponse as UnifiedFlowResponse
+
 from .services.responder import EnhancedFlowResponder
-from app.core.flow_response import FlowProcessingResult, FlowResponse as UnifiedFlowResponse
 
 
 @dataclass(slots=True)

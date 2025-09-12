@@ -77,7 +77,6 @@ from uuid import UUID
 from sqlalchemy import (
     DateTime,
     ForeignKey,
-    Index,
     Integer,
     String,
     Text,
@@ -413,19 +412,19 @@ class HandoffRequest(Base, TimestampMixin):
     )
 
     # Request details
-    reason: Mapped[str | None] = mapped_column(EncryptedString)  # Why handoff was requested
+    reason: Mapped[dict | None] = mapped_column(JSONB)  # Why handoff was requested
     current_node_id: Mapped[str | None] = mapped_column(String(255))  # Where in flow
     user_message: Mapped[str | None] = mapped_column(EncryptedString)  # Last user message
     collected_answers: Mapped[dict | None] = mapped_column(JSONB)  # Flow progress so far
-    
+
     # Status tracking
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    
+
     # Context preservation
     session_id: Mapped[str | None] = mapped_column(String(255))  # Flow session
     conversation_context: Mapped[dict | None] = mapped_column(JSONB)  # Additional context
-    
+
     # Relationships
     tenant: Mapped[Tenant] = relationship()
     flow: Mapped[Flow | None] = relationship()

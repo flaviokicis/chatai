@@ -18,17 +18,17 @@ class ActionResult:
     This is the contract between action executors and the LLM feedback system.
     All results must be serializable and contain human-readable messages.
     """
-    
+
     success: bool
     message: str  # Human-readable message for the user
     error: str | None = None  # Technical error details if failed
     data: dict[str, Any] | None = None  # Additional structured data
-    
+
     @property
     def is_success(self) -> bool:
         """Check if the action was successful."""
         return self.success
-    
+
     @property
     def is_failure(self) -> bool:
         """Check if the action failed."""
@@ -41,7 +41,7 @@ class ActionExecutor(ABC):
     All external actions that require LLM feedback must implement this interface.
     This ensures proper separation of concerns and consistent error handling.
     """
-    
+
     @abstractmethod
     async def execute(self, parameters: dict[str, Any], context: dict[str, Any]) -> ActionResult:
         """Execute the external action.
@@ -56,10 +56,8 @@ class ActionExecutor(ABC):
         Raises:
             Should not raise exceptions - all errors should be captured in ActionResult
         """
-        pass
-    
+
     @property
     @abstractmethod
     def action_name(self) -> str:
         """Unique identifier for this action type."""
-        pass

@@ -11,7 +11,9 @@ from app.core.redis_keys import RedisKeyBuilder
 logger = logging.getLogger(__name__)
 
 try:
-    from langchain_community.chat_message_histories import RedisChatMessageHistory  # type: ignore[import-not-found]
+    from langchain_community.chat_message_histories import (
+        RedisChatMessageHistory,  # type: ignore[import-not-found]
+    )
 except Exception:  # pragma: no cover - optional import
     RedisChatMessageHistory = None
 try:

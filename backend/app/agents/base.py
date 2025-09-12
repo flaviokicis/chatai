@@ -167,25 +167,25 @@ class FlowAgent(BaseAgent):
             answers = dict(stored.get("answers", {}))
             ctx.answers.update(answers)
 
-        # Extract project context from message metadata if available
-        project_context = message.metadata.get("project_context") if message.metadata else None
+        # Extract project context from typed message metadata
+        project_context = message.metadata.project_context if hasattr(message, "metadata") else None
 
         # Process one turn
-        result = runner.process_turn(ctx, message.text or None, project_context=project_context)
+        result = runner.process_turn(ctx, message.text or "", project_context=project_context)
 
-        # Handle terminal
+        # Handle terminal state
         if result.terminal:
-            return self._escalate("checklist_complete", {"answers": result.ctx.answers})
+            return self._escalate("checklist_complete", {"answers": ctx.answers})
 
-        # Handle escalation
+        # Handle escalation request
         if result.escalate:
-            return self._escalate("user_requested_handoff", {"answers": result.ctx.answers})
+            return self._escalate("user_requested_handoff", {"answers": ctx.answers})
 
         # After applying updates, re-evaluate path selection if any answers changed
         if result.answers_diff:
             updated_stored = {
-                "flow_context": result.ctx.to_dict(),
-                "answers": result.ctx.answers,
+                "flow_context": ctx.to_dict(),
+                "answers": ctx.answers,
             }
             updated_stored = self.save_agent_state(updated_stored, agent_state)
             new_flow = self.select_flow(updated_stored, message.text or "")
@@ -194,19 +194,13 @@ class FlowAgent(BaseAgent):
             if new_flow != selected_flow:
                 # Switch to new flow while preserving answers/history
                 new_runner = FlowTurnRunner(new_flow, self.deps.llm, strict_mode=self._strict_mode)
-                old_answers = result.ctx.answers.copy()
-                old_history = result.ctx.history.copy()
-                ctx2 = new_runner.initialize_context()
-                ctx2.answers.update(old_answers)
-                ctx2.history = old_history
+                old_answers = ctx.answers.copy()
+                old_history = ctx.history.copy()
+                ctx = new_runner.initialize_context() # Re-assign ctx
+                ctx.answers.update(old_answers)
+                ctx.history = old_history
                 # Produce next prompt in the new path (no new user input)
-                result = new_runner.process_turn(ctx2, None)
-                # Replace ctx for persistence below
-                ctx = ctx2
-            else:
-                ctx = result.ctx
-        else:
-            ctx = result.ctx
+                result = new_runner.process_turn(ctx, None)
 
         # Persist state
         stored_out = {

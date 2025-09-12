@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 from pathlib import Path
-from uuid import UUID
 
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
@@ -12,12 +11,11 @@ from langchain.chat_models import init_chat_model
 from app.core.langchain_adapter import LangChainToolsLLM
 from app.db.repository import get_active_tenants, get_flows_by_tenant
 from app.db.session import db_session
-from app.services.tenant_config_service import ProjectContext, TenantConfigService
+from app.services.tenant_config_service import TenantConfigService
 
 from .compiler import compile_flow
 from .ir import Flow
 from .runner import FlowTurnRunner
-from .state import FlowContext
 
 
 def _playground_flow_path() -> Path:
@@ -29,14 +27,14 @@ def _playground_flow_path() -> Path:
 
 class SimpleCLIAdapter:
     """Simple CLI adapter to replace the deleted CLIAdapter."""
-    
+
     def __init__(self):
         pass
-    
+
     def print_message(self, text: str) -> None:
         """Print a message to the console."""
         print(f"🤖 {text}")
-    
+
     def print_messages(self, messages: list[dict[str, any]]) -> None:
         """Print multiple messages with delays."""
         for msg in messages:
@@ -44,7 +42,7 @@ class SimpleCLIAdapter:
             if delay_ms > 0:
                 print(f"   [delay: {delay_ms}ms]")
             self.print_message(msg["text"])
-    
+
     def get_user_input(self, prompt: str = "You: ") -> str:
         """Get user input from the console."""
         try:
@@ -52,11 +50,11 @@ class SimpleCLIAdapter:
         except KeyboardInterrupt:
             print("\nGoodbye!")
             exit(0)
-    
+
     def print_status(self, message: str) -> None:
         """Print a status message."""
         print(f"📊 {message}")
-    
+
     def print_error(self, message: str) -> None:
         """Print an error message."""
         print(f"❌ {message}")
@@ -118,7 +116,7 @@ def run_cli() -> None:
                     cli_adapter.print_error("GOOGLE_API_KEY environment variable required for non-OpenAI models")
                     return
                 chat_model = init_chat_model(args.model, model_provider="google")
-            
+
             llm_client = LangChainToolsLLM(chat_model)
             cli_adapter.print_status(f"LLM initialized: {args.model}")
         except Exception as e:
@@ -128,7 +126,7 @@ def run_cli() -> None:
     # Load flow
     flow_json = None
     compiled_flow = None
-    
+
     if args.tenant:
         # Load from database
         cli_adapter.print_status(f"Loading flows from database for tenant: {args.tenant}")
@@ -149,7 +147,7 @@ def run_cli() -> None:
                             cli_adapter.print_error(f"No flows found for tenant {args.tenant}")
                             return
                         break
-                
+
                 if not tenant_found:
                     cli_adapter.print_error(f"Tenant '{args.tenant}' not found")
                     return
@@ -163,7 +161,7 @@ def run_cli() -> None:
             return
 
         try:
-            with open(args.json_path, "r", encoding="utf-8") as f:
+            with open(args.json_path, encoding="utf-8") as f:
                 flow_json = json.load(f)
             cli_adapter.print_status(f"Loaded flow from: {args.json_path}")
         except Exception as e:
@@ -184,10 +182,10 @@ def run_cli() -> None:
     if not llm_client:
         cli_adapter.print_error("LLM is required for the current flow system. Use --llm flag.")
         return
-    
+
     runner = FlowTurnRunner(compiled_flow, llm_client)
     context = runner.initialize_context()
-    
+
     # Project context (optional)
     project_context = None
     if args.tenant:
@@ -207,92 +205,92 @@ def run_cli() -> None:
     cli_adapter.print_status(f"Flow: {flow_name}")
     if project_context:
         cli_adapter.print_status(f"Project context loaded for tenant: {project_context.tenant_id}")
-    
+
     # Show initial state
     print("\n" + "="*60)
     print("📊 INITIAL STATE:")
     print(f"   Starting node: {context.current_node_id}")
-    print(f"   No answers collected yet")
+    print("   No answers collected yet")
     print("="*60)
     print()
 
     turn_count = 0
     while True:
         turn_count += 1
-        
+
         # Get user input
         if turn_count == 1:
             # First turn - start the conversation
             user_input = cli_adapter.get_user_input("Start conversation: ")
         else:
             user_input = cli_adapter.get_user_input()
-        
+
         if user_input.lower() in ["quit", "exit", "bye"]:
             cli_adapter.print_status("Goodbye!")
             break
-        
+
         if not user_input:
             continue
 
         # Process the turn (CLI users are always admin)
         try:
             result = runner.process_turn(context, user_input, project_context, is_admin=True)
-            
+
             # Check if flow modification was requested
-            if hasattr(result, 'metadata') and result.metadata and result.metadata.get('flow_modification_requested'):
+            if hasattr(result, "metadata") and result.metadata and result.metadata.get("flow_modification_requested"):
                 print("\n" + "="*60)
                 print("📝 FLOW MODIFICATION REQUESTED")
                 print("="*60)
-                
-                instruction = result.metadata.get('modification_instruction', '')
-                mod_type = result.metadata.get('modification_type', 'general')
-                
+
+                instruction = result.metadata.get("modification_instruction", "")
+                mod_type = result.metadata.get("modification_type", "general")
+
                 print(f"Type: {mod_type}")
                 print(f"Instruction: {instruction[:200]}..." if len(instruction) > 200 else f"Instruction: {instruction}")
                 print("\n⚠️  Note: Flow modification is not yet implemented in CLI mode.")
                 print("    Use the web interface or API for live flow modifications.")
                 print("="*60 + "\n")
-            
+
             # Display response
             if result.messages:
                 cli_adapter.print_messages(result.messages)
             elif result.assistant_message:
                 cli_adapter.print_message(result.assistant_message)
-            
+
             # Show debug info
             if result.tool_name:
                 print(f"   [Tool: {result.tool_name}]")
-                
+
                 # Show specific actions if available
-                if hasattr(result, 'metadata') and result.metadata:
-                    if 'actions' in result.metadata:
-                        actions = result.metadata['actions']
+                if hasattr(result, "metadata") and result.metadata:
+                    if "actions" in result.metadata:
+                        actions = result.metadata["actions"]
                         print(f"   [Actions: {', '.join(actions)}]")
-                    
+
                     # Also check in the responder output metadata
-                    if hasattr(result, 'responder_metadata'):
-                        if 'actions' in result.responder_metadata:
-                            actions = result.responder_metadata['actions']
+                    if hasattr(result, "responder_metadata"):
+                        if "actions" in result.responder_metadata:
+                            actions = result.responder_metadata["actions"]
                             print(f"   [Actions (from responder): {', '.join(actions)}]")
-                    
+
                     # Show flow modification details if present
-                    if result.metadata.get('flow_modification_requested'):
-                        print(f"   [Flow Modification: Requested]")
-                        if 'modification_instruction' in result.metadata:
+                    if result.metadata.get("flow_modification_requested"):
+                        print("   [Flow Modification: Requested]")
+                        if "modification_instruction" in result.metadata:
                             # Show first 100 chars of instruction
-                            instruction = result.metadata['modification_instruction'][:100]
+                            instruction = result.metadata["modification_instruction"][:100]
                             print(f"   [Instruction: {instruction}...]")
-                        if 'modification_type' in result.metadata:
+                        if "modification_type" in result.metadata:
                             print(f"   [Type: {result.metadata['modification_type']}]")
-            
-            if hasattr(result, 'confidence') and result.confidence < 1.0:
+
+            if hasattr(result, "confidence") and result.confidence < 1.0:
                 print(f"   [Confidence: {result.confidence:.2f}]")
-            if hasattr(result, 'reasoning') and result.reasoning:
+            if hasattr(result, "reasoning") and result.reasoning:
                 print(f"   [Reasoning: {result.reasoning}]")
-            
+
             # Update context
-            context = result.ctx if hasattr(result, 'ctx') else context
-            
+            context = result.ctx if hasattr(result, "ctx") else context
+
             # Show current state
             print("\n" + "="*60)
             print("📊 CURRENT STATE:")
@@ -303,7 +301,7 @@ def run_cli() -> None:
             if context.pending_field:
                 print(f"   Pending field: {context.pending_field}")
             print("="*60 + "\n")
-            
+
             # Check for completion
             if result.terminal:
                 cli_adapter.print_status("🎉 Flow completed!")
@@ -312,12 +310,12 @@ def run_cli() -> None:
                     for key, value in context.answers.items():
                         print(f"  {key}: {value}")
                 break
-            
+
             # Check for escalation
             if result.escalate:
                 cli_adapter.print_status("🚨 Escalated to human agent")
                 break
-                
+
         except KeyboardInterrupt:
             cli_adapter.print_status("Interrupted by user")
             break

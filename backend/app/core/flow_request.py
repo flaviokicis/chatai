@@ -9,7 +9,7 @@ from typing import Any
 @dataclass
 class FlowRequest:
     """Request for flow processing."""
-    
+
     user_id: str
     user_message: str
     flow_definition: dict[str, Any]
