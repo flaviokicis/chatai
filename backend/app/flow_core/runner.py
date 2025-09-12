@@ -1,4 +1,8 @@
-"""Simplified flow runner using the pure state machine engine."""
+"""Clean flow runner with external action feedback support.
+
+This runner provides a clean architecture that ensures the LLM is always
+aware of the actual results of external actions, preventing false promises.
+"""
 
 from __future__ import annotations
 
@@ -10,263 +14,290 @@ if TYPE_CHECKING:
     from app.core.llm import LLMClient
     from app.services.tenant_config_service import ProjectContext
 
-    from .compiler import CompiledFlow
-
-from .engine import LLMFlowEngine
-from .llm_responder import FlowResponse, LLMFlowResponder, ResponseConfig
-from .state import FlowContext, NodeStatus
+from .actions import ActionRegistry
+from .feedback import FeedbackLoop
+from .result_types import FlowExecutionContext, FlowProcessingResult, ToolExecutionResult
+from .services.responder import EnhancedFlowResponder
+from .services.tool_executor import ToolExecutionService
+from .state import FlowContext
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class TurnResult:
-    """Result of processing a turn in the flow."""
-
-    assistant_message: str | None = None
-    messages: list[dict[str, Any]] | None = None
-    tool_name: str | None = None
-    tool_args: dict[str, Any] | None = None
-    answers_diff: dict[str, Any] = field(default_factory=dict)
-    metadata: dict[str, Any] = field(default_factory=dict)
-    terminal: bool = False
-    escalate: bool = False
-    confidence: float = 1.0
-    reasoning: str | None = None
+# Alias for backward compatibility during transition
+TurnResult = FlowProcessingResult
 
 
 class FlowTurnRunner:
-    """
-    Simplified flow runner that orchestrates the state machine engine and GPT-5 responder.
+    """Clean flow runner with external action feedback loops.
     
-    Key principles:
-    1. Engine provides state (no LLM decisions)
-    2. GPT-5 makes all routing decisions
-    3. Runner coordinates between them
+    This runner ensures that:
+    1. External actions are actually executed
+    2. Results are fed back to the LLM
+    3. The LLM can only make truthful claims about action outcomes
+    4. Users receive accurate information about what happened
     """
 
-    def __init__(
-        self,
-        compiled_flow: CompiledFlow,
-        llm_client: LLMClient,
-        use_all_tools: bool = True,
-    ):
-        """Initialize the runner with engine and responder."""
-        self._engine = LLMFlowEngine(compiled_flow, llm_client)
-        self._responder = LLMFlowResponder(llm_client)
-        self._flow = compiled_flow
+    def __init__(self, llm_client: LLMClient, compiled_flow: Any):
+        """Initialize the flow runner.
+        
+        Args:
+            llm_client: LLM client for generating responses
+            compiled_flow: Compiled flow definition
+        """
+        self._llm_client = llm_client
+        self._compiled_flow = compiled_flow
+        
+        # Initialize clean architecture components
+        self._action_registry = ActionRegistry(llm_client)
+        self._responder = EnhancedFlowResponder(llm_client)
+        self._tool_executor = ToolExecutionService(self._action_registry)
+        self._feedback_loop = FeedbackLoop(self._responder)
+        
+        logger.info("FlowTurnRunner initialized with clean architecture")
 
     def initialize_context(self, existing_context: FlowContext | None = None) -> FlowContext:
-        """Initialize or restore flow context."""
-        return self._engine.initialize_context(existing_context)
+        """Initialize or update flow context.
+        
+        Args:
+            existing_context: Existing context to update, if any
+            
+        Returns:
+            Initialized flow context
+        """
+        if existing_context:
+            return existing_context
+            
+        # Create new context
+        return FlowContext(
+            user_id="",
+            session_id="",
+            tenant_id="", 
+            channel_id="",
+            flow_id="",
+            current_node_id="",
+            answers={},
+            history=[],
+        )
 
-    def process_turn(
+    async def process_turn(
         self,
         ctx: FlowContext,
-        user_message: str | None = None,
+        user_message: str,
         project_context: ProjectContext | None = None,
         is_admin: bool = False,
     ) -> TurnResult:
-        """
-        Process a turn in the conversation.
+        """Process a single turn in the flow with external action support.
         
-        This orchestrates:
-        1. Getting current state from engine
-        2. Having GPT-5 decide on tool and messages
-        3. Processing the tool action
-        4. Returning the result
+        Args:
+            ctx: Current flow context
+            user_message: User's message
+            project_context: Project context for the flow
+            is_admin: Whether the user has admin privileges
+            
+        Returns:
+            Turn result with proper external action feedback
         """
-        # Track answers before processing
-        initial_answers = dict(ctx.answers)
+        logger.info("=" * 80)
+        logger.info("🎯 FLOW TURN RUNNER: Processing turn")
+        logger.info("=" * 80)
+        logger.info(f"User message: {user_message[:100]}..." if len(user_message) > 100 else f"User message: {user_message}")
+        logger.info(f"Current node: {ctx.current_node_id}")
+        logger.info(f"Is admin: {is_admin}")
+        logger.info("=" * 80)
 
-        # Get engine response (current state)
-        engine_response = self._engine.process(ctx, user_message, project_context=project_context)
+        try:
+            # Add user message to history
+            from .state import ConversationTurn
+            from datetime import datetime
+            ctx.history.append(ConversationTurn(
+                timestamp=datetime.now(),
+                role="user",
+                content=user_message,
+                node_id=None,
+                metadata={}
+            ))
 
-        # Handle terminal states
-        if engine_response.kind == "terminal":
+            # Step 1: Get initial LLM response using existing responder interface
+            logger.info("🤖 Step 1: Getting initial LLM response...")
+            responder_output = await self._responder.respond(
+                prompt="",  # Will be built internally
+                pending_field=None,
+                context=ctx,
+                user_message=user_message,
+                project_context=project_context,
+                is_admin=is_admin,
+            )
+            
+            # Convert responder output to our expected format
+            llm_response = {
+                "tool_calls": [
+                    {
+                        "name": responder_output.tool_name,
+                        "arguments": responder_output.tool_result.metadata if responder_output.tool_result else {}
+                    }
+                ] if responder_output.tool_name else []
+            }
+
+            # Step 2: Use tool result from responder when available to avoid double execution
+            logger.info("🔧 Step 2: Processing tool calls / using existing tool result...")
+            if hasattr(responder_output, "tool_result") and responder_output.tool_result:
+                tool_result = responder_output.tool_result
+            else:
+                tool_result = await self._process_tool_calls(llm_response, ctx)
+
+            # Step 3: Handle external action feedback if needed
+            final_response = llm_response
+            if tool_result.requires_llm_feedback:
+                logger.info("🔄 Step 3: Processing external action feedback...")
+                final_response = await self._handle_external_action_feedback(
+                    llm_response, tool_result, ctx
+                )
+
+            # Step 4: Build turn result
+            turn_result = self._build_turn_result(final_response, tool_result, ctx)
+            
+            logger.info("=" * 80)
+            logger.info("✅ TURN PROCESSING COMPLETED")
+            logger.info("=" * 80)
+            logger.info(f"Messages: {len(turn_result.messages) if turn_result.messages else 0}")
+            logger.info(f"External action executed: {turn_result.external_action_executed}")
+            logger.info(f"External action successful: {turn_result.external_action_successful}")
+            logger.info("=" * 80)
+
+            return turn_result
+
+        except Exception as e:
+            logger.error("❌ Error in turn processing", exc_info=True)
             return TurnResult(
-                assistant_message=engine_response.message,
-                terminal=True,
-                metadata=engine_response.metadata or {},
+                assistant_message="❌ Desculpe, ocorreu um erro interno. Tente novamente.",
+                metadata={"error": str(e)},
+                confidence=0.0
             )
 
-        # Handle escalation
-        if engine_response.kind == "escalate":
-            # Auto-reset on escalation
-            logger.debug("Engine escalated, marking for session reset")
+    async def _process_tool_calls(self, llm_response: dict[str, Any], ctx: FlowContext) -> Any:
+        """Process tool calls from the LLM response.
+        
+        Args:
+            llm_response: Response from the LLM
+            ctx: Flow context
+            
+        Returns:
+            Tool execution result
+        """
+        if "tool_calls" not in llm_response or not llm_response["tool_calls"]:
+            # No tools to execute
+            from .services.tool_executor import ToolExecutionResult
+            return ToolExecutionResult()
 
-            return TurnResult(
-                assistant_message="Vamos recomeçar! Como posso te ajudar hoje?",
-                escalate=True,
-                metadata=engine_response.metadata or {},
-            )
+        tool_call = llm_response["tool_calls"][0]  # We expect only one tool call
+        tool_name = tool_call.get("name", "")
+        tool_args = tool_call.get("arguments", {})
 
-        # Extract available edges from metadata
-        available_edges = None
-        if engine_response.metadata and "available_edges" in engine_response.metadata:
-            available_edges = engine_response.metadata["available_edges"]
+        logger.info(f"Executing tool: {tool_name}")
+        return await self._tool_executor.execute_tool(tool_name, tool_args, ctx)
 
-        # Get allowed values if any
-        allowed_values = None
-        if engine_response.metadata and "allowed_values" in engine_response.metadata:
-            allowed_values = engine_response.metadata["allowed_values"]
+    async def _handle_external_action_feedback(
+        self,
+        original_response: dict[str, Any],
+        tool_result: Any,
+        ctx: FlowContext,
+    ) -> dict[str, Any]:
+        """Handle feedback for external actions.
+        
+        Args:
+            original_response: Original LLM response
+            tool_result: Tool execution result
+            ctx: Flow context
+            
+        Returns:
+            Updated response based on actual action results
+        """
+        if not tool_result.external_action_result:
+            return original_response
 
-        # Build flow graph from compiled flow for the LLM
-        flow_graph = {
-            "nodes": [
-                {
-                    "id": node_id,
-                    "type": node.__class__.__name__,
-                    "prompt": getattr(node, 'prompt', None),
-                    "key": getattr(node, 'key', None),
-                    "reason": getattr(node, 'reason', None),
-                    "label": getattr(node, 'label', None),
-                    "decision_type": getattr(node, 'decision_type', None),
-                    "decision_prompt": getattr(node, 'decision_prompt', None),
-                }
-                for node_id, node in self._flow.nodes.items()
-            ],
-            "edges": [
-                {
-                    "from": source,
-                    "to": edge.target,
-                    "condition": getattr(edge, 'label', None) or getattr(edge, 'condition_description', None),
-                    "priority": getattr(edge, 'priority', None),
-                    "guard": getattr(edge, 'guard', None),
-                }
-                for source, edges in self._flow.edges_from.items()
-                for edge in edges
-            ]
-        }
+        # Extract original messages and instruction
+        original_messages = None
+        original_instruction = None
+        
+        if "tool_calls" in original_response and original_response["tool_calls"]:
+            tool_call = original_response["tool_calls"][0]
+            if "arguments" in tool_call:
+                original_messages = tool_call["arguments"].get("messages")
+                original_instruction = tool_call["arguments"].get("flow_modification_instruction")
 
-        # Create response config with additional parameters
-        config = ResponseConfig(
-            allowed_values=allowed_values,
-            project_context=project_context,
-            is_completion=False,
-            available_edges=available_edges,
-            is_admin=is_admin,
-            flow_graph=flow_graph,
-        ) if any([allowed_values, project_context, available_edges, is_admin, flow_graph]) else None
-
-        # Use GPT-5 responder to process
-        responder_result = self._responder.respond(
-            prompt=engine_response.message or "",
-            pending_field=ctx.pending_field,
-            ctx=ctx,
-            user_message=user_message or "",
-            config=config,
+        # Process through feedback loop
+        action_name = "modify_flow"  # For now, we only have flow modification
+        feedback_result = await self._feedback_loop.process_action_result(
+            action_name=action_name,
+            action_result=tool_result.external_action_result,
+            context=ctx,
+            original_messages=original_messages,
+            original_instruction=original_instruction,
         )
 
-        # Convert responder result to engine event and process
-        engine_event = self._build_engine_event(responder_result)
-
-        # Extract actions for all tools (used for display and logic)
-        actions = []
-        if responder_result.metadata and "actions" in responder_result.metadata:
-            actions = responder_result.metadata["actions"]
-        
-        # Special handling for certain tools
-        if responder_result.tool_name == "PerformAction":
-            # PerformAction handles everything - extract what happened
-            
-            # Check if "navigate" action was requested (advance the flow)
-            wants_to_navigate = "navigate" in actions
-            
-            if responder_result.updates:
-                for field, value in responder_result.updates.items():
-                    ctx.answers[field] = value
-                    # Only mark as answer event if we want to navigate (not staying)
-                    # This allows natural flow progression when LLM says ["update", "navigate"]
-                    if field == ctx.pending_field and wants_to_navigate:
-                        engine_event["answer"] = value
-
-                    # If we're NOT navigating, ensure the node isn't marked as completed
-                    if not wants_to_navigate and field == ctx.pending_field:
-                        # Keep the node in pending state since we're collecting more info
-                        if ctx.current_node_id:
-                            node_state = ctx.get_node_state(ctx.current_node_id)
-                            if node_state:
-                                node_state.status = NodeStatus.IN_PROGRESS
-            
-            if responder_result.navigation:
-                engine_event["target_node_id"] = responder_result.navigation
-            
-            if responder_result.escalate:
-                engine_event["tool_name"] = "RequestHumanHandoff"
-                engine_event["reason"] = (responder_result.metadata or {}).get("reason", "requested")
-            
-            if responder_result.terminal:
-                ctx.is_complete = True
-                
-        elif responder_result.tool_name == "RequestHumanHandoff":
-            # Escalate to human
-            engine_event["tool_name"] = "RequestHumanHandoff"
-            engine_event["reason"] = responder_result.escalate_reason or "requested"
-
-        # Process the event if needed - but only if there's actual navigation or answers
-        # Don't call the engine just because there's a tool_name (e.g., PerformAction with stay)
-        if engine_event and (engine_event.get("target_node_id") or
-                            engine_event.get("answer") or
-                            engine_event.get("tool_name") == "RequestHumanHandoff"):
-            final_response = self._engine.process(ctx, None, engine_event)
-
-            # Update metadata with final response info
-            if final_response.metadata and responder_result.metadata:
-                responder_result.metadata.update(final_response.metadata)
-
-        # Add assistant response(s) to conversation history
-        if responder_result.messages:
-            # Add each message as a separate turn in the conversation
-            for i, msg in enumerate(responder_result.messages):
-                ctx.add_turn("assistant", msg["text"], ctx.current_node_id, {
-                    "tool_name": responder_result.tool_name,
-                    "confidence": responder_result.confidence,
-                    "message_index": i,
-                    "total_messages": len(responder_result.messages),
-                    "delay_ms": msg.get("delay_ms", 0)
-                })
-        elif responder_result.message:
-            ctx.add_turn("assistant", responder_result.message, ctx.current_node_id, {
-                "tool_name": responder_result.tool_name,
-                "confidence": responder_result.confidence
-            })
-
-        # Calculate answers diff
-        answers_diff = {
-            k: v for k, v in ctx.answers.items()
-            if k not in initial_answers or initial_answers[k] != v
+        # Build updated response
+        return {
+            "tool_calls": [{
+                "name": "PerformAction",
+                "arguments": {
+                    "messages": feedback_result["messages"],
+                    "actions": ["stay"],  # Always stay after external action
+                    "confidence": 0.95,
+                    "reasoning": f"Responding based on actual {action_name} result"
+                }
+            }]
         }
 
-        # Build final result
-        # Store actions in metadata for CLI display
-        metadata = responder_result.metadata or {}
-        if actions:
-            metadata['actions'] = actions
+    def _build_turn_result(
+        self, 
+        final_response: dict[str, Any], 
+        tool_result: Any, 
+        ctx: FlowContext
+    ) -> TurnResult:
+        """Build the final turn result.
         
+        Args:
+            final_response: Final LLM response (possibly with feedback)
+            tool_result: Tool execution result
+            ctx: Flow context
+            
+        Returns:
+            Complete turn result
+        """
+        # Extract messages from response
+        messages = []
+        tool_name = None
+        tool_args = None
+        reasoning = None
+
+        if "tool_calls" in final_response and final_response["tool_calls"]:
+            tool_call = final_response["tool_calls"][0]
+            tool_name = tool_call.get("name")
+            tool_args = tool_call.get("arguments", {})
+            messages = tool_args.get("messages", [])
+            reasoning = tool_args.get("reasoning")
+
+        # Determine assistant message (first message text)
+        assistant_message = None
+        if messages:
+            assistant_message = messages[0].get("text", "")
+
         return TurnResult(
-            assistant_message=responder_result.message,
-            messages=responder_result.messages,
-            tool_name=responder_result.tool_name,
-            tool_args={"navigation": responder_result.navigation} if responder_result.navigation else None,
-            answers_diff=answers_diff,
-            metadata=metadata,
-            terminal=ctx.is_complete,
-            escalate=responder_result.escalate,
-            confidence=responder_result.confidence,
-            reasoning=None,  # Not available in FlowResponse
+            assistant_message=assistant_message,
+            messages=messages,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            answers_diff=tool_result.updates if hasattr(tool_result, 'updates') else {},
+            metadata=tool_result.metadata if hasattr(tool_result, 'metadata') else {},
+            terminal=tool_result.terminal if hasattr(tool_result, 'terminal') else False,
+            escalate=tool_result.escalate if hasattr(tool_result, 'escalate') else False,
+            external_action_executed=tool_result.external_action_executed if hasattr(tool_result, 'external_action_executed') else False,
+            external_action_successful=(
+                tool_result.external_action_result.is_success 
+                if hasattr(tool_result, 'external_action_result') and tool_result.external_action_result 
+                else None
+            ),
+            reasoning=reasoning,
+            confidence=tool_args.get("confidence", 1.0) if tool_args else 1.0,
         )
-
-    def _build_engine_event(self, responder_result: FlowResponse) -> dict[str, Any]:
-        """Build an engine event from responder result."""
-        event: dict[str, Any] = {
-            "tool_name": responder_result.tool_name,
-        }
-
-        if responder_result.updates:
-            event["updates"] = responder_result.updates
-
-        if responder_result.navigation:
-            event["navigation"] = responder_result.navigation
-
-        return event

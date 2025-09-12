@@ -6,7 +6,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
-from app.core.flow_processor import SessionManager
+from app.core.session import SessionManager
 from app.flow_core.state import FlowContext
 
 if TYPE_CHECKING:

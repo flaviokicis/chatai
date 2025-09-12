@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .state import FlowContext
 
 from .services.responder import EnhancedFlowResponder
+from app.core.flow_response import FlowProcessingResult, FlowResponse as UnifiedFlowResponse
 
 
 @dataclass(slots=True)
@@ -32,20 +33,7 @@ class ResponseConfig:
     flow_graph: dict[str, Any] | None = None
 
 
-@dataclass(slots=True)
-class FlowResponse:
-    """Response from the LLM responder."""
-
-    updates: dict[str, Any]
-    message: str  # Primary message (first bubble)
-    messages: list[dict[str, Any]] | None = None  # Full WhatsApp-style messages
-    tool_name: str | None = None
-    confidence: float = 1.0
-    metadata: dict[str, Any] | None = None
-    escalate: bool = False
-    escalate_reason: str | None = None
-    navigation: str | None = None  # next node to navigate to
-    terminal: bool = False  # whether the flow reached a terminal node
+# No local FlowResponse dataclass - use the unified one from app.core.flow_response
 
 
 class LLMFlowResponder:
@@ -72,14 +60,14 @@ class LLMFlowResponder:
         """
         self._enhanced_responder = EnhancedFlowResponder(llm)
 
-    def respond(
+    async def respond(
         self,
         prompt: str,
         pending_field: str | None,
         ctx: FlowContext,
         user_message: str,
         config: ResponseConfig | None = None,
-    ) -> FlowResponse:
+    ) -> UnifiedFlowResponse:
         """
         Generate a response using enhanced GPT-5 processing.
 
@@ -106,7 +94,7 @@ class LLMFlowResponder:
             enhanced_prompt = f"{config.agent_custom_instructions}\n\n{prompt}"
 
         # Call the enhanced responder
-        output = self._enhanced_responder.respond(
+        output = await self._enhanced_responder.respond(
             prompt=enhanced_prompt,
             pending_field=pending_field,
             context=ctx,
@@ -125,15 +113,16 @@ class LLMFlowResponder:
         # Use first message as primary message
         primary_message = output.messages[0]["text"] if output.messages else ""
 
-        return FlowResponse(
-            updates=result.updates,
+        # Build metadata with messages for downstream channel adapter
+        metadata = dict(result.metadata or {})
+        if output.messages:
+            metadata["messages"] = [dict(msg) for msg in output.messages]
+
+        return UnifiedFlowResponse(
+            result=FlowProcessingResult.CONTINUE if not result.terminal and not result.escalate else (
+                FlowProcessingResult.ESCALATE if result.escalate else FlowProcessingResult.TERMINAL
+            ),
             message=primary_message,
-            messages=[dict(msg) for msg in output.messages] if output.messages else None,
-            tool_name=output.tool_name,
-            confidence=output.confidence,
-            metadata=result.metadata,
-            escalate=result.escalate,
-            escalate_reason=result.metadata.get("reason") if result.escalate else None,
-            navigation=result.navigation,
-            terminal=result.terminal,
+            context=ctx,
+            metadata=metadata,
         )
