@@ -69,10 +69,14 @@ class FlowChatService:
         if not content.strip():
             raise ValueError("Message content cannot be empty")
         
-        logger.info(
-            f"Processing message for flow {flow_id}: '{content[:100]}...', "
-            f"simplified={simplified_view_enabled}, path={active_path}"
-        )
+        logger.info("=" * 80)
+        logger.info("📨 FLOW CHAT SERVICE: Processing user message")
+        logger.info("=" * 80)
+        logger.info(f"Flow ID: {flow_id}")
+        logger.info(f"Content preview: {content[:200]}..." if len(content) > 200 else f"Content: {content}")
+        logger.info(f"Simplified view: {simplified_view_enabled}")
+        logger.info(f"Active path: {active_path}")
+        logger.info("=" * 80)
         
         try:
             # Save user message to database
@@ -86,7 +90,10 @@ class FlowChatService:
             # Get flow definition and history
             flow = self.session.get(Flow, flow_id)
             if not flow:
+                logger.error(f"❌ Flow {flow_id} not found in database")
                 raise ValueError(f"Flow {flow_id} not found")
+            
+            logger.info(f"✅ Flow loaded: {flow.name} (active={flow.is_active})")
             
             flow_def = flow.definition
             history = list_flow_chat_messages(self.session, flow_id)
@@ -96,24 +103,33 @@ class FlowChatService:
             ]
             
             # Process with v2 agent
-            logger.info(f"Calling v2 agent with {len(history_dicts)} history messages")
+            logger.info(f"🤖 Calling v2 agent with {len(history_dicts)} history messages")
             
-            agent_response = await self.agent.process(
-                flow=flow_def,
-                history=history_dicts,
-                flow_id=flow_id,
-                session=self.session,
-                simplified_view_enabled=simplified_view_enabled,
-                active_path=active_path
-            )
+            try:
+                agent_response = await self.agent.process(
+                    flow=flow_def,
+                    history=history_dicts,
+                    flow_id=flow_id,
+                    session=self.session,
+                    simplified_view_enabled=simplified_view_enabled,
+                    active_path=active_path
+                )
+            except Exception as e:
+                logger.error("❌ AGENT PROCESSING FAILED")
+                logger.error(f"Error: {e}", exc_info=True)
+                raise
             
-            logger.info(
-                f"Agent returned: messages={len(agent_response.messages)}, "
-                f"modified={agent_response.flow_was_modified}"
-            )
+            logger.info("=" * 80)
+            logger.info("📤 AGENT RESPONSE RECEIVED")
+            logger.info("=" * 80)
+            logger.info(f"Messages count: {len(agent_response.messages)}")
+            logger.info(f"Flow modified: {agent_response.flow_was_modified}")
             
             if agent_response.flow_was_modified:
-                logger.info(f"Modifications: {agent_response.modification_summary}")
+                logger.info(f"✨ Modification summary: {agent_response.modification_summary}")
+            else:
+                logger.info("ℹ️ No modifications were made to the flow")
+            logger.info("=" * 80)
             
             # Save assistant responses
             saved_messages = []
@@ -127,8 +143,14 @@ class FlowChatService:
                 saved_messages.append(saved_msg)
             
             # Commit the transaction
-            self.session.commit()
-            logger.info(f"Successfully committed {len(saved_messages)} messages")
+            try:
+                self.session.commit()
+                logger.info(f"✅ Successfully committed {len(saved_messages)} messages to database")
+            except Exception as e:
+                logger.error("❌ Failed to commit to database")
+                logger.error(f"Error: {e}", exc_info=True)
+                self.session.rollback()
+                raise
             
             # Verify persistence in production for debugging
             if agent_response.flow_was_modified:
@@ -148,7 +170,12 @@ class FlowChatService:
             )
             
         except Exception as e:
-            logger.error(f"Failed to process message for flow {flow_id}: {e}", exc_info=True)
+            logger.error("=" * 80)
+            logger.error("❌ FLOW CHAT SERVICE FAILED")
+            logger.error("=" * 80)
+            logger.error(f"Flow ID: {flow_id}")
+            logger.error(f"Error: {e}", exc_info=True)
+            logger.error("=" * 80)
             
             # Rollback the transaction
             self.session.rollback()

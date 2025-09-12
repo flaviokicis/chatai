@@ -75,11 +75,17 @@ class FlowChatAgentV2:
         Returns:
             FlowChatResponse with messages and modification status
         """
-        logger.info(
-            f"FlowChatAgentV2.process starting: flow_id={flow_id}, "
-            f"history_len={len(history)}, simplified_view={simplified_view_enabled}, "
-            f"active_path={active_path}"
-        )
+        logger.info("=" * 80)
+        logger.info("🤖 FLOW CHAT AGENT V2: Starting processing")
+        logger.info("=" * 80)
+        logger.info(f"Flow ID: {flow_id}")
+        logger.info(f"History length: {len(history)}")
+        logger.info(f"Simplified view: {simplified_view_enabled}")
+        logger.info(f"Active path: {active_path}")
+        if history:
+            last_msg = history[-1]
+            logger.info(f"Last message ({last_msg['role']}): {last_msg['content'][:200]}..." if len(last_msg['content']) > 200 else f"Last message ({last_msg['role']}): {last_msg['content']}")
+        logger.info("=" * 80)
         
         # Build the prompt
         prompt = self._build_prompt(flow, history, simplified_view_enabled, active_path)
@@ -191,7 +197,9 @@ class FlowChatAgentV2:
                 modification_summary=None
             )
         
-        logger.info(f"Executing batch of {len(actions)} actions")
+        logger.info("=" * 80)
+        logger.info(f"🔧 EXECUTING BATCH OF {len(actions)} ACTIONS")
+        logger.info("=" * 80)
         
         # Log actions for debugging
         for i, action in enumerate(actions):
@@ -201,21 +209,34 @@ class FlowChatAgentV2:
             target = action.get("target", "")
             
             logger.info(
-                f"Action {i+1}: {action_type} "
+                f"Action {i+1}/{len(actions)}: {action_type} "
                 f"node={node_id} edge={source}->{target}"
             )
         
+        logger.info("=" * 80)
+        
         # Execute actions using the service
+        logger.info("🚀 Calling FlowModificationService.execute_batch_actions")
         service = FlowModificationService(session)
-        result = service.execute_batch_actions(
-            flow=flow,
-            actions=actions,
-            flow_id=flow_id,
-            persist=bool(flow_id and session)
-        )
+        
+        try:
+            result = service.execute_batch_actions(
+                flow=flow,
+                actions=actions,
+                flow_id=flow_id,
+                persist=bool(flow_id and session)
+            )
+        except Exception as e:
+            logger.error("❌ FLOW MODIFICATION SERVICE FAILED")
+            logger.error(f"Error: {e}", exc_info=True)
+            raise
         
         if result.success:
-            logger.info(f"Successfully executed {len(actions)} actions")
+            logger.info("=" * 80)
+            logger.info("✅ FLOW MODIFICATION SUCCESSFUL")
+            logger.info("=" * 80)
+            logger.info(f"Actions executed: {len(actions)}")
+            logger.info(f"Flow modified: {result.modified_flow is not None}")
             
             # Build modification summary
             summary_parts = []
@@ -237,14 +258,18 @@ class FlowChatAgentV2:
                 modification_summary=modification_summary
             )
         else:
-            logger.error(f"Failed to execute actions: {result.error}")
+            logger.error("=" * 80)
+            logger.error("❌ FLOW MODIFICATION FAILED")
+            logger.error("=" * 80)
+            logger.error(f"Error: {result.error}")
             
             # Log individual action results for debugging
             for i, action_result in enumerate(result.action_results):
                 if not action_result.success:
                     logger.error(
-                        f"Action {i+1} failed: {action_result.error}"
+                        f"Action {i+1} failed: {action_result.action_type} - {action_result.error}"
                     )
+            logger.error("=" * 80)
             
             error_message = f"❌ Erro ao modificar o fluxo: {result.error}"
             

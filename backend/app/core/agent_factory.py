@@ -38,7 +38,7 @@ class FlowAgentFactory:
     def __init__(self) -> None:
         """Initialize the agent factory."""
 
-    def create_agent_for_flow(self, flow_definition: dict[str, Any], user_id: str) -> FlowAgent | None:
+    def create_agent_for_flow(self, flow_definition: dict[str, Any], user_id: str) -> Any | None:
         """
         Create an appropriate agent for the given flow definition.
         

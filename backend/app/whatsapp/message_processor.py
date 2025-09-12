@@ -542,6 +542,17 @@ class WhatsAppMessageProcessor:
             return PlainTextResponse("ok")  # Don't send anything if cancelled
 
         logger.info("Sending WhatsApp reply: %r (total messages: %d)", sync_reply, len(messages))
+        
+        # Log details about flow modification responses
+        if flow_response.metadata and flow_response.metadata.get("flow_modification_requested"):
+            logger.info("=" * 60)
+            logger.info("📱 WHATSAPP: FLOW MODIFICATION RESPONSE")
+            logger.info("=" * 60)
+            logger.info(f"Modification success: {flow_response.metadata.get('modification_success', False)}")
+            logger.info(f"Modification failed: {flow_response.metadata.get('modification_failed', False)}")
+            logger.info(f"Modification error: {flow_response.metadata.get('modification_error', 'None')}")
+            logger.info(f"Messages to send: {messages}")
+            logger.info("=" * 60)
 
         # Log WhatsApp messages
         await self._log_whatsapp_messages(message_data, conversation_setup, sync_reply)

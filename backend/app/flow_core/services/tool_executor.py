@@ -175,8 +175,14 @@ class ToolExecutionService:
                 target_node = tool_data.get("flow_modification_target")
                 modification_type = tool_data.get("flow_modification_type", "general")
                 
-                logger.info(f"Admin flow modification requested: {instruction}")
-                logger.info(f"Target node: {target_node}, Type: {modification_type}")
+                logger.info("=" * 80)
+                logger.info("📝 FLOW MODIFICATION ACTION TRIGGERED")
+                logger.info("=" * 80)
+                logger.info(f"Instruction: {instruction[:200]}..." if len(instruction) > 200 else f"Instruction: {instruction}")
+                logger.info(f"Target node: {target_node}")
+                logger.info(f"Modification type: {modification_type}")
+                logger.info(f"Context node: {context.current_node_id}")
+                logger.info("=" * 80)
                 
                 # Store modification metadata for flow processor to handle
                 result.metadata.update({
@@ -186,6 +192,8 @@ class ToolExecutionService:
                     "modification_type": modification_type,
                     "admin_action": True,
                 })
+                
+                logger.info("✅ Flow modification metadata stored for processor")
         
         return result
 

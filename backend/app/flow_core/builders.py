@@ -16,8 +16,6 @@ def build_flow_from_questions(questions: list[dict[str, Any]], flow_id: str) -> 
 
     normalized: list[dict[str, Any]] = []
     for item in questions:
-        if not isinstance(item, dict):
-            continue
         key = str(item.get("key", "")).strip()
         prompt = str(item.get("prompt", "")).strip()
         if not key or not prompt:

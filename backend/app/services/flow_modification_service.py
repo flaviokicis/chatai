@@ -120,7 +120,13 @@ class FlowModificationService:
         working_flow = flow.copy()
         action_results = []
         
-        logger.info(f"Executing batch of {len(actions)} actions on flow {flow_id}")
+        logger.info("=" * 80)
+        logger.info("🔧 FLOW MODIFICATION SERVICE: Executing batch actions")
+        logger.info("=" * 80)
+        logger.info(f"Flow ID: {flow_id}")
+        logger.info(f"Actions count: {len(actions)}")
+        logger.info(f"Persist: {persist}")
+        logger.info("=" * 80)
         
         for i, action in enumerate(actions):
             try:
@@ -170,17 +176,32 @@ class FlowModificationService:
         
         # Persist if requested and we have the necessary context
         if persist and flow_id and self.session:
+            logger.info(f"💾 Attempting to persist flow {flow_id} to database...")
             try:
                 self._persist_flow(working_flow, flow_id)
-                logger.info(f"Successfully persisted flow {flow_id} after {len(actions)} modifications")
+                logger.info("=" * 80)
+                logger.info("✅ FLOW PERSISTED SUCCESSFULLY")
+                logger.info("=" * 80)
+                logger.info(f"Flow ID: {flow_id}")
+                logger.info(f"Modifications applied: {len(actions)}")
+                logger.info("=" * 80)
             except Exception as e:
-                logger.error(f"Failed to persist flow: {e}", exc_info=True)
+                logger.error("=" * 80)
+                logger.error("❌ FLOW PERSISTENCE FAILED")
+                logger.error("=" * 80)
+                logger.error(f"Flow ID: {flow_id}")
+                logger.error(f"Error: {e}", exc_info=True)
+                logger.error("=" * 80)
                 return BatchActionResult(
                     success=False,
                     modified_flow=None,
                     action_results=action_results,
                     error=f"Failed to persist flow: {str(e)}"
                 )
+        elif persist and not flow_id:
+            logger.warning("⚠️ Persist requested but no flow_id provided")
+        elif persist and not self.session:
+            logger.warning("⚠️ Persist requested but no database session available")
         
         return BatchActionResult(
             success=True,
@@ -535,12 +556,18 @@ class FlowModificationService:
         node_count = len(flow.get("nodes", []))
         edge_count = len(flow.get("edges", []))
         
-        repository.update_flow_with_versioning(
-            self.session,
-            flow_id=flow_id,
-            new_definition=flow,
-            change_description=f"Batch modification: {node_count} nodes, {edge_count} edges",
-            created_by="flow_chat_agent"
-        )
+        logger.info(f"📝 Calling repository.update_flow_with_versioning for flow {flow_id}")
+        logger.info(f"   Nodes: {node_count}, Edges: {edge_count}")
         
-        logger.info(f"Persisted flow {flow_id} with {node_count} nodes and {edge_count} edges")
+        try:
+            repository.update_flow_with_versioning(
+                self.session,
+                flow_id=flow_id,
+                new_definition=flow,
+                change_description=f"Batch modification: {node_count} nodes, {edge_count} edges",
+                created_by="flow_chat_agent"
+            )
+            logger.info(f"✅ Repository update successful for flow {flow_id}")
+        except Exception as e:
+            logger.error(f"❌ Repository update failed: {e}", exc_info=True)
+            raise

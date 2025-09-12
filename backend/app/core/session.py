@@ -20,7 +20,7 @@ def _agent_type(agent: Agent) -> str:
 class StableSessionPolicy:
     """Simple policy: one session per channel+user+agent."""
 
-    def session_id(self, app_context: AppContext, agent: Agent, inbound: InboundMessage) -> str:  # type: ignore[override]
+    def session_id(self, app_context: AppContext, agent: Agent, inbound: InboundMessage) -> str:
         agent_type = _agent_type(agent)
         return f"{inbound.channel}:{inbound.user_id}:{agent_type}"
 
@@ -36,11 +36,11 @@ class WindowedSessionPolicy:
     def __init__(self, duration: timedelta) -> None:
         self.duration = duration
 
-    def session_id(self, app_context: AppContext, agent: Agent, inbound: InboundMessage) -> str:  # type: ignore[override]
+    def session_id(self, app_context: AppContext, agent: Agent, inbound: InboundMessage) -> str:
         now = datetime.now(UTC)
         agent_type = _agent_type(agent)
         meta_key = f"meta:{agent_type}"
-        existing = app_context.store.load(inbound.user_id, meta_key)  # type: ignore[arg-type]
+        existing = app_context.store.load(inbound.user_id, meta_key)
         meta: _WindowMeta
         if isinstance(existing, dict):
             try:

@@ -132,7 +132,7 @@ class PerformAction(FlowTool):
         description="Type of flow modification (optional)"
     )
     
-    @field_validator("messages")
+    @field_validator("messages")  # type: ignore[misc]
     @classmethod
     def validate_messages(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Validate message structure."""

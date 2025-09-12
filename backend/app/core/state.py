@@ -11,13 +11,13 @@ from app.core.redis_keys import RedisKeyBuilder
 logger = logging.getLogger(__name__)
 
 try:
-    from langchain_community.chat_message_histories import RedisChatMessageHistory
+    from langchain_community.chat_message_histories import RedisChatMessageHistory  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover - optional import
-    RedisChatMessageHistory = None  # type: ignore[assignment,unused-ignore]
+    RedisChatMessageHistory = None
 try:
     import redis
 except Exception:  # pragma: no cover - optional import
-    redis = None  # type: ignore[assignment,unused-ignore]
+    redis = None
 
 if TYPE_CHECKING:
     from .agent_base import AgentState
@@ -77,7 +77,7 @@ class RedisStore:
     def _events_key(self, user_id: str) -> str:
         return f"{self._ns}:events:{user_id}"  # Events use simple pattern
 
-    def load(self, user_id: str, agent_type: str) -> AgentState | None:  # type: ignore[name-defined]
+    def load(self, user_id: str, agent_type: str) -> AgentState | None:
         raw = self._r.get(self._state_key(user_id, agent_type))
         if not raw:
             return None
@@ -86,14 +86,14 @@ class RedisStore:
             data = json.loads(body)
         except Exception:
             return None
-        return data  # type: ignore[return-value]
+        return data  # type: ignore[no-any-return]
 
-    def save(self, user_id: str, agent_type: str, state: AgentState) -> None:  # type: ignore[name-defined]
+    def save(self, user_id: str, agent_type: str, state: AgentState) -> None:
         # state may be a dict-like as our concrete agents store dicts
         if isinstance(state, dict):
             payload: Any = state
         elif hasattr(state, "to_dict"):
-            payload = state.to_dict()  # type: ignore[call-arg]
+            payload = state.to_dict()
         else:
             payload = {}
         body = json.dumps(payload)
@@ -128,7 +128,7 @@ class RedisStore:
         # Try 1: Current versions use 'url' parameter (most common)
         try:
             # Get the Redis URL from the connection
-            pool_kwargs = self._r.connection_pool.connection_kwargs  # type: ignore[attr-defined]
+            pool_kwargs = self._r.connection_pool.connection_kwargs
             host = pool_kwargs.get("host", "localhost")
             port = int(pool_kwargs.get("port", 6379))
             db = int(pool_kwargs.get("db", 0))
@@ -160,7 +160,7 @@ class RedisStore:
 
         # Try 3: Older versions use host/port/db parameters
         try:
-            pool_kwargs = self._r.connection_pool.connection_kwargs  # type: ignore[attr-defined]
+            pool_kwargs = self._r.connection_pool.connection_kwargs
             return RedisChatMessageHistory(
                 session_id=session_id,
                 redis_host=pool_kwargs.get("host", "localhost"),  # Note: redis_host not just host
@@ -174,7 +174,7 @@ class RedisStore:
 
         # Try 4: Even older versions might use different param names
         try:
-            pool_kwargs = self._r.connection_pool.connection_kwargs  # type: ignore[attr-defined]
+            pool_kwargs = self._r.connection_pool.connection_kwargs
             return RedisChatMessageHistory(
                 session_id=session_id,
                 host=pool_kwargs.get("host", "localhost"),

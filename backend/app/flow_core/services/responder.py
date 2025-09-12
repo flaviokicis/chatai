@@ -149,7 +149,7 @@ class EnhancedFlowResponder:
             return "No navigation paths available from current node."
         
         # Build edge lookup from flow graph
-        edge_lookup = {}
+        edge_lookup: dict[str, Any] = {}
         if flow_graph and "edges" in flow_graph:
             for edge in flow_graph["edges"]:
                 if edge["from"] not in edge_lookup:
@@ -925,9 +925,8 @@ When an admin requests flow changes:
                 # Convert the result to GPT5Response format if needed
                 if isinstance(result, dict):
                     return self._convert_langchain_to_gpt5_response(result)
-                else:
-                    # If it's already the right format, return it
-                    return result
+                # If it's already the right format, return it
+                return result  # type: ignore[unreachable]
                 
             except Exception as e:
                 last_exception = e
@@ -995,7 +994,7 @@ When an admin requests flow changes:
             raise TypeError("Tool must be a Pydantic BaseModel")
 
         # Get the schema directly from the model
-        return tool.model_json_schema()
+        return tool.model_json_schema()  # type: ignore[no-any-return,attr-defined]
 
     def _convert_langchain_to_gpt5_response(self, langchain_result: dict[str, Any]) -> GPT5Response:
         """Convert LangChain tool result to GPT5Response format."""

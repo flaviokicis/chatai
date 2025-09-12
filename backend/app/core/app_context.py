@@ -27,9 +27,9 @@ class AppContext:
 
 def set_app_context(app: FastAPI, ctx: AppContext) -> None:
     # Store one typed context object under app.state
-    app.state.ctx = ctx  # type: ignore[attr-defined]
+    app.state.ctx = ctx
 
 
 def get_app_context(app: FastAPI) -> AppContext:
     # Retrieve and cast from app.state
-    return cast("AppContext", app.state.ctx)  # type: ignore[attr-defined]
+    return cast("AppContext", app.state.ctx)

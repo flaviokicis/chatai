@@ -4,9 +4,9 @@ from collections.abc import Callable
 from typing import Any
 
 try:
-    from langgraph.graph import StateGraph
+    from langgraph.graph import StateGraph  # type: ignore[import-not-found]
 except Exception:  # pragma: no cover - optional dependency for now
-    StateGraph = None  # type: ignore
+    StateGraph = None
 
 from .compiler import CompiledFlow
 

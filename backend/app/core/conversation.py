@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def _resolve_session_policy(app_context: AppContext) -> SessionPolicy:
     if app_context.session_policy is not None:
-        return app_context.session_policy  # type: ignore[return-value]
+        return app_context.session_policy
     return StableSessionPolicy()
 
 
@@ -35,7 +35,7 @@ def run_agent_turn(
     # Hard cap inbound text length for safety/cost control
     max_input_chars = 500
     if inbound.text and len(inbound.text) > max_input_chars:
-        inbound.text = inbound.text[:max_input_chars]  # type: ignore[attr-defined]
+        inbound.text = inbound.text[:max_input_chars]
 
     # Centralized rate limiting (per-tenant, per-user)
     try:
@@ -45,7 +45,7 @@ def run_agent_turn(
         try:
             meta = getattr(inbound, "metadata", {})
             if isinstance(meta, dict) and isinstance(meta.get("tenant_id"), str):
-                tenant_id = meta["tenant_id"]  # type: ignore[index]
+                tenant_id = meta["tenant_id"]
         except Exception:
             tenant_id = "default"
         if limiter is not None:
@@ -75,7 +75,7 @@ def run_agent_turn(
     history = None
     if hasattr(app_context.store, "get_message_history"):
         try:
-            history = app_context.store.get_message_history(session_id)  # type: ignore[attr-defined]
+            history = app_context.store.get_message_history(session_id)
             if hasattr(history, "add_user_message"):
                 history.add_user_message(inbound.text)
         except Exception:

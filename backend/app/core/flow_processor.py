@@ -410,8 +410,15 @@ class FlowProcessor:
                 def on_tool_event(tool_name: str, metadata: dict[str, Any]) -> bool:
                     # Check if this is a PerformAction with modify_flow action
                     if tool_name == "PerformAction" and metadata.get("flow_modification_requested"):
-                        print(f"[DEBUG PROCESSOR] Flow modification requested by user: {request.user_id}")
-                        print(f"[DEBUG PROCESSOR] User is admin: {is_admin}")
+                        logger.info("=" * 80)
+                        logger.info("🔧 FLOW PROCESSOR: MODIFICATION REQUEST RECEIVED")
+                        logger.info("=" * 80)
+                        logger.info(f"Tool: {tool_name}")
+                        logger.info(f"User ID: {request.user_id}")
+                        logger.info(f"Is Admin: {is_admin}")
+                        logger.info(f"Session ID: {session_id}")
+                        logger.info(f"Flow ID from metadata: {request.flow_metadata.get('selected_flow_id')}")
+                        logger.info("=" * 80)
 
                         if not is_admin:
                             logger.warning(f"Non-admin user {request.user_id} attempted flow modification")
@@ -419,7 +426,8 @@ class FlowProcessor:
 
                         # Handle live flow modification
                         instruction = metadata.get("modification_instruction", "")
-                        print(f"[DEBUG PROCESSOR] Admin instruction: {instruction}")
+                        logger.info("✅ Admin verified, processing modification...")
+                        logger.info(f"Instruction preview: {instruction[:200]}..." if len(instruction) > 200 else f"Instruction: {instruction}")
                         if instruction:
                             try:
                                 import asyncio
@@ -431,6 +439,8 @@ class FlowProcessor:
                                     flow_id = flow_id_raw
                                 else:
                                     flow_id = UUID(flow_id_raw)
+                                
+                                logger.info(f"🎯 Target Flow ID: {flow_id}")
 
                                 # Use the existing FlowChatService in a thread pool to avoid event loop conflicts
                                 import concurrent.futures
@@ -473,14 +483,23 @@ CRITICAL FLOW SAFETY RULES:
                                     finally:
                                         new_loop.close()
 
+                                logger.info("🚀 Starting flow modification in thread pool...")
                                 # Run in thread pool with timeout and wait for completion
                                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                                     future = executor.submit(run_flow_chat_modification)
+                                    logger.info("⏳ Waiting for modification to complete (timeout: 180s)...")
                                     try:
                                         result = future.result(timeout=180.0)  # 3 minute timeout for complex modifications
+                                        logger.info(f"🎯 Modification result received: modified={result.flow_was_modified if result else 'None'}")
 
                                         # Determine success message based on actual results
                                         if result.flow_was_modified:
+                                            logger.info("=" * 80)
+                                            logger.info("✨ FLOW MODIFICATION SUCCESSFUL!")
+                                            logger.info("=" * 80)
+                                            logger.info(f"Summary: {result.modification_summary}")
+                                            logger.info("=" * 80)
+                                            
                                             success_msg = "✅ Modificação aplicada com sucesso! As alterações já estão ativas no fluxo."
                                             if result.modification_summary:
                                                 success_msg += f"\n\nResumo: {result.modification_summary}"
@@ -497,6 +516,8 @@ CRITICAL FLOW SAFETY RULES:
                                             modification_message = success_msg
                                             modification_intercepted = True
                                         else:
+                                            logger.warning("⚠️ Flow modification returned but NO CHANGES were made")
+                                            logger.warning(f"Result details: {result}")
                                             info_msg = "ℹ️ Instrução processada, mas nenhuma modificação foi necessária no fluxo."
                                             modification_was_applied = False
                                             modification_message = info_msg
@@ -514,21 +535,25 @@ CRITICAL FLOW SAFETY RULES:
                                         return True
 
                                     except concurrent.futures.TimeoutError:
-                                        logger.error("Live flow modification timed out")
-                                        print("[DEBUG PROCESSOR] Modification timed out")
+                                        logger.error("❌ FLOW MODIFICATION TIMEOUT")
+                                        logger.error("Modification took longer than 180 seconds")
+                                        future.cancel()
                                         modification_was_applied = False
                                         modification_message = "❌ Modificação expirou. Tente novamente com uma instrução mais simples."
                                         modification_intercepted = True
                                         return True
                             except Exception as e:
-                                logger.exception(f"Live flow modification failed: {e}")
-                                print(f"[DEBUG PROCESSOR] Modification failed: {e}")
-                                # Log specific error for admin feedback
-                                logger.error(f"Live flow modification failed for admin {request.user_id}: {e}")
+                                logger.error("❌ FLOW MODIFICATION PREPARATION FAILED")
+                                logger.error(f"Error: {e}", exc_info=True)
                                 modification_was_applied = False
                                 modification_message = f"❌ Falha ao modificar o fluxo: {e!s}"
                                 modification_intercepted = True
                                 return True
+                        else:
+                            logger.warning("⚠️ No modification instruction provided")
+                            modification_was_applied = False
+                            modification_message = "⚠️ Nenhuma instrução de modificação fornecida."
+                            modification_intercepted = False
 
                         # Intercepted; skip normal flow and respond with explicit message
                         modification_intercepted = True
@@ -567,10 +592,25 @@ CRITICAL FLOW SAFETY RULES:
                         "tool_name": "PerformAction",
                         "flow_modified": modification_was_applied,
                         "action": "modify_flow",
+                        "modification_success": modification_was_applied,
+                        "modification_message": modification_message,
                     }
+                    
+                    # Include error details if modification failed
+                    if not modification_was_applied and modification_message:
+                        metadata["modification_failed"] = True
+                        if "erro" in modification_message.lower() or "falha" in modification_message.lower():
+                            metadata["modification_error"] = modification_message
+                    
                     # Include messages from the runner result if available
                     if hasattr(result, "messages") and result.messages:
                         metadata["messages"] = result.messages
+                    # Otherwise, create messages from the modification message
+                    elif modification_message:
+                        metadata["messages"] = [{"text": modification_message, "delay_ms": 0}]
+                    
+                    message_preview = modification_message[:100] + "..." if modification_message and len(modification_message) > 100 else modification_message or ""
+                    logger.info(f"📤 Returning modification response: success={modification_was_applied}, message={message_preview}")
                     
                     return FlowResponse(
                         result=FlowProcessingResult.CONTINUE,

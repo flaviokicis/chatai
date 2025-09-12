@@ -16,7 +16,7 @@ from contextvars import ContextVar
 from typing import Any
 
 from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware  # type: ignore[import-not-found]
 
 # ---------------------------------------------------------------------------
 # Context variable used to propagate per-request IDs to log records
@@ -82,7 +82,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     echoed back to clients in the ``X-Request-ID`` response header.
     """
 
-    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
         token = request_id_ctx_var.set(request_id)
         try:
