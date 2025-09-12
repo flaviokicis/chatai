@@ -745,27 +745,112 @@ As an admin, you can modify the flow in real-time using the PerformAction tool w
 
 **DETECTING ADMIN COMMANDS:**
 Admin commands are meta-instructions about the flow itself, NOT answers to questions. Look for:
-- "Change this question to..."
-- "Make this more/less..."  
-- "Add/remove a question..."
-- "Break this into multiple questions..."
-- "Don't ask about..."
+- "Change this question to..." / "Alterar esta pergunta para..."
+- "Make this more/less..." / "Fazer isso mais/menos..."  
+- "Add/remove a question..." / "Adicionar/remover uma pergunta..."
+- "Break this into multiple questions..." / "Quebrar em múltiplas perguntas..."
+- "Split nodes with multiple questions" / "Separar nós com múltiplas perguntas"
+- "Don't ask about..." / "Não perguntar sobre..."
 - Commands that reference the flow structure itself
+- **ANY message containing "(ordem admin)" or "(admin)" should be treated as an admin command**
+- Portuguese variations: "Pode alterar...", "Pode mudar...", "Pode dividir..."
+
+**DETECTING CONFIRMATION RESPONSES:**
+After asking for confirmation, these responses mean "yes, proceed":
+- "Sim", "sim", "s", "S"
+- "Confirmo", "confirma", "confirmado"
+- "Pode fazer", "pode prosseguir", "pode ir"
+- "Ok", "okay", "tá bom", "ta bom"
+- "Faça", "faz", "vai"
+- "Isso", "isso mesmo", "exato"
+- "Yes", "y", "Y"
+
+These responses mean "no, cancel":
+- "Não", "nao", "n", "N"
+- "Cancela", "cancelar", "esquece"
+- "Deixa", "deixa pra lá"
+- "Melhor não", "melhor nao"
+- "No", "nope"
+
+**CONVERSATION FLOW TRACKING:**
+Look at the recent conversation history to determine state:
+1. If your last message asked "Posso prosseguir com essa alteração?" or "Confirma essa modificação?":
+   - You are WAITING FOR CONFIRMATION
+   - Check if the user's response is a confirmation or cancellation
+   - If confirmed: Execute the modification
+   - If cancelled: Acknowledge and continue normal flow
+2. If the user is making a NEW admin request:
+   - Start the confirmation pattern (ask for confirmation first)
+
+**IMPORTANT: Confirmation Pattern**
+ALWAYS confirm flow modifications before executing:
+1. First response: Confirm what will be changed and ask for confirmation
+   - Use actions=["stay"] (NOT "modify_flow" yet)
+   - Explain clearly what changes will be made
+   - Ask "Posso prosseguir com essa alteração?" or "Confirma essa modificação?"
+2. After confirmation: Execute the modification
+   - Use actions=["modify_flow", "stay"]
+   - Include the flow_modification_instruction
+   - Confirm the changes were requested
 
 **Usage:**
-When an admin requests flow changes, use PerformAction with:
-- `actions`: Include "modify_flow" in the action list (e.g., ["modify_flow", "stay"])
-- `flow_modification_instruction`: Natural language instruction for the modification
-- `flow_modification_target` (optional): The ID of the specific node to modify
-- `flow_modification_type` (optional): Can be "prompt", "routing", "validation", or "general"
-- `messages`: Always include messages to confirm the action to the admin
+When an admin requests flow changes:
+- First time (no confirmation): Use PerformAction with actions=["stay"], explain changes, ask for confirmation
+- After confirmation: Use PerformAction with:
+  - `actions`: ["modify_flow", "stay"] to execute and stay on current node
+  - `flow_modification_instruction`: Natural language instruction for the modification
+  - `flow_modification_target` (optional): The ID of the specific node to modify
+  - `flow_modification_type` (optional): Can be "prompt", "routing", "validation", or "general"
+  - `messages`: Confirm the modification is being processed
 
 **Examples:**
+
+**Example 1: Initial request (needs confirmation)**
+- Admin says: "Pode alterar os nos que tem multiplas perguntas pra varios nos com uma pergunta?"
+  → Use: PerformAction with actions=["stay"], messages=[
+      {"text": "Entendi! Você quer que eu separe todos os nós que têm múltiplas perguntas em nós individuais, uma pergunta por nó.", "delay_ms": 0},
+      {"text": "Isso vai tornar o fluxo mais claro, perguntando uma coisa de cada vez.", "delay_ms": 1500},
+      {"text": "Posso prosseguir com essa alteração?", "delay_ms": 1000}
+    ]
+
+**Example 2: After confirmation**
+- Admin says: "Sim, pode fazer" or "Confirmo" or "Sim"
+  → Use: PerformAction with actions=["modify_flow", "stay"], 
+    flow_modification_instruction="Split all nodes that have multiple questions into separate nodes with one question each",
+    messages=[{"text": "✅ Perfeito! Estou processando a separação dos nós com múltiplas perguntas...", "delay_ms": 0}]
+
+**Example 3: Admin clarifies it's an order (with confirmation)**
 - Admin says: "Nao, isso foi uma ordem como admin pra quebrar o flow em 3 perguntas ao inves de uma só"
-  → Use: PerformAction with actions=["modify_flow", "stay"], flow_modification_instruction="Break the current question into 3 separate sequential questions", messages=[{"text": "Entendi! Vou dividir em 3 perguntas separadas conforme solicitado 👍", "delay_ms": 0}, {"text": "Primeiro: qual é a largura e o comprimento?", "delay_ms": 1700}]
-  
+  → Use: PerformAction with actions=["stay"], messages=[
+      {"text": "Ah, entendi! É uma ordem administrativa para modificar o fluxo.", "delay_ms": 0},
+      {"text": "Vou dividir a pergunta atual em 3 perguntas separadas sequenciais.", "delay_ms": 1500},
+      {"text": "Confirma que posso fazer essa alteração agora?", "delay_ms": 1000}
+    ]
+
+**Example 4: Direct modification request**
 - Admin says: "Change this question to ask for their full name"
-  → Use: PerformAction with actions=["modify_flow", "stay"], flow_modification_instruction="Change the prompt to ask for the user's full name", messages=[{"text": "Perfeito! Vou alterar a pergunta para solicitar o nome completo.", "delay_ms": 0}]
+  → Use: PerformAction with actions=["stay"], messages=[
+      {"text": "Ok! Vou alterar esta pergunta para solicitar o nome completo do usuário.", "delay_ms": 0},
+      {"text": "Confirma essa modificação?", "delay_ms": 1500}
+    ]
+
+**Example 5: Admin cancels modification**
+- Context: You just asked "Confirma essa modificação?"
+- Admin says: "Não, deixa como está" or "Cancela"
+  → Use: PerformAction with actions=["stay"], messages=[
+      {"text": "Ok, sem problemas! Mantendo o fluxo como está.", "delay_ms": 0},
+      {"text": "Continuando com a pergunta atual então...", "delay_ms": 1500},
+      {"text": "[Repeat the current question from the flow]", "delay_ms": 1000}
+    ]
+
+**Example 6: Admin provides different instructions after initial request**
+- Context: Admin asked to split nodes, you asked for confirmation
+- Admin says: "Na verdade, só divida este nó atual em 2 partes"
+  → Use: PerformAction with actions=["stay"], messages=[
+      {"text": "Ah, entendi! Mudando o plano então.", "delay_ms": 0},
+      {"text": "Vou dividir apenas o nó atual em 2 perguntas separadas.", "delay_ms": 1500},
+      {"text": "Confirma essa alteração?", "delay_ms": 1000}
+    ]
 """
 
     def _select_contextual_tools(

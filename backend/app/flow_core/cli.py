@@ -234,9 +234,24 @@ def run_cli() -> None:
         if not user_input:
             continue
 
-        # Process the turn
+        # Process the turn (CLI users are always admin)
         try:
-            result = runner.process_turn(context, user_input, project_context)
+            result = runner.process_turn(context, user_input, project_context, is_admin=True)
+            
+            # Check if flow modification was requested
+            if hasattr(result, 'metadata') and result.metadata and result.metadata.get('flow_modification_requested'):
+                print("\n" + "="*60)
+                print("📝 FLOW MODIFICATION REQUESTED")
+                print("="*60)
+                
+                instruction = result.metadata.get('modification_instruction', '')
+                mod_type = result.metadata.get('modification_type', 'general')
+                
+                print(f"Type: {mod_type}")
+                print(f"Instruction: {instruction[:200]}..." if len(instruction) > 200 else f"Instruction: {instruction}")
+                print("\n⚠️  Note: Flow modification is not yet implemented in CLI mode.")
+                print("    Use the web interface or API for live flow modifications.")
+                print("="*60 + "\n")
             
             # Display response
             if result.messages:
@@ -247,9 +262,32 @@ def run_cli() -> None:
             # Show debug info
             if result.tool_name:
                 print(f"   [Tool: {result.tool_name}]")
-            if result.confidence < 1.0:
+                
+                # Show specific actions if available
+                if hasattr(result, 'metadata') and result.metadata:
+                    if 'actions' in result.metadata:
+                        actions = result.metadata['actions']
+                        print(f"   [Actions: {', '.join(actions)}]")
+                    
+                    # Also check in the responder output metadata
+                    if hasattr(result, 'responder_metadata'):
+                        if 'actions' in result.responder_metadata:
+                            actions = result.responder_metadata['actions']
+                            print(f"   [Actions (from responder): {', '.join(actions)}]")
+                    
+                    # Show flow modification details if present
+                    if result.metadata.get('flow_modification_requested'):
+                        print(f"   [Flow Modification: Requested]")
+                        if 'modification_instruction' in result.metadata:
+                            # Show first 100 chars of instruction
+                            instruction = result.metadata['modification_instruction'][:100]
+                            print(f"   [Instruction: {instruction}...]")
+                        if 'modification_type' in result.metadata:
+                            print(f"   [Type: {result.metadata['modification_type']}]")
+            
+            if hasattr(result, 'confidence') and result.confidence < 1.0:
                 print(f"   [Confidence: {result.confidence:.2f}]")
-            if result.reasoning:
+            if hasattr(result, 'reasoning') and result.reasoning:
                 print(f"   [Reasoning: {result.reasoning}]")
             
             # Update context

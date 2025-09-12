@@ -161,13 +161,16 @@ class FlowTurnRunner:
         # Convert responder result to engine event and process
         engine_event = self._build_engine_event(responder_result)
 
+        # Extract actions for all tools (used for display and logic)
+        actions = []
+        if responder_result.metadata and "actions" in responder_result.metadata:
+            actions = responder_result.metadata["actions"]
+        
         # Special handling for certain tools
         if responder_result.tool_name == "PerformAction":
             # PerformAction handles everything - extract what happened
             
             # Check if "navigate" action was requested (advance the flow)
-            # The actions are stored in metadata by the tool executor
-            actions = responder_result.metadata.get("actions", []) if responder_result.metadata else []
             wants_to_navigate = "navigate" in actions
             
             if responder_result.updates:
@@ -235,13 +238,18 @@ class FlowTurnRunner:
         }
 
         # Build final result
+        # Store actions in metadata for CLI display
+        metadata = responder_result.metadata or {}
+        if actions:
+            metadata['actions'] = actions
+        
         return TurnResult(
             assistant_message=responder_result.message,
             messages=responder_result.messages,
             tool_name=responder_result.tool_name,
             tool_args={"navigation": responder_result.navigation} if responder_result.navigation else None,
             answers_diff=answers_diff,
-            metadata=responder_result.metadata or {},
+            metadata=metadata,
             terminal=ctx.is_complete,
             escalate=responder_result.escalate,
             confidence=responder_result.confidence,

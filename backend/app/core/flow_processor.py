@@ -175,6 +175,11 @@ class FlowProcessor:
             True if user is admin, False otherwise
         """
         try:
+            # CLI users are always admin for development/testing
+            if request.user_id.startswith("cli:"):
+                logger.info(f"CLI user {request.user_id} granted admin privileges")
+                return True
+            
             # Extract phone number from user_id (e.g., "whatsapp:+5511999999999")
             user_phone = request.user_id
 
@@ -430,10 +435,7 @@ class FlowProcessor:
                                 # Use the existing FlowChatService in a thread pool to avoid event loop conflicts
                                 import concurrent.futures
 
-                                from app.agents.flow_chat_agent import FlowChatAgent, ToolSpec
-                                from app.agents.flow_modification_tools import (
-                                    FLOW_MODIFICATION_TOOLS,
-                                )
+                                from app.agents.flow_chat_agent_v2 import FlowChatAgentV2
                                 from app.services.flow_chat_service import (
                                     FlowChatService,
                                     FlowChatServiceResponse,
@@ -445,16 +447,8 @@ class FlowProcessor:
                                     new_loop = asyncio.new_event_loop()
                                     asyncio.set_event_loop(new_loop)
                                     try:
-                                        # Build the same agent the frontend uses
-                                        tools = []
-                                        for tool_config in FLOW_MODIFICATION_TOOLS:
-                                            tools.append(ToolSpec(
-                                                name=str(tool_config["name"]),
-                                                description=str(tool_config["description"]) if tool_config.get("description") else None,
-                                                args_schema=tool_config["args_schema"],
-                                                func=tool_config["func"]
-                                            ))
-                                        agent = FlowChatAgent(llm=self._llm, tools=tools)
+                                        # Build the v2 agent
+                                        agent = FlowChatAgentV2(llm=self._llm)
 
                                         with create_session() as mod_session:
                                             service = FlowChatService(mod_session, agent=agent)
