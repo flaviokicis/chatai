@@ -24,9 +24,7 @@ def _get_adapter(settings: Any) -> WhatsAppAdapter:  # type: ignore[type-arg]
     return WhatsAppApiAdapter(settings)
 
 
-async def handle_whatsapp_webhook(
-    request: Request, x_twilio_signature: str | None
-) -> Response:
+async def handle_whatsapp_webhook(request: Request, x_twilio_signature: str | None) -> Response:
     """
     Clean, modular WhatsApp webhook handler.
 

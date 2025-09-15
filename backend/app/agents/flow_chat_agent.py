@@ -1,6 +1,6 @@
-"""Flow chat agent v2 - Single tool call architecture.
+"""Flow chat agent - Single tool call architecture.
 
-This module implements the refactored flow chat agent that uses a single
+This module implements the flow chat agent that uses a single
 LLM call with one tool that outputs multiple actions.
 """
 
@@ -38,7 +38,7 @@ class FlowChatResponse(NamedTuple):
     modification_summary: str | None = None
 
 
-class FlowChatAgentV2:
+class FlowChatAgent:
     """LLM-driven agent for flow modification using single tool architecture.
 
     This agent:
@@ -454,7 +454,7 @@ class FlowChatAgentV2:
             os.makedirs(debug_dir, exist_ok=True)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"llm_prompt_v2_{stage}_{timestamp}.txt"
+            filename = f"llm_prompt_{stage}_{timestamp}.txt"
             filepath = os.path.join(debug_dir, filename)
 
             with open(filepath, "w", encoding="utf-8") as f:

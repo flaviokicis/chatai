@@ -1,4 +1,4 @@
-"""Flow chat service using v2 single-tool architecture."""
+"""Flow chat service using single-tool architecture."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.agents.flow_chat_agent_v2 import FlowChatAgentV2
+from app.agents.flow_chat_agent import FlowChatAgent
 from app.db.models import Flow, FlowChatMessage, FlowChatRole
 from app.db.repository import (
     create_flow_chat_message,
@@ -29,14 +29,14 @@ class FlowChatServiceResponse(NamedTuple):
 
 
 class FlowChatService:
-    """Service layer for flow chat using v2 single-tool architecture.
+    """Service layer for flow chat using single-tool architecture.
 
-    This service coordinates between the UI, database, and the v2 agent
+    This service coordinates between the UI, database, and the agent
     that uses a single LLM call with batch actions.
     """
 
-    def __init__(self, session: Session, agent: FlowChatAgentV2):
-        """Initialize the service with a database session and v2 agent."""
+    def __init__(self, session: Session, agent: FlowChatAgent):
+        """Initialize the service with a database session and agent."""
         self.session = session
         self.agent = agent
 
@@ -98,8 +98,8 @@ class FlowChatService:
             history = list_flow_chat_messages(self.session, flow_id)
             history_dicts = [{"role": msg.role.value, "content": msg.content} for msg in history]
 
-            # Process with v2 agent
-            logger.info(f"🤖 Calling v2 agent with {len(history_dicts)} history messages")
+            # Process with agent
+            logger.info(f"🤖 Calling agent with {len(history_dicts)} history messages")
 
             try:
                 agent_response = await self.agent.process(

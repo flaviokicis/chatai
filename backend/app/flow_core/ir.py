@@ -183,18 +183,15 @@ class FlowMetadata(BaseModel):
 class Flow(BaseModel):
     """Complete flow definition."""
 
-    schema_version: Literal["v1", "v2"] = "v1"  # Support both v1 and v2
+    schema_version: Literal["v1"] = "v1"  # Single schema version
     id: str
     metadata: FlowMetadata | None = None
     entry: str
     nodes: list[Node]
     edges: list[Edge]
     policies: Policies = Field(default_factory=Policies)
-    # New: Validation rules
     validations: dict[str, ValidationRule] = Field(default_factory=dict)
-    # New: Global context/variables
     context: dict[str, Any] = Field(default_factory=dict)
-    # New: Subflows
     subflows: dict[str, Flow] = Field(default_factory=dict)
 
     def node_by_id(self, node_id: str) -> Node | None:

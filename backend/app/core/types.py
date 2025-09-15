@@ -6,7 +6,7 @@ other parts of the codebase. It imports existing types rather than
 duplicating them.
 """
 
-from typing import Any, NotRequired, Required, TypeAlias, TypedDict
+from typing import Any, NotRequired, Required, TypedDict
 from uuid import UUID
 
 # Import existing types instead of duplicating
@@ -16,13 +16,13 @@ from app.flow_core.flow_types import (
 )
 
 # Type Aliases for clarity and consistency (these don't exist elsewhere)
-UserId: TypeAlias = str
-AgentType: TypeAlias = str
-SessionId: TypeAlias = str
-ThreadId: TypeAlias = UUID
-TenantId: TypeAlias = UUID
-ChannelId: TypeAlias = UUID
-FlowId: TypeAlias = str
+type UserId = str
+type AgentType = str
+type SessionId = str
+type ThreadId = UUID
+type TenantId = UUID
+type ChannelId = UUID
+type FlowId = str
 
 
 class EventDict(TypedDict):

@@ -225,23 +225,23 @@ class WhatsAppApiAdapter:
                     # Use the phone_number_id from the original message
                     phone_number_id = from_number.replace("whatsapp:", "")
                     self._send_message_via_api(clean_to, text, phone_number_id)
-                    
+
                     # Log the follow-up message to database
                     if conversation_setup:
                         try:
                             import asyncio
                             from datetime import UTC, datetime
-                            
+
                             from app.db.models import MessageDirection, MessageStatus
                             from app.services.message_logging_service import message_logging_service
-                            
+
                             # Create a new event loop for this thread if needed
                             try:
                                 loop = asyncio.get_event_loop()
                             except RuntimeError:
                                 loop = asyncio.new_event_loop()
                                 asyncio.set_event_loop(loop)
-                            
+
                             # Log the follow-up message asynchronously
                             loop.run_until_complete(
                                 message_logging_service.save_message_async(
@@ -255,9 +255,9 @@ class WhatsAppApiAdapter:
                                     sent_at=datetime.now(UTC),
                                 )
                             )
-                            
+
                             logger.debug(f"Logged follow-up message #{i} to database")
-                            
+
                         except Exception as log_error:
                             logger.warning(f"Failed to log follow-up message #{i}: {log_error}")
                             # Don't fail the message sending if logging fails
