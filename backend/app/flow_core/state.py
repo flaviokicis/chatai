@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 
 class NodeStatus(str, Enum):
@@ -53,7 +56,7 @@ class FlowContext:
     # Session info (for thought tracing)
     user_id: str | None = None
     session_id: str | None = None
-    tenant_id: Any | None = None  # UUID, but avoiding import cycle
+    tenant_id: UUID | None = None  # Now properly typed using TYPE_CHECKING
     channel_id: str | None = None  # Channel identifier (e.g., WhatsApp business number)
 
     # Node tracking
@@ -207,7 +210,7 @@ class FlowContext:
             session_id=data.get("session_id"),
             pending_field=data.get("pending_field"),
         )
-        
+
         # Set is_complete state
         ctx._is_complete = data.get("is_complete", False)
 

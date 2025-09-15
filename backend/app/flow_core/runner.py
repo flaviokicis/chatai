@@ -89,22 +89,26 @@ class FlowTurnRunner:
         logger.info(f"Processing turn for user message: '{user_message}'")
         try:
             # Build flow graph from compiled flow
-            flow_graph = {
-                "id": self._compiled_flow.id,
-                "entry": self._compiled_flow.entry,
-                "nodes": [node.model_dump() for node in self._compiled_flow.nodes.values()],
-                "edges": [
-                    {
-                        "from": from_id, 
-                        "to": edge.target, 
-                        "condition": edge.condition_description or edge.label or "",
-                        "priority": edge.priority
-                    }
-                    for from_id, edges in self._compiled_flow.edges_from.items()
-                    for edge in edges
-                ]
-            } if self._compiled_flow else None
-            
+            flow_graph = (
+                {
+                    "id": self._compiled_flow.id,
+                    "entry": self._compiled_flow.entry,
+                    "nodes": [node.model_dump() for node in self._compiled_flow.nodes.values()],
+                    "edges": [
+                        {
+                            "from": from_id,
+                            "to": edge.target,
+                            "condition": edge.condition_description or edge.label or "",
+                            "priority": edge.priority,
+                        }
+                        for from_id, edges in self._compiled_flow.edges_from.items()
+                        for edge in edges
+                    ],
+                }
+                if self._compiled_flow
+                else None
+            )
+
             # Get available edges from current node
             available_edges = []
             if ctx.current_node_id and self._compiled_flow:
@@ -113,22 +117,22 @@ class FlowTurnRunner:
                     {
                         "target_node_id": edge.target,
                         "condition": edge.condition_description or edge.label or "",
-                        "priority": edge.priority
+                        "priority": edge.priority,
                     }
                     for edge in edges_from_current
                 ]
-            
+
             # Get the current node to find pending field
             current_node = None
             pending_field = ctx.pending_field
             if ctx.current_node_id and self._compiled_flow:
                 current_node = self._compiled_flow.nodes.get(ctx.current_node_id)
-                if current_node and hasattr(current_node, 'data_key'):
+                if current_node and hasattr(current_node, "data_key"):
                     pending_field = current_node.data_key
-            
+
             # Step 1: Get initial LLM response with full context
             responder_output = await self._responder.respond(
-                prompt=current_node.text if current_node and hasattr(current_node, 'text') else "",
+                prompt=current_node.text if current_node and hasattr(current_node, "text") else "",
                 pending_field=pending_field,
                 context=ctx,
                 user_message=user_message,
@@ -141,7 +145,7 @@ class FlowTurnRunner:
             # Store messages from responder in the tool result metadata
             if responder_output.messages:
                 responder_output.tool_result.metadata["messages"] = responder_output.messages
-            
+
             llm_response = {
                 "tool_calls": [
                     {
@@ -155,7 +159,7 @@ class FlowTurnRunner:
 
             # Step 2: Process tool calls
             tool_result = await self._process_tool_calls(llm_response, ctx)
-            
+
             # Ensure messages from responder are preserved in tool_result
             if responder_output.messages and not tool_result.metadata.get("messages"):
                 tool_result.metadata["messages"] = responder_output.messages
@@ -172,7 +176,8 @@ class FlowTurnRunner:
                 args = final_response["tool_calls"][0].get("arguments", {})
                 msgs = args.get("messages")
                 if msgs:
-                    tool_result.metadata.setdefault("messages", msgs)
+                    # IMPORTANT: Replace messages with feedback messages, don't just setdefault
+                    tool_result.metadata["messages"] = msgs
 
             return tool_result
 

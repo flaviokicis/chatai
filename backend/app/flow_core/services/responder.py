@@ -297,13 +297,26 @@ If the user message starts with "[AUDIO_ERROR:", this means there was a technica
 Current question/intent (from current node {context.current_node_id or "unknown"}): {prompt}
 {"Pending field being collected: " + pending_field if pending_field else ""}
 {"IMPORTANT: If you just asked for missing information and the user provides a short response (like a number, 'yes', 'no', or brief text), it's likely the answer to your question!" if context.clarification_count > 0 else ""}
+{"NOTE: You're returning to the flow after handling an admin request. Adapt the question naturally - don't repeat verbatim!" if context.history and len(context.history) > 0 and any("modify" in str(turn.metadata or {}) for turn in context.history[-3:]) else ""}
+{"NOTE: You've been in conversation for a while. Skip formalities and be more casual." if context.turn_count > 5 else ""}
 
 ⚠️ CRITICAL - TWO PRIMARY RULES:
 1. **INTENT FIDELITY**: Maintain the same intention/purpose as the current node's question. The core information being requested must remain the same.
-2. **NATURAL CONVERSATION**: Every message must feel natural in the ongoing conversation. You CAN and SHOULD rewrite the base prompt to fit naturally.
+2. **NATURAL CONVERSATION**: NEVER repeat the node's prompt verbatim! Always adapt it naturally to the conversation.
 
-- You MAY rewrite the question's wording to sound natural in the conversation context
-- If the node's text includes a greeting and you've already greeted, OMIT the redundant greeting
+⚠️ REWRITING IS MANDATORY - NOT OPTIONAL:
+- You MUST rewrite the question's wording to sound natural - NEVER copy-paste exactly
+- The node's text is a GUIDE for intent, not a script to read
+- Adapt based on conversation context:
+  * After admin task/interruption: "Então, voltando..." or "Agora me conta..."
+  * Already greeted: Skip "Olá" and get to the point
+  * Returning to question: Acknowledge the return: "Voltando ao que importa..."
+  * Second attempt: Vary the wording completely
+- Examples for "Olá! Como posso te ajudar hoje? Qual é o seu interesse?":
+  * First time: Can use full greeting
+  * After interruption: "Então, em que posso ajudar?"
+  * Already talked: "Me conta o que você precisa"
+  * Retry: "Qual seria seu interesse?"
 - DO NOT make up questions beyond what the flow intends - follow the node's purpose
 
 ⚠️ HANDLING POTENTIAL MISTAKES/TYPOS:

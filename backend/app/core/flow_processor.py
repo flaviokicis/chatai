@@ -36,7 +36,7 @@ class ThreadStatusUpdater(ABC):
         request: FlowRequest,
     ) -> None:
         """Update thread status after flow completion.
-        
+
         Args:
             thread_id: The thread identifier
             flow_response: The flow processing response
@@ -96,7 +96,7 @@ class FlowProcessor:
 
         # Initialize existing_context early to avoid UnboundLocalError
         existing_context = None
-        
+
         try:
             # Check for cancellation
             self._cancellation_manager.check_cancellation_and_raise(session_id, "flow_processing")
@@ -113,6 +113,7 @@ class FlowProcessor:
 
             # Convert dict to Flow object if needed
             from app.flow_core.ir import Flow
+
             if isinstance(flow_definition, dict):
                 flow_obj = Flow.model_validate(flow_definition)
             else:
@@ -133,7 +134,16 @@ class FlowProcessor:
             ctx.session_id = session_id
             ctx.tenant_id = request.tenant_id
             ctx.channel_id = request.channel_id
-            ctx.flow_id = request.flow_metadata.get("selected_flow_id", "")
+
+            # Validate flow metadata and get flow_id with runtime safety
+            from app.core.types import validate_flow_metadata
+
+            try:
+                validated_metadata = validate_flow_metadata(request.flow_metadata)
+                ctx.flow_id = validated_metadata["selected_flow_id"]
+            except ValueError as e:
+                logger.warning(f"Flow metadata validation failed: {e}, using fallback")
+                ctx.flow_id = request.flow_metadata.get("selected_flow_id", "")
 
             # Add user message to conversation history
             ctx.add_turn(
@@ -141,7 +151,7 @@ class FlowProcessor:
                 content=request.user_message,
                 node_id=ctx.current_node_id,
             )
-            
+
             # Process the turn with clean architecture
             result = await runner.process_turn(
                 ctx=ctx,
@@ -149,13 +159,14 @@ class FlowProcessor:
                 project_context=request.project_context,
                 is_admin=is_admin,
             )
-            
+
             # Add assistant response to conversation history
             messages = result.metadata.get("messages", [])
             if messages:
                 # Combine all message texts for history
                 response_text = " ".join(
-                    msg.get("text", "") for msg in messages 
+                    msg.get("text", "")
+                    for msg in messages
                     if isinstance(msg, dict) and msg.get("text")
                 )
                 if response_text:
@@ -163,7 +174,7 @@ class FlowProcessor:
                         role="assistant",
                         content=response_text,
                         node_id=ctx.current_node_id,
-                        metadata={"tool": result.metadata.get("tool_name")}
+                        metadata={"tool": result.metadata.get("tool_name")},
                     )
 
             # Save updated context with conversation history
@@ -225,7 +236,10 @@ class FlowProcessor:
             metadata.update(
                 {
                     "external_action_executed": True,
-                    "external_action_successful": bool(turn_result.external_action_result and turn_result.external_action_result.success),
+                    "external_action_successful": bool(
+                        turn_result.external_action_result
+                        and turn_result.external_action_result.success
+                    ),
                     "tool_name": metadata.get("tool_name", "unknown"),
                 }
             )
@@ -252,11 +266,13 @@ class FlowProcessor:
         else:
             # Fallback to any message in metadata
             assistant_message = metadata.get("message", "")
-        
+
         logger.info(f"Result type: {result_type}")
         logger.info(f"Message: {assistant_message}")
         logger.info(f"External action executed: {turn_result.external_action_executed}")
-        logger.info(f"External action successful: {bool(turn_result.external_action_result and turn_result.external_action_result.success)}")
+        logger.info(
+            f"External action successful: {bool(turn_result.external_action_result and turn_result.external_action_result.success)}"
+        )
         logger.info("=" * 80)
 
         return FlowResponse(
