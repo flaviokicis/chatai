@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, Query, Request, Response
 
-from .webhook import handle_twilio_whatsapp_webhook, handle_whatsapp_webhook_verification
+from .webhook import handle_whatsapp_webhook, handle_whatsapp_webhook_verification
 
 router = APIRouter()
 
@@ -13,7 +13,7 @@ async def whatsapp_webhook_post(
     x_twilio_signature: str | None = Header(default=None, alias="X-Twilio-Signature"),
 ) -> Response:
     """Handle incoming WhatsApp messages (POST) - supports both Twilio and Cloud API."""
-    return await handle_twilio_whatsapp_webhook(request, x_twilio_signature)
+    return await handle_whatsapp_webhook(request, x_twilio_signature)
 
 
 # Legacy route for backwards compatibility
@@ -23,7 +23,7 @@ async def twilio_whatsapp_webhook_legacy(
     x_twilio_signature: str | None = Header(default=None, alias="X-Twilio-Signature"),
 ) -> Response:
     """Legacy Twilio WhatsApp webhook (redirects to new unified endpoint)."""
-    return await handle_twilio_whatsapp_webhook(request, x_twilio_signature)
+    return await handle_whatsapp_webhook(request, x_twilio_signature)
 
 
 @router.get("/webhooks/whatsapp")

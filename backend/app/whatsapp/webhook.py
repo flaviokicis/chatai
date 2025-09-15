@@ -19,25 +19,24 @@ from app.whatsapp.whatsapp_api_adapter import WhatsAppApiAdapter
 logger = logging.getLogger(__name__)
 
 
-def _get_adapter(settings: Any, *, use_whatsapp_api: bool = False) -> WhatsAppAdapter:  # type: ignore[type-arg]
-    """Get the WhatsApp Cloud API adapter."""
+def _get_adapter(settings: Any) -> WhatsAppAdapter:  # type: ignore[type-arg]
+    """Get the WhatsApp adapter based on provider settings."""
     return WhatsAppApiAdapter(settings)
 
 
-async def handle_twilio_whatsapp_webhook(
+async def handle_whatsapp_webhook(
     request: Request, x_twilio_signature: str | None
 ) -> Response:
     """
     Clean, modular WhatsApp webhook handler.
 
-    This function now delegates all complex logic to specialized services,
-    maintaining a clean separation of concerns and single responsibility principle.
+    Delegates complex logic to specialized services while keeping this layer
+    focused on HTTP concerns.
     """
     try:
         # Get appropriate adapter
         settings = get_settings()
-        use_whatsapp_api = settings.whatsapp_provider == "cloud_api"
-        adapter = _get_adapter(settings, use_whatsapp_api=use_whatsapp_api)
+        adapter = _get_adapter(settings)
 
         # Process message through the complete pipeline
         processor = WhatsAppMessageProcessor(adapter)
