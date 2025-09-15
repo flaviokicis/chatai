@@ -28,20 +28,22 @@ class WhatsAppAdapter(Protocol):
         plan: list[dict[str, object]] | None,
         reply_id: str | None = None,
         store: Any = None,
+        conversation_setup: Any = None,
     ) -> None:
         """Send follow-up messages with delays, best-effort (may run in background).
 
         Implementations should skip the first item of the plan (it was already sent
         synchronously in the initial webhook response).
-        
+
         Args:
             reply_id: Unique ID for this conversation turn, used for interruption handling
             store: Redis store for checking if reply is still current
+            conversation_setup: Conversation context for database logging
         """
 
     def send_typing_indicator(self, to_phone: str, phone_number_id: str, message_id: str) -> None:
         """Send typing indicator to show that the bot is preparing a response.
-        
+
         Args:
             to_phone: Phone number to send typing indicator to (clean format, no whatsapp: prefix)
             phone_number_id: WhatsApp Business phone number ID

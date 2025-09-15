@@ -14,19 +14,13 @@ def build_flow_from_questions(questions: list[QuestionConfig], flow_id: str) -> 
 
     # Question nodes
     for q in questions:
-        nodes.append(
-            QuestionNode(id=f"q:{q.key}", label=q.key, key=q.key, prompt=q.prompt)
-        )
+        nodes.append(QuestionNode(id=f"q:{q.key}", label=q.key, key=q.key, prompt=q.prompt))
 
     # Edges
     edges: list[Edge] = []
     for q in sorted(questions, key=lambda it: it.priority):
-        guard = GuardRef(
-            fn="deps_missing", args={"key": q.key, "dependencies": q.dependencies}
-        )
-        edges.append(
-            Edge(source=chooser.id, target=f"q:{q.key}", guard=guard, priority=q.priority)
-        )
+        guard = GuardRef(fn="deps_missing", args={"key": q.key, "dependencies": q.dependencies})
+        edges.append(Edge(source=chooser.id, target=f"q:{q.key}", guard=guard, priority=q.priority))
 
     edges.append(
         Edge(source=chooser.id, target=terminal.id, guard=GuardRef(fn="always"), priority=10_000)
@@ -87,7 +81,7 @@ def build_flow_from_question_graph_params(params: dict[str, Any], flow_id: str) 
                 allowed_values=q_data.get("allowed_values"),
                 input_type=str(q_data.get("input_type", "text")),
                 placeholder=q_data.get("placeholder"),
-                help_text=q_data.get("help_text")
+                help_text=q_data.get("help_text"),
             )
             if question.key and question.prompt:  # Only add valid questions
                 questions.append(question)
@@ -109,7 +103,7 @@ def build_flow_from_question_graph_params(params: dict[str, Any], flow_id: str) 
         version=str(params.get("version", "1.0")),
         allow_skip=bool(params.get("allow_skip", False)),
         require_all_answers=bool(params.get("require_all_answers", True)),
-        completion_message=params.get("completion_message")
+        completion_message=params.get("completion_message"),
     )
 
     return build_flow_from_config(config)

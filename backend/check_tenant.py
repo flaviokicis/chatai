@@ -2,11 +2,13 @@
 """
 Quick script to check if a tenant exists in the database.
 """
+
 import os
 import sys
 
 # Add the backend directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 
 def check_tenant(tenant_id: str):
     """Check if a tenant exists by ID."""
@@ -41,8 +43,10 @@ def check_tenant(tenant_id: str):
     except Exception as e:
         print(f"💥 Error checking tenant: {e}")
         import traceback
+
         traceback.print_exc()
         return False
+
 
 if __name__ == "__main__":
     tenant_id = "068aace8-3cbf-782f-b0a4-bde1d02ffd6e"

@@ -25,17 +25,21 @@ class HandoffReason(BaseModel):
         "out_of_scope",
         "error_recovery",
         "timeout",
-        "other"
+        "other",
     ] = Field(description="Category of handoff reason")
 
     description: str = Field(description="Human-readable description")
-    technical_details: str | None = Field(default=None, description="Technical details for debugging")
+    technical_details: str | None = Field(
+        default=None, description="Technical details for debugging"
+    )
     severity: Literal["low", "medium", "high", "critical"] = Field(
         default="medium", description="Severity level"
     )
 
     # Context information
-    triggered_by_node: str | None = Field(default=None, description="Flow node that triggered handoff")
+    triggered_by_node: str | None = Field(
+        default=None, description="Flow node that triggered handoff"
+    )
     user_input: str | None = Field(default=None, description="User input that caused handoff")
     error_code: str | None = Field(default=None, description="Error code if applicable")
 
@@ -77,8 +81,12 @@ class HandoffContext(BaseModel):
 
     # Agent preferences
     preferred_language: str | None = Field(default=None, description="User's preferred language")
-    accessibility_needs: list[str] = Field(default_factory=list, description="Accessibility requirements")
-    communication_style: str | None = Field(default=None, description="Preferred communication style")
+    accessibility_needs: list[str] = Field(
+        default_factory=list, description="Accessibility requirements"
+    )
+    communication_style: str | None = Field(
+        default=None, description="Preferred communication style"
+    )
 
 
 @dataclass(slots=True)
@@ -179,7 +187,7 @@ class HandoffQueue(BaseModel):
     max_capacity: int = Field(default=100, description="Maximum queue capacity")
     priority_levels: list[str] = Field(
         default_factory=lambda: ["low", "medium", "high", "critical"],
-        description="Supported priority levels"
+        description="Supported priority levels",
     )
 
     # Current state
@@ -193,7 +201,9 @@ class HandoffQueue(BaseModel):
     # Queue rules
     auto_escalation_minutes: int = Field(default=60, description="Auto-escalation timeout")
     requires_skills: list[str] = Field(default_factory=list, description="Required agent skills")
-    business_hours_only: bool = Field(default=True, description="Only process during business hours")
+    business_hours_only: bool = Field(
+        default=True, description="Only process during business hours"
+    )
 
     @property
     def is_at_capacity(self) -> bool:

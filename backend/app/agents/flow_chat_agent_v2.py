@@ -40,7 +40,7 @@ class FlowChatResponse(NamedTuple):
 
 class FlowChatAgentV2:
     """LLM-driven agent for flow modification using single tool architecture.
-    
+
     This agent:
     - Makes exactly ONE LLM call per user request
     - Uses a single tool that accepts multiple actions
@@ -62,7 +62,7 @@ class FlowChatAgentV2:
         active_path: str | None = None,
     ) -> FlowChatResponse:
         """Process a user message and modify the flow as needed.
-        
+
         Args:
             flow: Current flow definition
             history: Conversation history
@@ -70,7 +70,7 @@ class FlowChatAgentV2:
             session: Optional database session
             simplified_view_enabled: Whether simplified view is enabled
             active_path: Currently active path in simplified view
-            
+
         Returns:
             FlowChatResponse with messages and modification status
         """
@@ -83,7 +83,11 @@ class FlowChatAgentV2:
         logger.info(f"Active path: {active_path}")
         if history:
             last_msg = history[-1]
-            logger.info(f"Last message ({last_msg['role']}): {last_msg['content'][:200]}..." if len(last_msg["content"]) > 200 else f"Last message ({last_msg['role']}): {last_msg['content']}")
+            logger.info(
+                f"Last message ({last_msg['role']}): {last_msg['content'][:200]}..."
+                if len(last_msg["content"]) > 200
+                else f"Last message ({last_msg['role']}): {last_msg['content']}"
+            )
         logger.info("=" * 80)
 
         # Build the prompt
@@ -116,21 +120,21 @@ class FlowChatAgentV2:
                 logger.error(f"Attempt {attempt + 1} failed: {e}", exc_info=True)
 
             if attempt < MAX_LLM_RETRIES - 1:
-                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                await asyncio.sleep(2**attempt)  # Exponential backoff
 
         if not result:
             error_msg = f"Failed after {MAX_LLM_RETRIES} attempts: {last_error}"
             logger.error(error_msg)
             return FlowChatResponse(
-                messages=["Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."],
+                messages=[
+                    "Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."
+                ],
                 flow_was_modified=False,
-                modification_summary=None
+                modification_summary=None,
             )
 
         # Process the LLM response
-        return await self._process_llm_response(
-            result, flow, flow_id, session, history
-        )
+        return await self._process_llm_response(result, flow, flow_id, session, history)
 
     async def _call_llm_with_timeout(self, prompt: str) -> dict[str, Any] | None:
         """Call LLM with timeout protection."""
@@ -143,7 +147,7 @@ class FlowChatAgentV2:
         try:
             result = await asyncio.wait_for(
                 loop.run_in_executor(None, self.llm.extract, prompt, [tool_schema]),
-                timeout=LLM_TIMEOUT
+                timeout=LLM_TIMEOUT,
             )
             return result
         except TimeoutError:
@@ -158,29 +162,24 @@ class FlowChatAgentV2:
         flow: dict[str, Any],
         flow_id: UUID | None,
         session: Session | None,
-        history: list[dict[str, str]]
+        history: list[dict[str, str]],
     ) -> FlowChatResponse:
         """Process the LLM response and execute actions."""
         content = llm_result.get("content", "")
         tool_calls = llm_result.get("tool_calls", [])
 
-        logger.info(
-            f"LLM response: content_len={len(content)}, "
-            f"tool_calls={len(tool_calls)}"
-        )
+        logger.info(f"LLM response: content_len={len(content)}, tool_calls={len(tool_calls)}")
 
         # If no tool calls, just return the content
         if not tool_calls:
             if content:
                 return FlowChatResponse(
-                    messages=[content],
-                    flow_was_modified=False,
-                    modification_summary=None
+                    messages=[content], flow_was_modified=False, modification_summary=None
                 )
             return FlowChatResponse(
                 messages=["Como posso ajudar você com o fluxo?"],
                 flow_was_modified=False,
-                modification_summary=None
+                modification_summary=None,
             )
 
         # Execute the batch actions
@@ -192,7 +191,7 @@ class FlowChatAgentV2:
             return FlowChatResponse(
                 messages=[content] if content else ["Nenhuma ação foi especificada."],
                 flow_was_modified=False,
-                modification_summary=None
+                modification_summary=None,
             )
 
         logger.info("=" * 80)
@@ -207,7 +206,7 @@ class FlowChatAgentV2:
             target = action.get("target", "")
 
             logger.info(
-                f"Action {i+1}/{len(actions)}: {action_type} "
+                f"Action {i + 1}/{len(actions)}: {action_type} "
                 f"node={node_id} edge={source}->{target}"
             )
 
@@ -219,10 +218,7 @@ class FlowChatAgentV2:
 
         try:
             result = service.execute_batch_actions(
-                flow=flow,
-                actions=actions,
-                flow_id=flow_id,
-                persist=bool(flow_id and session)
+                flow=flow, actions=actions, flow_id=flow_id, persist=bool(flow_id and session)
             )
         except Exception as e:
             logger.error("❌ FLOW MODIFICATION SERVICE FAILED")
@@ -253,7 +249,7 @@ class FlowChatAgentV2:
             return FlowChatResponse(
                 messages=[message],
                 flow_was_modified=True,
-                modification_summary=modification_summary
+                modification_summary=modification_summary,
             )
         logger.error("=" * 80)
         logger.error("❌ FLOW MODIFICATION FAILED")
@@ -264,16 +260,14 @@ class FlowChatAgentV2:
         for i, action_result in enumerate(result.action_results):
             if not action_result.success:
                 logger.error(
-                    f"Action {i+1} failed: {action_result.action_type} - {action_result.error}"
+                    f"Action {i + 1} failed: {action_result.action_type} - {action_result.error}"
                 )
         logger.error("=" * 80)
 
         error_message = f"❌ Erro ao modificar o fluxo: {result.error}"
 
         return FlowChatResponse(
-            messages=[error_message],
-            flow_was_modified=False,
-            modification_summary=None
+            messages=[error_message], flow_was_modified=False, modification_summary=None
         )
 
     def _build_prompt(
@@ -281,128 +275,133 @@ class FlowChatAgentV2:
         flow: dict[str, Any],
         history: list[dict[str, str]],
         simplified_view_enabled: bool,
-        active_path: str | None
+        active_path: str | None,
     ) -> str:
         """Build the prompt for the LLM."""
         lines = []
 
         # System instructions
-        lines.extend([
-            "You are an expert flow editing assistant that modifies conversation flows.",
-            "You help users create and modify flows using a JSON-based flow language.",
-            "",
-            "## CRITICAL INSTRUCTIONS:",
-            "1. You have access to ONE TOOL: BatchFlowActionsRequest",
-            "2. This tool accepts an array of actions to perform on the flow",
-            "3. You must output ALL modifications in a SINGLE tool call",
-            "4. NEVER make multiple tool calls - batch everything together",
-            "5. Order matters - actions are executed sequentially",
-            "",
-            "## Action Types Available:",
-            "- add_node: Add a new node to the flow",
-            "- update_node: Update an existing node",
-            "- delete_node: Delete a node (automatically removes its edges)",
-            "- add_edge: Add a new edge between nodes",
-            "- update_edge: Update an existing edge",
-            "- delete_edge: Delete an edge",
-            "- set_entry: Change the flow's entry point",
-            "",
-            "## Action Examples:",
-            "```json",
-            json.dumps({
-                "actions": [
+        lines.extend(
+            [
+                "You are an expert flow editing assistant that modifies conversation flows.",
+                "You help users create and modify flows using a JSON-based flow language.",
+                "",
+                "## CRITICAL INSTRUCTIONS:",
+                "1. You have access to ONE TOOL: BatchFlowActionsRequest",
+                "2. This tool accepts an array of actions to perform on the flow",
+                "3. You must output ALL modifications in a SINGLE tool call",
+                "4. NEVER make multiple tool calls - batch everything together",
+                "5. Order matters - actions are executed sequentially",
+                "",
+                "## Action Types Available:",
+                "- add_node: Add a new node to the flow",
+                "- update_node: Update an existing node",
+                "- delete_node: Delete a node (automatically removes its edges)",
+                "- add_edge: Add a new edge between nodes",
+                "- update_edge: Update an existing edge",
+                "- delete_edge: Delete an edge",
+                "- set_entry: Change the flow's entry point",
+                "",
+                "## Action Examples:",
+                "```json",
+                json.dumps(
                     {
-                        "action": "delete_node",
-                        "node_id": "q.old_question"
+                        "actions": [
+                            {"action": "delete_node", "node_id": "q.old_question"},
+                            {
+                                "action": "add_node",
+                                "node_definition": {
+                                    "id": "q.new_question",
+                                    "kind": "Question",
+                                    "key": "answer_key",
+                                    "prompt": "What is your question?",
+                                },
+                            },
+                            {"action": "set_entry", "entry_node": "q.new_question"},
+                            {
+                                "action": "add_edge",
+                                "source": "q.new_question",
+                                "target": "q.next_node",
+                                "priority": 0,
+                            },
+                            {
+                                "action": "update_node",
+                                "node_id": "q.existing",
+                                "updates": {
+                                    "prompt": "Updated question text",
+                                    "allowed_values": ["yes", "no"],
+                                },
+                            },
+                        ]
                     },
-                    {
-                        "action": "add_node",
-                        "node_definition": {
-                            "id": "q.new_question",
-                            "kind": "Question",
-                            "key": "answer_key",
-                            "prompt": "What is your question?"
-                        }
-                    },
-                    {
-                        "action": "set_entry",
-                        "entry_node": "q.new_question"
-                    },
-                    {
-                        "action": "add_edge",
-                        "source": "q.new_question",
-                        "target": "q.next_node",
-                        "priority": 0
-                    },
-                    {
-                        "action": "update_node",
-                        "node_id": "q.existing",
-                        "updates": {
-                            "prompt": "Updated question text",
-                            "allowed_values": ["yes", "no"]
-                        }
-                    }
-                ]
-            }, indent=2),
-            "```",
-            "",
-            "## Important Rules:",
-            "1. When deleting nodes, you don't need to delete edges - they're removed automatically",
-            "2. When adding nodes, remember to connect them with edges",
-            "3. Ensure node IDs are unique and meaningful (e.g., q.field_name, d.decision, t.terminal)",
-            "4. Always validate that source and target nodes exist before adding edges",
-            "5. Order actions correctly: delete old structure before adding new",
-            "6. If deleting the entry node, update the flow's entry point to the new first node",
-            "7. When splitting nodes, maintain the original flow sequence",
-            "",
-            "## Flow Language Reference:",
-            "",
-            "### Node Types:",
-            "- Question: Collects information from user",
-            "  - Required: id, kind='Question', key, prompt",
-            "  - Optional: allowed_values, clarification, examples",
-            "",
-            "- Decision: Routes conversation based on logic",
-            "  - Required: id, kind='Decision'",
-            "  - Optional: decision_type='llm_assisted', decision_prompt",
-            "",
-            "- Terminal: Ends the conversation",
-            "  - Required: id, kind='Terminal'",
-            "  - Optional: reason, success (true/false)",
-            "",
-            "### Edge Properties:",
-            "- source: Source node ID",
-            "- target: Target node ID",
-            "- priority: Lower numbers = higher priority (default 0)",
-            '- guard: Condition object (e.g., {"fn": "answers_has", "args": {"key": "field"}})',
-            "- condition_description: Human-readable description",
-            "",
-        ])
+                    indent=2,
+                ),
+                "```",
+                "",
+                "## Important Rules:",
+                "1. When deleting nodes, you don't need to delete edges - they're removed automatically",
+                "2. When adding nodes, remember to connect them with edges",
+                "3. Ensure node IDs are unique and meaningful (e.g., q.field_name, d.decision, t.terminal)",
+                "4. Always validate that source and target nodes exist before adding edges",
+                "5. Order actions correctly: delete old structure before adding new",
+                "6. If deleting the entry node, update the flow's entry point to the new first node",
+                "7. When splitting nodes, maintain the original flow sequence",
+                "",
+                "## Flow Language Reference:",
+                "",
+                "### Node Types:",
+                "- Question: Collects information from user",
+                "  - Required: id, kind='Question', key, prompt",
+                "  - Optional: allowed_values, clarification, examples",
+                "",
+                "- Decision: Routes conversation based on logic",
+                "  - Required: id, kind='Decision'",
+                "  - Optional: decision_type='llm_assisted', decision_prompt",
+                "",
+                "- Terminal: Ends the conversation",
+                "  - Required: id, kind='Terminal'",
+                "  - Optional: reason, success (true/false)",
+                "",
+                "### Edge Properties:",
+                "- source: Source node ID",
+                "- target: Target node ID",
+                "- priority: Lower numbers = higher priority (default 0)",
+                '- guard: Condition object (e.g., {"fn": "answers_has", "args": {"key": "field"}})',
+                "- condition_description: Human-readable description",
+                "",
+            ]
+        )
 
         # Add simplified view context if enabled
         if simplified_view_enabled and active_path:
-            lines.extend([
-                "## 🎯 VIEW CONTEXT:",
-                f"- User is viewing the '{active_path}' path only",
-                "- Focus modifications on nodes related to this path",
-                "- Don't modify nodes from other conversation paths",
-                "",
-            ])
+            lines.extend(
+                [
+                    "## 🎯 VIEW CONTEXT:",
+                    f"- User is viewing the '{active_path}' path only",
+                    "- Focus modifications on nodes related to this path",
+                    "- Don't modify nodes from other conversation paths",
+                    "",
+                ]
+            )
 
         # Add current flow
-        lines.extend([
-            "## Current Flow Definition:",
-            "```json",
-            json.dumps(flow, indent=2),
-            "```",
-            "",
-        ])
+        lines.extend(
+            [
+                "## Current Flow Definition:",
+                "```json",
+                json.dumps(flow, indent=2),
+                "```",
+                "",
+            ]
+        )
 
         # Add conversation history
         if history:
-            lines.extend([
-                "## Conversation History:",
-            ])
+            lines.extend(
+                [
+                    "## Conversation History:",
+                ]
+            )
             for msg in history:
                 role = msg.get("role", "unknown")
                 content = msg.get("content", "")
@@ -410,34 +409,36 @@ class FlowChatAgentV2:
             lines.append("")
 
         # Final instruction
-        lines.extend([
-            "## Complex Transformation Examples:",
-            "",
-            "### Splitting Multi-Question Nodes:",
-            "If user asks to split nodes with multiple questions:",
-            "1. Identify nodes where prompt contains multiple '?' marks",
-            "2. For each multi-question node:",
-            "   - Delete the original node",
-            "   - Create separate nodes for each question",
-            "   - Reconnect edges to maintain flow",
-            "3. Update entry point if needed",
-            "",
-            "Example: 'What's your name? And your email?' becomes:",
-            "- q.name: 'What's your name?'",
-            "- q.email: 'What's your email?'",
-            "",
-            "### Merging Sequential Nodes:",
-            "If user asks to combine nodes:",
-            "1. Create new combined node",
-            "2. Delete original nodes",
-            "3. Reconnect edges",
-            "",
-            "## Your Task:",
-            "Analyze the user's request and generate the appropriate actions to modify the flow.",
-            "Remember: Output ALL actions in a SINGLE BatchFlowActionsRequest tool call.",
-            "Be helpful, make smart decisions, and ensure the flow remains valid.",
-            "For complex transformations, think step-by-step about all required changes.",
-        ])
+        lines.extend(
+            [
+                "## Complex Transformation Examples:",
+                "",
+                "### Splitting Multi-Question Nodes:",
+                "If user asks to split nodes with multiple questions:",
+                "1. Identify nodes where prompt contains multiple '?' marks",
+                "2. For each multi-question node:",
+                "   - Delete the original node",
+                "   - Create separate nodes for each question",
+                "   - Reconnect edges to maintain flow",
+                "3. Update entry point if needed",
+                "",
+                "Example: 'What's your name? And your email?' becomes:",
+                "- q.name: 'What's your name?'",
+                "- q.email: 'What's your email?'",
+                "",
+                "### Merging Sequential Nodes:",
+                "If user asks to combine nodes:",
+                "1. Create new combined node",
+                "2. Delete original nodes",
+                "3. Reconnect edges",
+                "",
+                "## Your Task:",
+                "Analyze the user's request and generate the appropriate actions to modify the flow.",
+                "Remember: Output ALL actions in a SINGLE BatchFlowActionsRequest tool call.",
+                "Be helpful, make smart decisions, and ensure the flow remains valid.",
+                "For complex transformations, think step-by-step about all required changes.",
+            ]
+        )
 
         return "\n".join(lines)
 

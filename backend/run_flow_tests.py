@@ -18,7 +18,9 @@ def run_tests():
 
     # Run the specific test file
     cmd = [
-        sys.executable, "-m", "pytest",
+        sys.executable,
+        "-m",
+        "pytest",
         "tests/test_flow_modification_tools.py",
         "-v",  # Verbose output
         "--tb=short",  # Short traceback format
@@ -45,6 +47,7 @@ def run_tests():
     except Exception as e:
         print(f"❌ Error running tests: {e}")
         return 1
+
 
 if __name__ == "__main__":
     exit_code = run_tests()

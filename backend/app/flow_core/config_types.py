@@ -86,11 +86,15 @@ class ProjectStyleConfig(BaseModel):
     target_audience: str | None = Field(default=None, description="Target audience description")
 
     # Brand voice
-    brand_personality: list[str] = Field(default_factory=list, description="Brand personality traits")
+    brand_personality: list[str] = Field(
+        default_factory=list, description="Brand personality traits"
+    )
     key_values: list[str] = Field(default_factory=list, description="Key brand values")
 
     # Custom instructions
-    custom_instructions: str | None = Field(default=None, description="Additional custom instructions")
+    custom_instructions: str | None = Field(
+        default=None, description="Additional custom instructions"
+    )
 
     @field_validator("tone")
     @classmethod
@@ -128,7 +132,9 @@ class LLMConfig(BaseModel):
     timeout_seconds: int = Field(default=30, ge=1, description="Request timeout in seconds")
 
     # Response preferences
-    prefer_structured_output: bool = Field(default=True, description="Prefer structured JSON responses")
+    prefer_structured_output: bool = Field(
+        default=True, description="Prefer structured JSON responses"
+    )
     enforce_json_mode: bool = Field(default=False, description="Force JSON mode if supported")
 
 
@@ -189,5 +195,3 @@ class ResponseGenerationConfig:
 
     # Additional context
     extra_context: dict[str, Any] = field(default_factory=dict)
-
-

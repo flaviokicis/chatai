@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 
 class ActionRegistry:
     """Registry for external action executors.
-    
+
     This class manages all available action executors and provides
     a clean interface for executing actions by name.
     """
 
     def __init__(self, llm_client: LLMClient):
         """Initialize the action registry.
-        
+
         Args:
             llm_client: LLM client for actions that need it
         """
@@ -34,7 +34,7 @@ class ActionRegistry:
 
     def _register_default_executors(self, llm_client: LLMClient) -> None:
         """Register the default set of action executors.
-        
+
         Args:
             llm_client: LLM client for executors that need it
         """
@@ -46,10 +46,10 @@ class ActionRegistry:
 
     def register(self, executor: ActionExecutor) -> None:
         """Register an action executor.
-        
+
         Args:
             executor: The executor to register
-            
+
         Raises:
             ValueError: If an executor with the same name is already registered
         """
@@ -62,10 +62,10 @@ class ActionRegistry:
 
     def get_executor(self, action_name: str) -> ActionExecutor | None:
         """Get an action executor by name.
-        
+
         Args:
             action_name: Name of the action
-            
+
         Returns:
             The executor if found, None otherwise
         """
@@ -73,10 +73,10 @@ class ActionRegistry:
 
     def has_executor(self, action_name: str) -> bool:
         """Check if an executor is registered for the given action.
-        
+
         Args:
             action_name: Name of the action
-            
+
         Returns:
             True if an executor is registered, False otherwise
         """
@@ -84,7 +84,7 @@ class ActionRegistry:
 
     def list_actions(self) -> list[str]:
         """Get a list of all registered action names.
-        
+
         Returns:
             List of registered action names
         """

@@ -44,6 +44,7 @@ class SpeechToTextService:
 
     def _transcribe(self, audio_bytes: bytes, filename: str) -> str:
         import logging
+
         logger = logging.getLogger(__name__)
 
         # Start Langfuse generation for cost tracking
@@ -57,7 +58,7 @@ class SpeechToTextService:
                 "file_size_bytes": len(audio_bytes),
                 "language": "pt",
                 "filename": filename,
-            }
+            },
         )
 
         try:
@@ -65,10 +66,12 @@ class SpeechToTextService:
             files = {"file": (filename, audio_bytes)}
             data = {
                 "model": "whisper-1",  # Using standard Whisper model name
-                "language": "pt"  # Portuguese language hint for better accuracy
+                "language": "pt",  # Portuguese language hint for better accuracy
             }
 
-            logger.info("Starting audio transcription with OpenAI (size: %d bytes)", len(audio_bytes))
+            logger.info(
+                "Starting audio transcription with OpenAI (size: %d bytes)", len(audio_bytes)
+            )
 
             resp = requests.post(
                 "https://api.openai.com/v1/audio/transcriptions",
@@ -98,7 +101,7 @@ class SpeechToTextService:
                     "transcribed_length": len(transcribed_text),
                     "estimated_duration_seconds": estimated_duration_seconds,
                     "language_detected": response_data.get("language", "pt"),
-                }
+                },
             )
             generation.end()
 
@@ -109,8 +112,7 @@ class SpeechToTextService:
         except Exception as e:
             # Track error in Langfuse
             generation.update(
-                output=f"ERROR: {e}",
-                metadata={"error": str(e), "error_type": type(e).__name__}
+                output=f"ERROR: {e}", metadata={"error": str(e), "error_type": type(e).__name__}
             )
             generation.end()
             raise

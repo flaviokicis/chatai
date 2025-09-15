@@ -1,4 +1,4 @@
-.PHONY: install dev test lint lint-fix fmt typecheck ci
+.PHONY: install dev test lint lint-fix fmt typecheck validate validate-quick ci
 
 PROJECT_DIR := $(shell pwd)
 APP := app.main:app
@@ -46,7 +46,115 @@ fmt:
 typecheck:
 	. .venv/bin/activate && PYTHONPATH=. uv run mypy --config-file pyproject.toml app tests
 
-ci: lint fmt typecheck test
+# Pre-flight validation - catches issues before runtime  
+validate:
+	@echo "🚀 Pre-flight Validation"
+	@echo "========================"
+	@echo ""
+	@echo "\033[1;33m1. Running Ruff linter (critical errors only)...\033[0m"
+	@RUFF_OUTPUT=$$(. .venv/bin/activate && ruff check app/ --quiet 2>&1 || true); \
+	if echo "$$RUFF_OUTPUT" | grep -q "F401\|F821\|E999\|W292\|F541"; then \
+		echo "\033[0;31m❌ Critical Ruff errors found:\033[0m"; \
+		echo "$$RUFF_OUTPUT" | grep -E "(F401|F821|E999|W292|F541)"; \
+		echo "\033[0;31mRun 'make lint-fix' to auto-fix these critical issues\033[0m"; \
+		exit 1; \
+	else \
+		echo "\033[0;32m✅ Ruff: No critical errors (style warnings ignored)\033[0m"; \
+	fi
+	@echo ""
+	@echo "\033[1;33m2. Checking function signatures and critical type errors with MyPy...\033[0m"
+	@MYPY_OUTPUT=$$(. .venv/bin/activate && mypy app/flow_core/whatsapp_cli.py app/db/repository.py app/services/message_logging_service.py app/core/flow_processor.py app/flow_core/services/responder.py --ignore-missing-imports --no-error-summary 2>&1 || true); \
+	if echo "$$MYPY_OUTPUT" | grep -q "Unexpected keyword argument\|Missing named argument"; then \
+		echo "\033[0;31m❌ Function signature mismatches found:\033[0m"; \
+		echo "$$MYPY_OUTPUT" | grep -E "(Unexpected keyword argument|Missing named argument)" -A1 -B1 | head -20; \
+		echo "\033[0;31mFix these before running to avoid runtime errors!\033[0m"; \
+		exit 1; \
+	elif echo "$$MYPY_OUTPUT" | grep -E "ToolExecutionResult.*has no attribute" | grep -E "(messages|assistant_message|external_action_successful|tool_name)" > /dev/null; then \
+		echo "\033[0;31m❌ ToolExecutionResult attribute errors found:\033[0m"; \
+		echo "$$MYPY_OUTPUT" | grep -E "ToolExecutionResult.*has no attribute" -A1 -B1 | head -20; \
+		echo "\033[0;31mFix these attribute access issues!\033[0m"; \
+		exit 1; \
+	else \
+		echo "\033[0;32m✅ MyPy: No critical type errors\033[0m"; \
+	fi
+	@echo ""
+	@echo "\033[1;33m3. Checking for syntax errors in recently modified files...\033[0m"
+	@MODIFIED_FILES=$$(find app/ -name "*.py" -mtime -1 2>/dev/null | head -10); \
+	if [ ! -z "$$MODIFIED_FILES" ]; then \
+		for file in $$MODIFIED_FILES; do \
+			if ! . .venv/bin/activate && python -m py_compile "$$file" 2>/dev/null; then \
+				echo "\033[0;31m❌ Syntax error in $$file\033[0m"; \
+				. .venv/bin/activate && python -m py_compile "$$file"; \
+				exit 1; \
+			fi; \
+		done; \
+	fi
+	@echo "\033[0;32m✅ No syntax errors in recently modified files\033[0m"
+	@echo ""
+	@echo "\033[1;33m4. Checking critical imports...\033[0m"
+	@if . .venv/bin/activate && python -c "from app.flow_core.whatsapp_cli import WhatsAppSimulatorCLI; from app.db.repository import create_message" 2>/dev/null; then \
+		echo "\033[0;32m✅ Critical imports working\033[0m"; \
+	else \
+		echo "\033[0;31m❌ Import errors detected\033[0m"; \
+		. .venv/bin/activate && python -c "from app.flow_core.whatsapp_cli import WhatsAppSimulatorCLI; from app.db.repository import create_message"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "\033[1;33m5. Validating database functions...\033[0m"
+	@if . .venv/bin/activate && python -c "import inspect; from app.db.repository import create_message; sig = inspect.signature(create_message); params = list(sig.parameters.keys()); required = ['session', 'tenant_id', 'channel_instance_id', 'thread_id', 'contact_id', 'text']; missing = [p for p in required if p not in params]; exit(1) if missing else print('✅ create_message signature valid')"; then \
+		echo "\033[0;32m✅ Database function signatures valid\033[0m"; \
+	else \
+		echo "\033[0;31m❌ Database function signature issues detected\033[0m"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "\033[1;33m6. Checking for JSON serialization issues...\033[0m"
+	@if . .venv/bin/activate && python -c "import re, pathlib; content = pathlib.Path('app/flow_core/services/responder.py').read_text(); matches = re.findall(r'context\.is_complete[^(]', content); exit(1) if matches else print('✅ No method serialization issues')" 2>/dev/null; then \
+		echo "\033[0;32m✅ No JSON serialization issues\033[0m"; \
+	else \
+		echo "\033[0;31m❌ JSON serialization issue: context.is_complete should be context.is_complete()\033[0m"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "\033[1;33m7. Validating flow compilation and edge attributes...\033[0m"
+	@if . .venv/bin/activate && python -c "from app.flow_core.compiler import CompiledEdge; e = CompiledEdge(source='a', target='b'); hasattr(e, 'condition_description') or exit(1); print('✅ CompiledEdge attributes valid')"; then \
+		echo "\033[0;32m✅ Flow compilation types valid\033[0m"; \
+	else \
+		echo "\033[0;31m❌ Flow compilation issues detected\033[0m"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "\033[0;32m========================\033[0m"
+	@echo "\033[0;32m✅ All validations passed!\033[0m" 
+	@echo "\033[0;32m========================\033[0m"
+	@echo ""
+	@echo "You can now safely run:"
+	@echo "  \033[1;33mmake whatsapp-cli\033[0m"
+
+# Quick validation - just function signatures and imports (faster)
+validate-quick:
+	@echo "⚡ Quick Validation"
+	@echo "=================="
+	@echo ""
+	@echo "\033[1;33mChecking function signatures...\033[0m"
+	@MYPY_OUTPUT=$$(. .venv/bin/activate && mypy app/flow_core/whatsapp_cli.py app/db/repository.py --ignore-missing-imports --no-error-summary 2>&1 || true); \
+	if echo "$$MYPY_OUTPUT" | grep -q "Unexpected keyword argument\|Missing named argument"; then \
+		echo "\033[0;31m❌ Function signature issues found:\033[0m"; \
+		echo "$$MYPY_OUTPUT" | grep -E "(Unexpected keyword argument|Missing named argument)" -A1 -B1; \
+		exit 1; \
+	else \
+		echo "\033[0;32m✅ Function signatures OK\033[0m"; \
+	fi
+	@echo "\033[1;33mChecking imports...\033[0m"
+	@if . .venv/bin/activate && python -c "from app.flow_core.whatsapp_cli import WhatsAppSimulatorCLI; from app.db.repository import create_message" 2>/dev/null; then \
+		echo "\033[0;32m✅ Imports OK\033[0m"; \
+	else \
+		echo "\033[0;31m❌ Import errors\033[0m"; \
+		exit 1; \
+	fi
+	@echo "\033[0;32m✅ Quick validation passed!\033[0m"
+
+ci: lint fmt typecheck validate test
 
 # Danger: Drop and recreate all tables (useful after UUID migration)
 .PHONY: reset-db
@@ -85,6 +193,11 @@ flow-async:
 .PHONY: flow-unified
 flow-unified:
 	. .venv/bin/activate && uv run python -m app.flow_core.cli_unified ./playground/fluxo_luminarias.json --model gpt-5
+
+# Run WhatsApp CLI simulator with production infrastructure
+.PHONY: whatsapp-cli
+whatsapp-cli:
+	. .venv/bin/activate && uv run python -m app.flow_core.whatsapp_cli --phone +15550489424
 
 # Run the Flow Core CLI with LLM using the JSON file (for testing without database)
 .PHONY: flow-llm-file

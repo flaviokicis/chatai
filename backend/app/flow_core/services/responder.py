@@ -29,7 +29,7 @@ from ..constants import (
     MIN_MESSAGES_PER_TURN,
     NO_DELAY_MS,
 )
-from ..types import (
+from ..flow_types import (
     GPT5Response,
     GPT5SchemaError,
     WhatsAppMessage,
@@ -60,7 +60,7 @@ class EnhancedFlowResponder:
         thought_tracer: None = None,
     ) -> None:
         """Initialize the enhanced responder.
-        
+
         Args:
             llm: The LLM client (GPT-5) for processing
             thought_tracer: Optional thought tracer (deprecated - using Langfuse)
@@ -85,7 +85,7 @@ class EnhancedFlowResponder:
         flow_graph: dict[str, Any] | None = None,
     ) -> ResponderOutput:
         """Process user message and generate response with tool calling and natural messages.
-        
+
         Args:
             prompt: The current question prompt
             pending_field: The field we're trying to fill
@@ -94,7 +94,7 @@ class EnhancedFlowResponder:
             allowed_values: Optional allowed values for validation
             project_context: Optional project context for styling
             is_completion: Whether this is a flow completion
-            
+
         Returns:
             ResponderOutput with tool execution and natural messages
         """
@@ -124,7 +124,7 @@ class EnhancedFlowResponder:
                 pending_field=pending_field,
                 user_message=user_message,
                 is_admin=is_admin,
-                project_context=project_context
+                project_context=project_context,
             )
 
             # Process the validated response
@@ -142,7 +142,9 @@ class EnhancedFlowResponder:
             # Return fallback response
             return self._create_fallback_response(str(e))
 
-    def _format_available_paths(self, available_edges: list[dict[str, Any]] | None, flow_graph: dict[str, Any] | None) -> str:
+    def _format_available_paths(
+        self, available_edges: list[dict[str, Any]] | None, flow_graph: dict[str, Any] | None
+    ) -> str:
         """Format available paths visualization, skipping routing nodes."""
         if not available_edges:
             return "No navigation paths available from current node."
@@ -162,7 +164,9 @@ class EnhancedFlowResponder:
             for node in flow_graph["nodes"]:
                 node_types[node["id"]] = node["type"]
                 # Get the prompt or reason for display
-                node_prompts[node["id"]] = node.get("prompt") or node.get("reason") or node.get("label") or node["id"]
+                node_prompts[node["id"]] = (
+                    node.get("prompt") or node.get("reason") or node.get("label") or node["id"]
+                )
 
         paths = []
         for edge in available_edges:
@@ -220,7 +224,7 @@ class EnhancedFlowResponder:
             "path_locked": context.path_locked,
             "clarification_count": context.clarification_count,
             "path_corrections": context.path_corrections,
-            "is_complete": context.is_complete,
+            "is_complete": context.is_complete(),  # Call the method
             "turn_count": context.turn_count,
             "available_edges": available_edges if available_edges else [],
         }
@@ -290,7 +294,7 @@ If the user message starts with "[AUDIO_ERROR:", this means there was a technica
 {project_context.project_description if project_context and project_context.project_description else "No specific business context available"}
 
 ## CURRENT CONTEXT
-Current question/intent (from current node {context.current_node_id or 'unknown'}): {prompt}
+Current question/intent (from current node {context.current_node_id or "unknown"}): {prompt}
 {"Pending field being collected: " + pending_field if pending_field else ""}
 {"IMPORTANT: If you just asked for missing information and the user provides a short response (like a number, 'yes', 'no', or brief text), it's likely the answer to your question!" if context.clarification_count > 0 else ""}
 
@@ -396,7 +400,7 @@ This is a conversational flow system - like a "loose script" for the conversatio
 
 ## COMPLETE FLOW DEFINITION
 This is the raw flow JSON that defines all nodes and edges. Use this to understand the complete flow structure:
-{json.dumps(flow_graph if flow_graph else {{"note": "Flow graph not available"}}, ensure_ascii=False, indent=2)}
+{json.dumps(flow_graph if flow_graph else {"note": "Flow graph not available"}, ensure_ascii=False, indent=2)}
 
 ## CURRENT STATE
 This is your current position in the flow:
@@ -684,7 +688,7 @@ REMEMBER: ALWAYS include messages in your tool arguments!"""
 ### Core Messaging Principles
 - Generate {MIN_MESSAGES_PER_TURN}-{MAX_MESSAGES_PER_TURN} natural WhatsApp message bubbles
 - First message always has delay_ms: {NO_DELAY_MS}
-- Follow-up messages have delay_ms: {MAX_FOLLOWUP_DELAY_MS//2}-{MAX_FOLLOWUP_DELAY_MS} (vary naturally)
+- Follow-up messages have delay_ms: {MAX_FOLLOWUP_DELAY_MS // 2}-{MAX_FOLLOWUP_DELAY_MS} (vary naturally)
 - Keep each message concise (max {MAX_MESSAGE_LENGTH} characters)
 - Sound conversational and warm
 """)
@@ -881,15 +885,15 @@ When an admin requests flow changes:
         project_context: ProjectContext | None = None,
     ) -> GPT5Response:
         """Call GPT-5 with enhanced schema and retry on validation failures.
-        
+
         Args:
             instruction: The prompt for GPT-5
             tools: Available tools for selection
             max_retries: Maximum retries for schema validation
-            
+
         Returns:
             Validated GPT5Response
-            
+
         Raises:
             GPT5SchemaError: If validation fails after retries
         """
@@ -899,16 +903,14 @@ When an admin requests flow changes:
             "properties": {
                 "tools": {
                     "type": "array",
-                    "items": {
-                        "oneOf": [self._tool_to_schema(tool) for tool in tools]
-                    },
+                    "items": {"oneOf": [self._tool_to_schema(tool) for tool in tools]},
                     "minItems": 1,
-                    "maxItems": 1  # We only want one tool per response
+                    "maxItems": 1,  # We only want one tool per response
                 },
                 "reasoning": {
                     "type": "string",
-                    "description": "Overall reasoning for the response"
-                }
+                    "description": "Overall reasoning for the response",
+                },
             },
             "required": ["tools", "reasoning"],
         }
@@ -929,9 +931,7 @@ When an admin requests flow changes:
 
             except Exception as e:
                 last_exception = e
-                logger.warning(
-                    f"LLM call failed on attempt {i + 1}/{max_retries}: {e}"
-                )
+                logger.warning(f"LLM call failed on attempt {i + 1}/{max_retries}: {e}")
                 # Add error to instruction for retry
                 error_summary = f"Error: {str(e)[:500]}"
                 instruction += f"\n\n--- PREVIOUS ATTEMPT FAILED ---\nERROR: {error_summary}\nPlease try again with a valid response."
@@ -940,7 +940,7 @@ When an admin requests flow changes:
         raise GPT5SchemaError(
             message=error_msg,
             raw_response={},
-            validation_errors=[str(last_exception)] if last_exception else []
+            validation_errors=[str(last_exception)] if last_exception else [],
         ) from last_exception
 
     async def _process_gpt5_response(
@@ -965,6 +965,7 @@ When an admin requests flow changes:
         # Execute the tool
         # Create tool executor with action registry when needed
         from ..actions import ActionRegistry
+
         action_registry = ActionRegistry(self._llm)
         tool_executor = ToolExecutionService(action_registry)
 
@@ -976,7 +977,9 @@ When an admin requests flow changes:
         )
 
         # Extract messages from the tool (messages should be in the tool data)
-        messages = tool_data.get("messages", [{"text": "Erro ao processar mensagens", "delay_ms": 0}])
+        messages = tool_data.get(
+            "messages", [{"text": "Erro ao processar mensagens", "delay_ms": 0}]
+        )
 
         # Extract common fields from tool data for the final output
         reasoning = tool_data.get("reasoning", response.reasoning)
@@ -1002,7 +1005,7 @@ When an admin requests flow changes:
 
     def _convert_langchain_to_gpt5_response(self, langchain_result: dict[str, Any]) -> GPT5Response:
         """Convert LangChain tool result to GPT5Response format."""
-        from ..types import PerformActionCall, RequestHumanHandoffCall
+        from ..flow_types import PerformActionCall, RequestHumanHandoffCall
 
         # DEBUG: Log what we received from LangChain
         logger.info(f"[DEBUG] LangChain result: {json.dumps(langchain_result, indent=2)}")
@@ -1021,11 +1024,10 @@ When an admin requests flow changes:
                 actions=["stay"],
                 messages=[{"text": content or "Como posso ajudar?", "delay_ms": 0}],
                 reasoning="No specific tool selected",
-                confidence=0.5
+                confidence=0.5,
             )
             return GPT5Response(
-                tools=[tool_call],
-                reasoning="Processed user input without specific tool"
+                tools=[tool_call], reasoning="Processed user input without specific tool"
             )
 
         # Process the first tool call
@@ -1066,12 +1068,11 @@ When an admin requests flow changes:
                 actions=["stay"],
                 messages=tool_args.get("messages", [{"text": "Como posso ajudar?", "delay_ms": 0}]),
                 reasoning=tool_args.get("reasoning", f"Unknown tool {tool_name}, staying on node"),
-                confidence=tool_args.get("confidence", 0.3)
+                confidence=tool_args.get("confidence", 0.3),
             )
 
         return GPT5Response(
-            tools=[tool_call],
-            reasoning=tool_args.get("reasoning", "Processed user input")
+            tools=[tool_call], reasoning=tool_args.get("reasoning", "Processed user input")
         )
 
     def _format_conversation_history(self, context: FlowContext) -> str:
@@ -1098,8 +1099,16 @@ When an admin requests flow changes:
                     last_assistant_message = assistant_msg
             else:
                 # Unknown format, try to extract content
-                user_content = getattr(turn, "content", str(turn)) if hasattr(turn, "role") and turn.role == "user" else ""
-                assistant_content = getattr(turn, "content", str(turn)) if hasattr(turn, "role") and turn.role == "assistant" else ""
+                user_content = (
+                    getattr(turn, "content", str(turn))
+                    if hasattr(turn, "role") and turn.role == "user"
+                    else ""
+                )
+                assistant_content = (
+                    getattr(turn, "content", str(turn))
+                    if hasattr(turn, "role") and turn.role == "assistant"
+                    else ""
+                )
                 if user_content:
                     formatted_history.append(f"User: {user_content}")
                 if assistant_content:
@@ -1108,16 +1117,20 @@ When an admin requests flow changes:
 
         # Add context about what the assistant is waiting for
         if last_assistant_message and "?" in last_assistant_message:
-            formatted_history.append("[CONTEXT: The assistant just asked a question and is waiting for an answer]")
+            formatted_history.append(
+                "[CONTEXT: The assistant just asked a question and is waiting for an answer]"
+            )
 
         return "\n".join(formatted_history)
 
-    def _add_allowed_values_constraint(self, allowed_values: list[str] | None, pending_field: str | None) -> str:
+    def _add_allowed_values_constraint(
+        self, allowed_values: list[str] | None, pending_field: str | None
+    ) -> str:
         """Add constraints for allowed values if applicable."""
         if allowed_values and pending_field:
             return f"""
 ### Constraint for '{pending_field}'
-The value for the field '{pending_field}' MUST be one of the following: {', '.join(allowed_values)}.
+The value for the field '{pending_field}' MUST be one of the following: {", ".join(allowed_values)}.
 Map the user's response to one of these exact values.
 """
         return ""
@@ -1127,10 +1140,7 @@ Map the user's response to one of these exact values.
         error_msg = f"Creating fallback response due to error: {error_message}"
         logger.error(error_msg)
 
-        fallback_message: WhatsAppMessage = {
-            "text": DEFAULT_ERROR_MESSAGE,
-            "delay_ms": NO_DELAY_MS
-        }
+        fallback_message: WhatsAppMessage = {"text": DEFAULT_ERROR_MESSAGE, "delay_ms": NO_DELAY_MS}
 
         return ResponderOutput(
             tool_name=None,

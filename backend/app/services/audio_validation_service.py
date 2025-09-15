@@ -23,17 +23,25 @@ class AudioValidationService:
             tuple: (is_valid, duration_seconds, error_message)
         """
         try:
-            logger.debug("Starting audio duration validation, max allowed: %ds", self.max_duration_seconds)
+            logger.debug(
+                "Starting audio duration validation, max allowed: %ds", self.max_duration_seconds
+            )
 
             duration = self._get_audio_duration_audioread(audio_bytes)
 
             if duration is None:
                 # If we can't determine duration, reject to be safe (prevent large audio costs)
-                logger.warning("Could not determine audio duration, rejecting for safety (bytes received: %d)",
-                             len(audio_bytes) if audio_bytes else 0)
+                logger.warning(
+                    "Could not determine audio duration, rejecting for safety (bytes received: %d)",
+                    len(audio_bytes) if audio_bytes else 0,
+                )
                 return False, None, "Could not determine audio duration"
 
-            logger.debug("Audio duration determined: %.2fs (max allowed: %ds)", duration, self.max_duration_seconds)
+            logger.debug(
+                "Audio duration determined: %.2fs (max allowed: %ds)",
+                duration,
+                self.max_duration_seconds,
+            )
 
             is_valid = duration <= self.max_duration_seconds
             error_msg = None
@@ -72,12 +80,15 @@ class AudioValidationService:
             if file_signature == b"OggS":
                 logger.debug("Detected OGG container format")
             else:
-                logger.warning("Unknown audio format (signature: %s), expected OGG", file_signature.hex())
+                logger.warning(
+                    "Unknown audio format (signature: %s), expected OGG", file_signature.hex()
+                )
 
             # Try to import mutagen for OGG/Opus files
             try:
                 from mutagen.oggopus import OggOpus
                 from mutagen.oggvorbis import OggVorbis
+
                 logger.debug("Mutagen libraries imported successfully")
             except ImportError as e:
                 logger.error("Failed to import mutagen: %s", e)
@@ -96,10 +107,12 @@ class AudioValidationService:
                     audio = OggOpus(temp_path)
                     if audio.info and hasattr(audio.info, "length"):
                         duration = float(audio.info.length)
-                        logger.info("Successfully parsed OggOpus: duration=%.2fs, bitrate=%s, channels=%s",
-                                   duration,
-                                   getattr(audio.info, "bitrate", "unknown"),
-                                   getattr(audio.info, "channels", "unknown"))
+                        logger.info(
+                            "Successfully parsed OggOpus: duration=%.2fs, bitrate=%s, channels=%s",
+                            duration,
+                            getattr(audio.info, "bitrate", "unknown"),
+                            getattr(audio.info, "channels", "unknown"),
+                        )
                         return duration
                     logger.warning("OggOpus parsed but no duration info available")
                 except Exception as e:
@@ -111,21 +124,26 @@ class AudioValidationService:
                     audio = OggVorbis(temp_path)
                     if audio.info and hasattr(audio.info, "length"):
                         duration = float(audio.info.length)
-                        logger.info("Successfully parsed OggVorbis: duration=%.2fs, bitrate=%s, channels=%s",
-                                   duration,
-                                   getattr(audio.info, "bitrate", "unknown"),
-                                   getattr(audio.info, "channels", "unknown"))
+                        logger.info(
+                            "Successfully parsed OggVorbis: duration=%.2fs, bitrate=%s, channels=%s",
+                            duration,
+                            getattr(audio.info, "bitrate", "unknown"),
+                            getattr(audio.info, "channels", "unknown"),
+                        )
                         return duration
                     logger.warning("OggVorbis parsed but no duration info available")
                 except Exception as e:
                     logger.debug("Not a Vorbis file or parsing failed: %s", str(e))
 
-                logger.error("Could not parse OGG file with mutagen - file might be corrupted, incomplete, or use unsupported codec")
+                logger.error(
+                    "Could not parse OGG file with mutagen - file might be corrupted, incomplete, or use unsupported codec"
+                )
 
                 # Try to read more details about why it failed
                 try:
                     # Check file size
                     from pathlib import Path
+
                     file_size = Path(temp_path).stat().st_size
                     logger.debug("Temp file size on disk: %d bytes", file_size)
 
@@ -153,7 +171,9 @@ class AudioValidationService:
 
         return None
 
-    def validate_twilio_media_duration(self, media_url: str, auth: tuple[str, str] | None = None) -> tuple[bool, float | None, str | None]:
+    def validate_twilio_media_duration(
+        self, media_url: str, auth: tuple[str, str] | None = None
+    ) -> tuple[bool, float | None, str | None]:
         """
         Validate audio duration for Twilio media URL.
 
@@ -165,29 +185,42 @@ class AudioValidationService:
             tuple: (is_valid, duration_seconds, error_message)
         """
         try:
-            logger.debug("Starting Twilio media validation for URL: %s", media_url[:100] + "..." if len(media_url) > 100 else media_url)
+            logger.debug(
+                "Starting Twilio media validation for URL: %s",
+                media_url[:100] + "..." if len(media_url) > 100 else media_url,
+            )
             logger.debug("Using auth: %s", "Yes" if auth else "No")
 
             response = requests.get(media_url, auth=auth, timeout=30)
 
-            logger.debug("Twilio media response: status=%d, content_size=%d bytes, content_type=%s",
-                        response.status_code, len(response.content),
-                        response.headers.get("content-type", "unknown"))
+            logger.debug(
+                "Twilio media response: status=%d, content_size=%d bytes, content_type=%s",
+                response.status_code,
+                len(response.content),
+                response.headers.get("content-type", "unknown"),
+            )
 
             if response.status_code != 200:
-                logger.error("Twilio media download failed: status=%d, headers=%s",
-                           response.status_code, dict(response.headers))
+                logger.error(
+                    "Twilio media download failed: status=%d, headers=%s",
+                    response.status_code,
+                    dict(response.headers),
+                )
                 return False, None, f"Twilio download error: {response.status_code}"
 
             response.raise_for_status()
 
-            logger.debug("Downloaded %d bytes of Twilio audio data, validating...", len(response.content))
+            logger.debug(
+                "Downloaded %d bytes of Twilio audio data, validating...", len(response.content)
+            )
             is_valid, duration, error_msg = self.validate_audio_duration(response.content)
 
             if is_valid:
                 logger.info("Twilio audio validation successful: duration=%.2fs", duration or 0)
             else:
-                logger.warning("Twilio audio validation failed: error=%s, duration=%s", error_msg, duration)
+                logger.warning(
+                    "Twilio audio validation failed: error=%s, duration=%s", error_msg, duration
+                )
 
             return is_valid, duration, error_msg
 
@@ -195,16 +228,26 @@ class AudioValidationService:
             logger.error("Timeout downloading Twilio media: %s", media_url[:100])
             return False, None, "Timeout downloading audio"
         except requests.exceptions.RequestException as e:
-            logger.error("Network error downloading Twilio media: %s, error=%s",
-                        media_url[:100], e, exc_info=True)
+            logger.error(
+                "Network error downloading Twilio media: %s, error=%s",
+                media_url[:100],
+                e,
+                exc_info=True,
+            )
             return False, None, f"Network error: {e}"
         except Exception as e:
-            logger.error("Unexpected error in Twilio media validation: %s, error=%s",
-                        media_url[:100], e, exc_info=True)
+            logger.error(
+                "Unexpected error in Twilio media validation: %s, error=%s",
+                media_url[:100],
+                e,
+                exc_info=True,
+            )
             # On error, reject to be safe (prevent unexpected costs)
             return False, None, f"Failed to download audio: {e}"
 
-    def validate_whatsapp_api_media_duration(self, media_id: str, access_token: str) -> tuple[bool, float | None, str | None]:
+    def validate_whatsapp_api_media_duration(
+        self, media_id: str, access_token: str
+    ) -> tuple[bool, float | None, str | None]:
         """
         Validate audio duration for WhatsApp Cloud API media.
 
@@ -224,23 +267,32 @@ class AudioValidationService:
 
             meta_resp = requests.get(
                 api_url,
-                headers={"Authorization": f"Bearer {access_token[:10]}..."},  # Log partial token for security
+                headers={
+                    "Authorization": f"Bearer {access_token[:10]}..."
+                },  # Log partial token for security
                 timeout=30,
             )
 
-            logger.debug("WhatsApp API metadata response: status=%d, size=%d bytes",
-                        meta_resp.status_code, len(meta_resp.content))
+            logger.debug(
+                "WhatsApp API metadata response: status=%d, size=%d bytes",
+                meta_resp.status_code,
+                len(meta_resp.content),
+            )
 
             if meta_resp.status_code != 200:
-                logger.error("WhatsApp API error: status=%d, response=%s",
-                           meta_resp.status_code, meta_resp.text[:500])
+                logger.error(
+                    "WhatsApp API error: status=%d, response=%s",
+                    meta_resp.status_code,
+                    meta_resp.text[:500],
+                )
                 return False, None, f"WhatsApp API error: {meta_resp.status_code}"
 
             meta_resp.raise_for_status()
 
             meta_data = meta_resp.json()
-            logger.debug("WhatsApp media metadata: %s",
-                        {k: v for k, v in meta_data.items() if k != "url"})  # Don't log full URL
+            logger.debug(
+                "WhatsApp media metadata: %s", {k: v for k, v in meta_data.items() if k != "url"}
+            )  # Don't log full URL
 
             media_url = meta_data.get("url")
             mime_type = meta_data.get("mime_type", "unknown")
@@ -261,27 +313,42 @@ class AudioValidationService:
                 timeout=30,
             )
 
-            logger.debug("WhatsApp CDN response: status=%d, content_size=%d bytes, content_type=%s",
-                        media_resp.status_code, len(media_resp.content),
-                        media_resp.headers.get("content-type", "unknown"))
+            logger.debug(
+                "WhatsApp CDN response: status=%d, content_size=%d bytes, content_type=%s",
+                media_resp.status_code,
+                len(media_resp.content),
+                media_resp.headers.get("content-type", "unknown"),
+            )
 
             if media_resp.status_code != 200:
-                logger.error("WhatsApp CDN error: status=%d, headers=%s",
-                           media_resp.status_code, dict(media_resp.headers))
+                logger.error(
+                    "WhatsApp CDN error: status=%d, headers=%s",
+                    media_resp.status_code,
+                    dict(media_resp.headers),
+                )
                 return False, None, f"WhatsApp CDN error: {media_resp.status_code}"
 
             media_resp.raise_for_status()
 
             # Validate the downloaded audio
-            logger.debug("Downloaded %d bytes of audio data, validating...", len(media_resp.content))
+            logger.debug(
+                "Downloaded %d bytes of audio data, validating...", len(media_resp.content)
+            )
             is_valid, duration, error_msg = self.validate_audio_duration(media_resp.content)
 
             if is_valid:
-                logger.info("WhatsApp audio validation successful: media_id=%s, duration=%.2fs",
-                          media_id, duration or 0)
+                logger.info(
+                    "WhatsApp audio validation successful: media_id=%s, duration=%.2fs",
+                    media_id,
+                    duration or 0,
+                )
             else:
-                logger.warning("WhatsApp audio validation failed: media_id=%s, error=%s, duration=%s",
-                             media_id, error_msg, duration)
+                logger.warning(
+                    "WhatsApp audio validation failed: media_id=%s, error=%s, duration=%s",
+                    media_id,
+                    error_msg,
+                    duration,
+                )
 
             return is_valid, duration, error_msg
 
@@ -289,11 +356,19 @@ class AudioValidationService:
             logger.error("Timeout downloading WhatsApp media: media_id=%s", media_id)
             return False, None, "Timeout downloading audio"
         except requests.exceptions.RequestException as e:
-            logger.error("Network error downloading WhatsApp media: media_id=%s, error=%s",
-                        media_id, e, exc_info=True)
+            logger.error(
+                "Network error downloading WhatsApp media: media_id=%s, error=%s",
+                media_id,
+                e,
+                exc_info=True,
+            )
             return False, None, f"Network error: {e}"
         except Exception as e:
-            logger.error("Unexpected error in WhatsApp media validation: media_id=%s, error=%s",
-                        media_id, e, exc_info=True)
+            logger.error(
+                "Unexpected error in WhatsApp media validation: media_id=%s, error=%s",
+                media_id,
+                e,
+                exc_info=True,
+            )
             # On error, reject to be safe (prevent unexpected costs)
             return False, None, f"Failed to download audio: {e}"

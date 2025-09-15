@@ -14,7 +14,7 @@ from typing import Any
 @dataclass(frozen=True)
 class ActionResult:
     """Result of an external action execution.
-    
+
     This is the contract between action executors and the LLM feedback system.
     All results must be serializable and contain human-readable messages.
     """
@@ -37,7 +37,7 @@ class ActionResult:
 
 class ActionExecutor(ABC):
     """Base interface for executing external actions.
-    
+
     All external actions that require LLM feedback must implement this interface.
     This ensures proper separation of concerns and consistent error handling.
     """
@@ -45,14 +45,14 @@ class ActionExecutor(ABC):
     @abstractmethod
     async def execute(self, parameters: dict[str, Any], context: dict[str, Any]) -> ActionResult:
         """Execute the external action.
-        
+
         Args:
             parameters: Action-specific parameters from the LLM
             context: Execution context (user_id, session_id, etc.)
-            
+
         Returns:
             ActionResult with success/failure status and human-readable message
-            
+
         Raises:
             Should not raise exceptions - all errors should be captured in ActionResult
         """

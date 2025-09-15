@@ -69,7 +69,9 @@ class FlowContext:
     active_path: str | None = None
     path_confidence: dict[str, float] = field(default_factory=dict)
     path_locked: bool = False
-    path_labels: dict[str, str] = field(default_factory=dict)  # Maps path keys to human-readable labels
+    path_labels: dict[str, str] = field(
+        default_factory=dict
+    )  # Maps path keys to human-readable labels
     path_corrections: int = 0  # Track how many times user has corrected path
 
     # LLM context hints
@@ -77,8 +79,8 @@ class FlowContext:
     conversation_style: str | None = None  # formal, casual, technical, etc.
     clarification_count: int = 0
 
-    # Flow control
-    is_complete: bool = False
+    # Flow control - renamed to avoid conflict with is_complete() method
+    _is_complete: bool = field(default=False, init=False)
     escalation_reason: str | None = None
 
     # Metadata
@@ -174,13 +176,17 @@ class FlowContext:
             "user_intent": self.user_intent,
             "conversation_style": self.conversation_style,
             "clarification_count": self.clarification_count,
-            "is_complete": self.is_complete,
+            "is_complete": self._is_complete,
             "escalation_reason": self.escalation_reason,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "session_id": self.session_id,
             "pending_field": self.pending_field,
         }
+
+    def is_complete(self) -> bool:
+        """Check if the flow is complete (implements AgentState protocol)."""
+        return self._is_complete
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> FlowContext:
@@ -197,11 +203,13 @@ class FlowContext:
             user_intent=data.get("user_intent"),
             conversation_style=data.get("conversation_style"),
             clarification_count=data.get("clarification_count", 0),
-            is_complete=data.get("is_complete", False),
             escalation_reason=data.get("escalation_reason"),
             session_id=data.get("session_id"),
             pending_field=data.get("pending_field"),
         )
+        
+        # Set is_complete state
+        ctx._is_complete = data.get("is_complete", False)
 
         # Restore timestamps
         if "created_at" in data:

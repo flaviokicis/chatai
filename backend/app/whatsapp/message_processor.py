@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 class WhatsAppMessageProcessor:
     """
     WhatsApp message processor with clean architecture.
-    
+
     Responsibilities:
     - WhatsApp message parsing and validation
     - WhatsApp typing indicators
@@ -58,14 +58,10 @@ class WhatsAppMessageProcessor:
         self.adapter = adapter
         self.settings = get_settings()
 
-    async def process_message(
-        self,
-        request: Request,
-        x_twilio_signature: str | None
-    ) -> Response:
+    async def process_message(self, request: Request, x_twilio_signature: str | None) -> Response:
         """
         Process incoming WhatsApp message.
-        
+
         This method handles all WhatsApp-specific operations and coordinates
         with the flow processor for business logic processing.
         """
@@ -83,13 +79,18 @@ class WhatsAppMessageProcessor:
 
         # Skip processing if no meaningful message content (delivery receipts, status updates, etc.)
         if not message_data.get("sender_number") or not message_data.get("receiver_number"):
-            logger.info("WhatsApp webhook received but no sender/receiver - likely delivery receipt or status update")
+            logger.info(
+                "WhatsApp webhook received but no sender/receiver - likely delivery receipt or status update"
+            )
             return PlainTextResponse("ok")
 
         # Step 3: Check WhatsApp-specific duplicates
         if self._is_duplicate_whatsapp_message(message_data, app_context):
-            logger.debug("WhatsApp message %s from %s is duplicate - already processed",
-                        message_data.get("message_id", "unknown"), message_data.get("sender_number", "unknown"))
+            logger.debug(
+                "WhatsApp message %s from %s is duplicate - already processed",
+                message_data.get("message_id", "unknown"),
+                message_data.get("sender_number", "unknown"),
+            )
             return PlainTextResponse("ok")
 
         # Step 4: Send WhatsApp typing indicator
@@ -104,8 +105,7 @@ class WhatsAppMessageProcessor:
 
         # Step 6: Check for rapid message coordination BEFORE flow processing
         session_id = self._build_session_id(
-            message_data["sender_number"],
-            conversation_setup.flow_id or "unknown"
+            message_data["sender_number"], conversation_setup.flow_id or "unknown"
         )
 
         # Add to message buffer and check if we should wait for aggregation
@@ -116,7 +116,9 @@ class WhatsAppMessageProcessor:
 
             # Check if there's ongoing processing that we should cancel
             if cancellation_manager.should_cancel_processing(session_id):
-                logger.info(f"Detected rapid messages for session {session_id}, attempting aggregation")
+                logger.info(
+                    f"Detected rapid messages for session {session_id}, attempting aggregation"
+                )
 
                 # Wait a bit for more messages to arrive
                 await asyncio.sleep(1.0)
@@ -125,11 +127,15 @@ class WhatsAppMessageProcessor:
                 aggregated_message = cancellation_manager.try_claim_aggregation(session_id)
                 if not aggregated_message:
                     # Another request is handling aggregation, we should exit
-                    logger.info(f"Another request is handling aggregation for {session_id}, exiting")
+                    logger.info(
+                        f"Another request is handling aggregation for {session_id}, exiting"
+                    )
                     return PlainTextResponse("ok")
 
                 # We got the aggregated message, update our request
-                logger.info(f"Processing aggregated message for {session_id}: {aggregated_message[:100]}...")
+                logger.info(
+                    f"Processing aggregated message for {session_id}: {aggregated_message[:100]}..."
+                )
                 message_data["message_text"] = aggregated_message
 
                 # Mark that this is an aggregated message for proper logging
@@ -147,9 +153,7 @@ class WhatsAppMessageProcessor:
         )
 
     async def _extract_whatsapp_message_data(
-        self,
-        params: dict[str, Any],
-        request: Request
+        self, params: dict[str, Any], request: Request
     ) -> dict[str, Any] | None:
         """Extract WhatsApp-specific message data."""
         sender_number = params.get("From", "")
@@ -159,40 +163,48 @@ class WhatsAppMessageProcessor:
         # Handle audio messages early by validating duration and transcribing them to text
         # Check for audio messages more robustly - either empty text or MessageType is audio
         is_audio_message = (
-            params.get("MessageType") == "audio" or
-            (not message_text and params.get("MessageType") == "audio") or
-            (message_text == "[audio message]")  # Fallback for legacy behavior
+            params.get("MessageType") == "audio"
+            or (not message_text and params.get("MessageType") == "audio")
+            or (message_text == "[audio message]")  # Fallback for legacy behavior
         )
 
-        logger.debug("Message type check: MessageType=%s, message_text='%s', is_audio=%s",
-                    params.get("MessageType"), message_text[:50] if message_text else "", is_audio_message)
+        logger.debug(
+            "Message type check: MessageType=%s, message_text='%s', is_audio=%s",
+            params.get("MessageType"),
+            message_text[:50] if message_text else "",
+            is_audio_message,
+        )
 
         if is_audio_message:
             logger.info("Processing audio message from %s", sender_number)
             stt_service = SpeechToTextService(self.settings)
             audio_validator = AudioValidationService(self.settings.max_audio_duration_seconds)
-            logger.debug("Audio validator initialized with max_duration=%ds", self.settings.max_audio_duration_seconds)
+            logger.debug(
+                "Audio validator initialized with max_duration=%ds",
+                self.settings.max_audio_duration_seconds,
+            )
 
             try:
                 num_media = int(str(params.get("NumMedia", "0")) or 0)
                 media_type = str(params.get("MediaContentType0", ""))
                 media_url = params.get("MediaUrl0")
 
-                if (
-                    num_media > 0
-                    and media_url
-                    and media_type.startswith("audio")
-                ):
+                if num_media > 0 and media_url and media_type.startswith("audio"):
                     # Validate Twilio audio duration first
                     is_valid, duration, error_msg = await asyncio.to_thread(
                         audio_validator.validate_twilio_media_duration,
                         media_url,
-                        (self.settings.twilio_account_sid, self.settings.twilio_auth_token) if self.settings.twilio_account_sid else None
+                        (self.settings.twilio_account_sid, self.settings.twilio_auth_token)
+                        if self.settings.twilio_account_sid
+                        else None,
                     )
 
                     if not is_valid:
-                        logger.info("Audio duration validation failed for Twilio media: %s (duration: %ss)",
-                                  error_msg, duration)
+                        logger.info(
+                            "Audio duration validation failed for Twilio media: %s (duration: %ss)",
+                            error_msg,
+                            duration,
+                        )
 
                         # Pass the audio error to the LLM so it can generate a natural response
                         if duration is not None:
@@ -217,23 +229,30 @@ class WhatsAppMessageProcessor:
                 elif params.get("MessageType") == "audio":
                     raw_msg = params.get("WhatsAppRawMessage", {})
                     media_id = (
-                        raw_msg.get("audio", {}).get("id")
-                        if isinstance(raw_msg, dict)
-                        else None
+                        raw_msg.get("audio", {}).get("id") if isinstance(raw_msg, dict) else None
                     )
-                    logger.debug("WhatsApp Cloud API audio: media_id=%s, raw_msg_keys=%s",
-                               media_id, list(raw_msg.keys()) if isinstance(raw_msg, dict) else "not_dict")
+                    logger.debug(
+                        "WhatsApp Cloud API audio: media_id=%s, raw_msg_keys=%s",
+                        media_id,
+                        list(raw_msg.keys()) if isinstance(raw_msg, dict) else "not_dict",
+                    )
 
                     if media_id:
                         # Skip duration validation for WhatsApp Cloud API
                         # WhatsApp already limits audio messages and validation requires API token
                         # Just proceed directly to transcription
-                        logger.info("Transcribing WhatsApp audio: media_id=%s (skipping duration validation)", media_id)
+                        logger.info(
+                            "Transcribing WhatsApp audio: media_id=%s (skipping duration validation)",
+                            media_id,
+                        )
                         try:
                             transcribed_text = await asyncio.to_thread(
                                 stt_service.transcribe_whatsapp_api_media, media_id
                             )
-                            logger.debug("Transcription complete: '%s'", transcribed_text[:100] if transcribed_text else "empty")
+                            logger.debug(
+                                "Transcription complete: '%s'",
+                                transcribed_text[:100] if transcribed_text else "empty",
+                            )
                             # Mark that this came from audio for the LLM
                             if transcribed_text:
                                 message_text = f"[FROM_AUDIO] {transcribed_text}"
@@ -241,7 +260,10 @@ class WhatsAppMessageProcessor:
                                 message_text = transcribed_text
                         except requests.exceptions.HTTPError as e:
                             if e.response and e.response.status_code == 401:
-                                logger.error("WhatsApp API authentication failed - check WHATSAPP_ACCESS_TOKEN: %s", e)
+                                logger.error(
+                                    "WhatsApp API authentication failed - check WHATSAPP_ACCESS_TOKEN: %s",
+                                    e,
+                                )
                                 message_text = "[AUDIO_ERROR: Configuração do WhatsApp API inválida - verifique o token de acesso]"
                             else:
                                 logger.error("HTTP error transcribing WhatsApp audio: %s", e)
@@ -250,31 +272,47 @@ class WhatsAppMessageProcessor:
                             logger.error("Failed to transcribe WhatsApp audio: %s", e)
                             message_text = "[AUDIO_ERROR: Não foi possível processar o áudio]"
                     else:
-                        logger.error("No media_id found in WhatsApp audio message. raw_msg=%s", raw_msg)
-                        message_text = "[AUDIO_ERROR: Não foi possível processar o áudio - ID não encontrado]"
+                        logger.error(
+                            "No media_id found in WhatsApp audio message. raw_msg=%s", raw_msg
+                        )
+                        message_text = (
+                            "[AUDIO_ERROR: Não foi possível processar o áudio - ID não encontrado]"
+                        )
             except Exception as e:
                 logger.error("Failed to process WhatsApp audio: %s", e, exc_info=True)
                 message_text = "[AUDIO_ERROR: Erro inesperado ao processar áudio]"
 
         # Extract WhatsApp message ID
         message_id = (
-            params.get("MessageSid") or
-            params.get("SmsMessageSid") or
-            params.get("message_id") or
+            params.get("MessageSid")
+            or params.get("SmsMessageSid")
+            or params.get("message_id")
+            or
             # WhatsApp Cloud API format
-            (params.get("entry", [{}])[0].get("changes", [{}])[0].get("value", {}).get("messages", [{}])[0].get("id")
-             if isinstance(params.get("entry"), list) else None)
+            (
+                params.get("entry", [{}])[0]
+                .get("changes", [{}])[0]
+                .get("value", {})
+                .get("messages", [{}])[0]
+                .get("id")
+                if isinstance(params.get("entry"), list)
+                else None
+            )
         )
 
-        client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+        client_ip = request.headers.get(
+            "x-forwarded-for", request.client.host if request.client else "unknown"
+        )
 
         # Apply WhatsApp message length limits
         if len(message_text) > self.MAX_INPUT_CHARS:
-            message_text = message_text[:self.MAX_INPUT_CHARS]
+            message_text = message_text[: self.MAX_INPUT_CHARS]
 
         logger.info(
             "Incoming WhatsApp message from %s to %s: %s",
-            sender_number, receiver_number, message_text
+            sender_number,
+            receiver_number,
+            message_text,
         )
 
         return {
@@ -287,9 +325,7 @@ class WhatsAppMessageProcessor:
         }
 
     def _is_duplicate_whatsapp_message(
-        self,
-        message_data: dict[str, Any],
-        app_context: Any
+        self, message_data: dict[str, Any], app_context: Any
     ) -> bool:
         """Check for WhatsApp-specific duplicate messages."""
         dedup_service = MessageDeduplicationService(app_context.store)
@@ -298,7 +334,7 @@ class WhatsAppMessageProcessor:
             message_data["sender_number"],
             message_data["receiver_number"],
             message_data["params"],
-            message_data["client_ip"]
+            message_data["client_ip"],
         )
 
     async def _log_webhook_data(self, request: Request, params: dict[str, Any]) -> None:
@@ -345,7 +381,9 @@ class WhatsAppMessageProcessor:
                 "query_params": dict(request.query_params),
                 "parsed_params": params,
                 "raw_body": body.decode("utf-8") if body else "",
-                "client_ip": request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+                "client_ip": request.headers.get(
+                    "x-forwarded-for", request.client.host if request.client else "unknown"
+                ),
             }
 
             # Write to file
@@ -357,11 +395,7 @@ class WhatsAppMessageProcessor:
         except Exception as e:
             logger.warning(f"Failed to log webhook data: {e}")
 
-    def _is_likely_retry(
-        self,
-        message_data: dict[str, Any],
-        app_context: Any
-    ) -> bool:
+    def _is_likely_retry(self, message_data: dict[str, Any], app_context: Any) -> bool:
         """Check if this is likely a webhook retry based on timing and patterns."""
         # Check if we've recently processed a message from this user
         if not app_context.store or not hasattr(app_context.store, "_r"):
@@ -374,6 +408,7 @@ class WhatsAppMessageProcessor:
 
             # Use a hash of the message content to handle long messages
             import hashlib
+
             message_hash = hashlib.md5(message_text.encode()).hexdigest()[:16]
 
             retry_key = f"webhook_processed:{sender}:{message_hash}"
@@ -391,10 +426,11 @@ class WhatsAppMessageProcessor:
 
     async def _send_whatsapp_typing_indicator(self, message_data: dict[str, Any]) -> None:
         """Send WhatsApp typing indicator."""
-        if (self.settings.whatsapp_provider == "cloud_api" and
-            message_data["message_id"] and
-            hasattr(self.adapter, "send_typing_indicator")):
-
+        if (
+            self.settings.whatsapp_provider == "cloud_api"
+            and message_data["message_id"]
+            and hasattr(self.adapter, "send_typing_indicator")
+        ):
             try:
                 await asyncio.sleep(1.0)
 
@@ -402,7 +438,9 @@ class WhatsAppMessageProcessor:
                 clean_from = message_data["receiver_number"].replace("whatsapp:", "")
 
                 self.adapter.send_typing_indicator(clean_to, clean_from, message_data["message_id"])  # type: ignore[attr-defined]
-                logger.debug("Sent WhatsApp typing indicator for message %s", message_data["message_id"])
+                logger.debug(
+                    "Sent WhatsApp typing indicator for message %s", message_data["message_id"]
+                )
             except Exception as e:
                 logger.warning("Failed to send WhatsApp typing indicator: %s", e)
 
@@ -410,30 +448,28 @@ class WhatsAppMessageProcessor:
         """Setup conversation context."""
         try:
             from app.db.session import db_transaction
+
             with db_transaction() as session:
                 db_handler = WebhookDatabaseHandler(session)
                 return db_handler.setup_conversation(
-                    message_data["sender_number"],
-                    message_data["receiver_number"]
+                    message_data["sender_number"], message_data["receiver_number"]
                 )
         except Exception as e:
             logger.error("Failed to setup WhatsApp conversation context: %s", e)
             return None
 
     async def _process_through_flow_processor(
-        self,
-        message_data: dict[str, Any],
-        conversation_setup: Any,
-        app_context: Any
+        self, message_data: dict[str, Any], conversation_setup: Any, app_context: Any
     ):
         """Process through the flow processor with dependency injection."""
         # Build session ID for cancellation coordination
         session_id = self._build_session_id(
-            message_data["sender_number"],
-            conversation_setup.flow_id or "unknown"
+            message_data["sender_number"], conversation_setup.flow_id or "unknown"
         )
 
-        logger.debug(f"Processing message for session {session_id}: {message_data.get('message_text', '')[:100]}")
+        logger.debug(
+            f"Processing message for session {session_id}: {message_data.get('message_text', '')[:100]}"
+        )
 
         # Create flow request
         flow_request = FlowRequest(
@@ -448,7 +484,9 @@ class WhatsAppMessageProcessor:
             },
             tenant_id=conversation_setup.tenant_id,
             project_context=conversation_setup.project_context,
-            channel_id=message_data["receiver_number"],  # WhatsApp business number for customer traceability
+            channel_id=message_data[
+                "receiver_number"
+            ],  # WhatsApp business number for customer traceability
         )
 
         # Create dependencies with dependency injection
@@ -482,19 +520,26 @@ class WhatsAppMessageProcessor:
         if not flow_response.is_success:
             # Check if this was a cancellation (not a real error)
             if flow_response.metadata and flow_response.metadata.get("cancelled"):
-                logger.info("Flow processing was cancelled for user %s (rapid messages)",
-                           message_data["sender_number"])
+                logger.info(
+                    "Flow processing was cancelled for user %s (rapid messages)",
+                    message_data["sender_number"],
+                )
                 # Don't send error message for cancellations - messages are being aggregated
                 return PlainTextResponse("ok")
 
             # Check if this might be a duplicate/retry webhook to avoid sending multiple error messages
             if self._is_likely_retry(message_data, app_context):
-                logger.warning("Likely webhook retry detected for user %s, not sending duplicate error message",
-                             message_data["sender_number"])
+                logger.warning(
+                    "Likely webhook retry detected for user %s, not sending duplicate error message",
+                    message_data["sender_number"],
+                )
                 return PlainTextResponse("ok")
 
-            logger.error("Flow processor error for user %s: %s",
-                        message_data["sender_number"], flow_response.error)
+            logger.error(
+                "Flow processor error for user %s: %s",
+                message_data["sender_number"],
+                flow_response.error,
+            )
             return self.adapter.build_sync_response(
                 "Desculpe, erro interno do sistema. Tente novamente."
             )
@@ -502,19 +547,27 @@ class WhatsAppMessageProcessor:
         # Determine reply text
         if flow_response.result == FlowProcessingResult.ESCALATE:
             reply_text = flow_response.message or "Vou chamar alguém para ajudar você."
-            logger.warning("Flow escalated for tenant %s: %s",
-                          conversation_setup.tenant_id, reply_text)
+            logger.warning(
+                "Flow escalated for tenant %s: %s", conversation_setup.tenant_id, reply_text
+            )
         elif flow_response.result == FlowProcessingResult.TERMINAL:
             reply_text = flow_response.message or "Obrigado pela conversa!"
-            logger.info("Flow completed for tenant %s: %s",
-                       conversation_setup.tenant_id, reply_text)
+            logger.info(
+                "Flow completed for tenant %s: %s", conversation_setup.tenant_id, reply_text
+            )
         else:
             reply_text = flow_response.message or ""
 
         # Check for cancellation before naturalizing
         try:
-            cancellation_manager = flow_response.metadata.get("cancellation_manager") if flow_response.metadata else None
-            session_id = flow_response.metadata.get("session_id") if flow_response.metadata else None
+            cancellation_manager = (
+                flow_response.metadata.get("cancellation_manager")
+                if flow_response.metadata
+                else None
+            )
+            session_id = (
+                flow_response.metadata.get("session_id") if flow_response.metadata else None
+            )
 
             if cancellation_manager and session_id:
                 cancellation_manager.check_cancellation_and_raise(session_id, "naturalizing")
@@ -550,9 +603,15 @@ class WhatsAppMessageProcessor:
             logger.info("=" * 60)
             logger.info("📱 WHATSAPP: FLOW MODIFICATION RESPONSE")
             logger.info("=" * 60)
-            logger.info(f"Modification success: {flow_response.metadata.get('modification_success', False)}")
-            logger.info(f"Modification failed: {flow_response.metadata.get('modification_failed', False)}")
-            logger.info(f"Modification error: {flow_response.metadata.get('modification_error', 'None')}")
+            logger.info(
+                f"Modification success: {flow_response.metadata.get('modification_success', False)}"
+            )
+            logger.info(
+                f"Modification failed: {flow_response.metadata.get('modification_failed', False)}"
+            )
+            logger.info(
+                f"Modification error: {flow_response.metadata.get('modification_error', 'None')}"
+            )
             logger.info(f"Messages to send: {messages}")
             logger.info("=" * 60)
 
@@ -590,10 +649,7 @@ class WhatsAppMessageProcessor:
         return [{"text": "Entendi. Vou te ajudar com isso.", "delay_ms": 0}]
 
     async def _log_whatsapp_messages(
-        self,
-        message_data: dict[str, Any],
-        conversation_setup: Any,
-        sync_reply: str
+        self, message_data: dict[str, Any], conversation_setup: Any, sync_reply: str
     ) -> None:
         """Log WhatsApp messages asynchronously."""
         try:
@@ -603,7 +659,7 @@ class WhatsAppMessageProcessor:
                 payload = {
                     "aggregated": True,
                     "original_message_count": message_data.get("original_message_count", 1),
-                    "aggregation_method": "rapid_succession"
+                    "aggregation_method": "rapid_succession",
                 }
 
             # Log inbound message (will be the aggregated version if applicable)
@@ -615,8 +671,8 @@ class WhatsAppMessageProcessor:
                 text=message_data["message_text"],
                 direction=MessageDirection.inbound,
                 provider_message_id=(
-                    message_data["params"].get("SmsMessageSid") or
-                    message_data["params"].get("MessageSid")
+                    message_data["params"].get("SmsMessageSid")
+                    or message_data["params"].get("MessageSid")
                 ),
                 payload=payload,
                 status=MessageStatus.delivered,
@@ -647,23 +703,27 @@ class WhatsAppMessageProcessor:
         """Send WhatsApp follow-up messages."""
         try:
             from uuid import uuid4
+
             reply_id = str(uuid4())
 
             from app.core.redis_keys import redis_keys
+
             current_reply_key = redis_keys.current_reply_key(message_data["sender_number"])
             # Extract the key part after "chatai:state:system:" for the store.save call
             key_suffix = current_reply_key.replace("chatai:state:system:", "")
-            app_context.store.save("system", key_suffix, {
-                "reply_id": reply_id,
-                "timestamp": int(datetime.now().timestamp())
-            })
+            app_context.store.save(
+                "system",
+                key_suffix,
+                {"reply_id": reply_id, "timestamp": int(datetime.now().timestamp())},
+            )
 
             self.adapter.send_followups(
                 message_data["sender_number"],
                 message_data["receiver_number"],
                 messages,
                 reply_id,
-                app_context.store
+                app_context.store,
+                conversation_setup,  # Pass conversation context for database logging
             )
         except Exception as e:
             logger.warning("Failed to send WhatsApp follow-ups: %s", e)

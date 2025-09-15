@@ -2,11 +2,13 @@
 """
 Debug script to check tenant and flows.
 """
+
 import os
 import sys
 
 # Add the backend directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 
 def debug_tenant_and_flows(tenant_id: str):
     """Debug tenant and associated flows."""
@@ -39,7 +41,9 @@ def debug_tenant_and_flows(tenant_id: str):
 
             # Check for active flows (not deleted)
             print("🔍 Checking ACTIVE flows for tenant...")
-            active_flows = db.query(Flow).filter(Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None)).all()
+            active_flows = (
+                db.query(Flow).filter(Flow.tenant_id == tenant_id, Flow.deleted_at.is_(None)).all()
+            )
 
             print("📊 Flow Summary:")
             print(f"   Total flows: {len(all_flows)}")
@@ -72,8 +76,10 @@ def debug_tenant_and_flows(tenant_id: str):
     except Exception as e:
         print(f"💥 Error: {e}")
         import traceback
+
         traceback.print_exc()
         return None
+
 
 if __name__ == "__main__":
     # The tenant ID from the logs

@@ -19,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 class FeedbackLoop:
     """Manages the feedback loop between external actions and the LLM.
-    
+
     This class ensures that when external actions are executed, their results
     are fed back to the LLM for proper acknowledgment and truthful responses.
     """
 
     def __init__(self, responder: EnhancedFlowResponder):
         """Initialize the feedback loop.
-        
+
         Args:
             responder: The flow responder for LLM communication
         """
@@ -40,16 +40,19 @@ class FeedbackLoop:
         context: FlowContext,
         original_messages: list[dict[str, Any]] | None = None,
         original_instruction: str | None = None,
+        flow_graph: dict[str, Any] | None = None,
+        available_edges: list[dict[str, Any]] | None = None,
+        current_prompt: str | None = None,
     ) -> dict[str, Any]:
         """Process an external action result through the LLM feedback loop.
-        
+
         Args:
             action_name: Name of the action that was executed
             action_result: Result of the action execution
             context: Current flow context
             original_messages: Original messages the LLM intended to send
             original_instruction: Original instruction from the LLM
-            
+
         Returns:
             Updated response from the LLM based on actual action result
         """
@@ -81,12 +84,14 @@ class FeedbackLoop:
             logger.info("🤖 Requesting LLM feedback response...")
             # Use responder.respond (async) to generate a truthful response based on action result
             responder_output = await self._responder.respond(
-                prompt="",  # Responder builds prompt internally
-                pending_field=None,
+                prompt=current_prompt or f"Action '{action_name}' completed: {action_result.message}",
+                pending_field=context.pending_field,
                 context=feedback_context,
-                user_message="",
+                user_message=result_prompt,  # The action result becomes the "message" to respond to
                 project_context=None,
                 is_admin=True,
+                flow_graph=flow_graph,
+                available_edges=available_edges,
             )
 
             # Convert responder output into a simulated llm_response structure
@@ -97,10 +102,12 @@ class FeedbackLoop:
                         "arguments": {
                             "messages": responder_output.messages,
                             "confidence": responder_output.confidence,
-                            "reasoning": responder_output.reasoning or ""
+                            "reasoning": responder_output.reasoning or "",
                         },
                     }
-                ] if responder_output.tool_name else []
+                ]
+                if responder_output.tool_name
+                else []
             }
 
             logger.info("✅ LLM feedback response generated")
@@ -119,13 +126,13 @@ class FeedbackLoop:
         original_messages: list[dict[str, Any]] | None,
     ) -> FlowContext:
         """Build a context for the feedback loop.
-        
+
         Args:
             original_context: Original flow context
             result_prompt: Prompt with action result details
             instruction_prompt: Instruction for handling the result
             original_messages: Original messages from the LLM
-            
+
         Returns:
             Updated context for feedback
         """
@@ -145,45 +152,50 @@ class FeedbackLoop:
         from datetime import datetime
 
         from ..state import ConversationTurn
-        feedback_context.history.append(ConversationTurn(
-            timestamp=datetime.now(),
-            role="system",
-            content=result_prompt,
-            node_id=None,
-            metadata={}
-        ))
 
-        feedback_context.history.append(ConversationTurn(
-            timestamp=datetime.now(),
-            role="system",
-            content=instruction_prompt,
-            node_id=None,
-            metadata={}
-        ))
+        feedback_context.history.append(
+            ConversationTurn(
+                timestamp=datetime.now(),
+                role="system",
+                content=result_prompt,
+                node_id=None,
+                metadata={},
+            )
+        )
+
+        feedback_context.history.append(
+            ConversationTurn(
+                timestamp=datetime.now(),
+                role="system",
+                content=instruction_prompt,
+                node_id=None,
+                metadata={},
+            )
+        )
 
         if original_messages:
             # Use system role to annotate draft content in a typed-safe way
-            feedback_context.history.append(ConversationTurn(
-                timestamp=datetime.now(),
-                role="system",
-                content=f"Original intended messages: {original_messages}",
-                node_id=None,
-                metadata={}
-            ))
+            feedback_context.history.append(
+                ConversationTurn(
+                    timestamp=datetime.now(),
+                    role="system",
+                    content=f"Original intended messages: {original_messages}",
+                    node_id=None,
+                    metadata={},
+                )
+            )
 
         return feedback_context
 
     def _extract_truthful_response(
-        self,
-        llm_response: dict[str, Any],
-        action_result: ActionResult
+        self, llm_response: dict[str, Any], action_result: ActionResult
     ) -> dict[str, Any]:
         """Extract and validate the truthful response from the LLM.
-        
+
         Args:
             llm_response: Response from the LLM
             action_result: Actual action result
-            
+
         Returns:
             Validated response
         """
@@ -200,23 +212,17 @@ class FeedbackLoop:
             logger.warning("⚠️ LLM response doesn't align with action result, using fallback")
             return self._create_fallback_response("action", action_result)
 
-        return {
-            "messages": messages,
-            "action_result": action_result,
-            "truthful": True
-        }
+        return {"messages": messages, "action_result": action_result, "truthful": True}
 
     def _validate_response_truthfulness(
-        self,
-        messages: list[dict[str, Any]],
-        action_result: ActionResult
+        self, messages: list[dict[str, Any]], action_result: ActionResult
     ) -> bool:
         """Validate that the LLM response is truthful about the action result.
-        
+
         Args:
             messages: Messages from the LLM
             action_result: Actual action result
-            
+
         Returns:
             True if the response is truthful, False otherwise
         """
@@ -234,30 +240,26 @@ class FeedbackLoop:
         error_indicators = ["erro", "falha", "não foi", "❌", "problema", "falhou"]
         return any(indicator in response_text for indicator in error_indicators)
 
-    def _create_fallback_response(self, action_name: str, action_result: ActionResult) -> dict[str, Any]:
+    def _create_fallback_response(
+        self, action_name: str, action_result: ActionResult
+    ) -> dict[str, Any]:
         """Create a fallback response when the LLM feedback fails.
-        
+
         Args:
             action_name: Name of the action
             action_result: Action result
-            
+
         Returns:
             Fallback response
         """
         if action_result.is_success:
-            messages = [{
-                "text": action_result.message,
-                "delay_ms": 0
-            }]
+            messages = [{"text": action_result.message, "delay_ms": 0}]
         else:
-            messages = [{
-                "text": f"{action_result.message}",
-                "delay_ms": 0
-            }]
+            messages = [{"text": f"{action_result.message}", "delay_ms": 0}]
 
         return {
             "messages": messages,
             "action_result": action_result,
             "truthful": True,
-            "fallback": True
+            "fallback": True,
         }

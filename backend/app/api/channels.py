@@ -24,6 +24,7 @@ class FlowData(BaseModel):
     channel_instance_id: str
     is_active: bool
 
+
 class ChannelResponse(BaseModel):
     id: str  # Convert UUID to string for frontend
     channel_type: str
@@ -51,18 +52,20 @@ async def list_tenant_channels(
                     name=flow.name,
                     flow_id=flow.flow_id,
                     channel_instance_id=str(flow.channel_instance_id),
-                    is_active=flow.is_active
+                    is_active=flow.is_active,
                 )
                 for flow in flows
             ]
 
-            result.append(ChannelResponse(
-                id=str(channel.id),
-                channel_type=channel.channel_type.value,
-                identifier=channel.identifier,
-                phone_number=channel.phone_number,
-                flows=flows_data
-            ))
+            result.append(
+                ChannelResponse(
+                    id=str(channel.id),
+                    channel_type=channel.channel_type.value,
+                    identifier=channel.identifier,
+                    phone_number=channel.phone_number,
+                    flows=flows_data,
+                )
+            )
 
         return result
 

@@ -3,6 +3,7 @@
 Test script to verify direct intention routing works on first interaction.
 Tests the fix for the bug where first user messages were not processed.
 """
+
 import os
 import sys
 
@@ -48,12 +49,14 @@ def test_direct_intent():
     print(f"Tool used: {result.tool_name}")
 
     # Verify the intent was extracted
-    assert ctx.answers.get("interesse_inicial") is not None, \
+    assert ctx.answers.get("interesse_inicial") is not None, (
         "Failed to extract interesse_inicial from first message!"
+    )
 
     # Verify we've advanced past the initial question
-    assert ctx.current_node_id != "q.interesse_inicial", \
+    assert ctx.current_node_id != "q.interesse_inicial", (
         f"Still stuck on initial question! Current node: {ctx.current_node_id}"
+    )
 
     print("\n✅ Test 1 PASSED: Intent extracted and flow advanced on first message")
 
@@ -75,12 +78,14 @@ def test_direct_intent():
     print(f"Tool used: {result.tool_name}")
 
     # Verify the intent was extracted
-    assert ctx.answers.get("interesse_inicial") is not None, \
+    assert ctx.answers.get("interesse_inicial") is not None, (
         "Failed to extract interesse_inicial from tennis court message!"
+    )
 
     # Verify we've advanced past the initial question
-    assert ctx.current_node_id != "q.interesse_inicial", \
+    assert ctx.current_node_id != "q.interesse_inicial", (
         f"Still stuck on initial question! Current node: {ctx.current_node_id}"
+    )
 
     print("\n✅ Test 2 PASSED: Tennis court intent extracted and flow advanced")
 
@@ -89,6 +94,6 @@ def test_direct_intent():
     print("Direct intention routing is working correctly!")
     print("=" * 60)
 
+
 if __name__ == "__main__":
     test_direct_intent()
-

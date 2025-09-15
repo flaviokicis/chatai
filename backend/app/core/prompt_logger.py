@@ -20,7 +20,7 @@ class PromptLogger:
         input_text: str,
         response: str,
         model: str = "unknown",
-        metadata: dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Log a prompt/response pair to both JSON and readable TXT files."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]  # milliseconds
@@ -36,7 +36,7 @@ class PromptLogger:
             "instruction": instruction,
             "input_text": input_text,
             "response": response,
-            "metadata": metadata or {}
+            "metadata": metadata or {},
         }
 
         # Save TXT file (readable format)

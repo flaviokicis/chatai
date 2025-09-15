@@ -22,14 +22,14 @@ logger = logging.getLogger(__name__)
 
 class FlowModificationExecutor(ActionExecutor):
     """Executes flow modification actions through the FlowChatService.
-    
+
     This executor provides a clean interface for the LLM to modify flows
     while ensuring proper error handling and user feedback.
     """
 
     def __init__(self, llm_client: LLMClient):
         """Initialize the flow modification executor.
-        
+
         Args:
             llm_client: LLM client for the flow chat agent
         """
@@ -42,11 +42,11 @@ class FlowModificationExecutor(ActionExecutor):
 
     async def execute(self, parameters: dict[str, Any], context: dict[str, Any]) -> ActionResult:
         """Execute flow modification.
-        
+
         Args:
             parameters: Must contain 'flow_modification_instruction' and 'flow_id'
             context: Must contain execution context
-            
+
         Returns:
             ActionResult with modification outcome
         """
@@ -57,7 +57,7 @@ class FlowModificationExecutor(ActionExecutor):
                 return ActionResult(
                     success=False,
                     message="❌ Erro interno: instrução de modificação não fornecida",
-                    error="Missing flow_modification_instruction parameter"
+                    error="Missing flow_modification_instruction parameter",
                 )
 
             flow_id_raw = parameters.get("flow_id")
@@ -65,7 +65,7 @@ class FlowModificationExecutor(ActionExecutor):
                 return ActionResult(
                     success=False,
                     message="❌ Erro interno: ID do fluxo não fornecido",
-                    error="Missing flow_id parameter"
+                    error="Missing flow_id parameter",
                 )
 
             # Convert flow_id to UUID
@@ -75,14 +75,18 @@ class FlowModificationExecutor(ActionExecutor):
                 return ActionResult(
                     success=False,
                     message="❌ Erro interno: ID do fluxo inválido",
-                    error=f"Invalid flow_id: {e}"
+                    error=f"Invalid flow_id: {e}",
                 )
 
             logger.info("=" * 80)
             logger.info("🔧 FLOW MODIFICATION EXECUTOR: Starting execution")
             logger.info("=" * 80)
             logger.info(f"Flow ID: {flow_id}")
-            logger.info(f"Instruction: {instruction[:200]}..." if len(instruction) > 200 else f"Instruction: {instruction}")
+            logger.info(
+                f"Instruction: {instruction[:200]}..."
+                if len(instruction) > 200
+                else f"Instruction: {instruction}"
+            )
             logger.info("=" * 80)
 
             # Execute modification using FlowChatService
@@ -93,13 +97,13 @@ class FlowModificationExecutor(ActionExecutor):
                 return ActionResult(
                     success=True,
                     message="✅ Fluxo modificado com sucesso! As alterações foram aplicadas.",
-                    data={"summary": result.data.get("summary") if result.data else None}
+                    data={"summary": result.data.get("summary") if result.data else None},
                 )
             logger.error(f"❌ Flow modification failed: {result.error}")
             return ActionResult(
                 success=False,
                 message=f"❌ Falha ao modificar o fluxo: {result.error or 'Erro desconhecido'}",
-                error=result.error
+                error=result.error,
             )
 
         except Exception as e:
@@ -107,16 +111,16 @@ class FlowModificationExecutor(ActionExecutor):
             return ActionResult(
                 success=False,
                 message="❌ Erro interno inesperado ao modificar o fluxo",
-                error=str(e)
+                error=str(e),
             )
 
     async def _execute_modification(self, flow_id: UUID, instruction: str) -> ActionResult:
         """Execute the actual flow modification.
-        
+
         Args:
             flow_id: ID of the flow to modify
             instruction: Modification instruction
-            
+
         Returns:
             ActionResult with execution outcome
         """
@@ -134,18 +138,16 @@ class FlowModificationExecutor(ActionExecutor):
                     return ActionResult(
                         success=True,
                         message="Flow modified successfully",
-                        data={"summary": response.modification_summary}
+                        data={"summary": response.modification_summary},
                     )
                 return ActionResult(
                     success=False,
                     message="No modifications were made",
-                    error="FlowChatService returned flow_was_modified=False"
+                    error="FlowChatService returned flow_was_modified=False",
                 )
 
         except Exception as e:
             logger.error(f"Error executing flow modification: {e}", exc_info=True)
             return ActionResult(
-                success=False,
-                message="Failed to execute modification",
-                error=str(e)
+                success=False, message="Failed to execute modification", error=str(e)
             )

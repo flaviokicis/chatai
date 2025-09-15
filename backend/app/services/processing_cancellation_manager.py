@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ProcessingState:
     """State of a processing session."""
+
     is_processing: bool = False
     cancellation_token: asyncio.Event | None = None
     start_time: float = field(default_factory=time.time)
@@ -87,12 +88,16 @@ class ProcessingCancellationManager:
                 return False
 
             # Check if the last message was recent (rapid succession)
-            last_message_time = last_time if last_time is not None else state.get("last_message_time", 0)
+            last_message_time = (
+                last_time if last_time is not None else state.get("last_message_time", 0)
+            )
             time_since_last = time.time() - float(last_message_time or 0)
             should_cancel = time_since_last < self.RAPID_MESSAGE_WINDOW
 
             if should_cancel:
-                logger.info(f"Should cancel processing for session {session_id}: last message {time_since_last:.1f}s ago")
+                logger.info(
+                    f"Should cancel processing for session {session_id}: last message {time_since_last:.1f}s ago"
+                )
 
             return should_cancel
         except Exception as e:
@@ -122,7 +127,7 @@ class ProcessingCancellationManager:
                     "is_processing": True,
                     "start_time": state.start_time,
                     "last_message_time": state.last_message_time,
-                    "process_id": str(uuid.uuid4())  # Track which process owns this
+                    "process_id": str(uuid.uuid4()),  # Track which process owns this
                 }
                 self._store._r.setex(state_key, 300, json.dumps(state_data))  # 5 min expiry
                 logger.info(f"Created cancellation token for session {session_id}")
@@ -198,7 +203,9 @@ class ProcessingCancellationManager:
 
                 # Delete all related keys
                 self._store._r.delete(state_key, cancel_key, lock_key, buffer_key)
-                logger.debug(f"Cleared processing state and aggregation lock for session {session_id}")
+                logger.debug(
+                    f"Cleared processing state and aggregation lock for session {session_id}"
+                )
             except Exception as e:
                 logger.warning(f"Failed to clear Redis state: {e}")
 
@@ -229,10 +236,7 @@ class ProcessingCancellationManager:
                         continue
 
                 # Add message to buffer if not already there
-                msg_data = json.dumps({
-                    "content": message,
-                    "timestamp": current_time
-                })
+                msg_data = json.dumps({"content": message, "timestamp": current_time})
                 self._store._r.rpush(key, msg_data)
                 self._store._r.expire(key, 300)  # 5 minute expiry
 
@@ -248,7 +252,7 @@ class ProcessingCancellationManager:
                     new_state = {
                         "is_processing": False,
                         "last_message_time": current_time,
-                        "start_time": current_time
+                        "start_time": current_time,
                     }
                     self._store._r.setex(state_key, 300, json.dumps(new_state))
 
@@ -273,7 +277,7 @@ class ProcessingCancellationManager:
 
     def try_claim_aggregation(self, session_id: str) -> str | None:
         """Try to atomically claim and get aggregated messages.
-        
+
         Returns the aggregated messages if successfully claimed, None if another request already claimed them.
         """
         if not self._store or not hasattr(self._store, "_r"):
@@ -379,11 +383,11 @@ class ProcessingCancellationManager:
     def check_cancellation_and_raise(self, session_id: str, stage: str = "processing") -> None:
         """
         Check if processing was cancelled and raise an exception if so.
-        
+
         Args:
             session_id: Session to check
             stage: Stage name for logging (e.g., "naturalizing", "sending")
-            
+
         Raises:
             ProcessingCancelledException: If processing was cancelled
         """
@@ -391,14 +395,18 @@ class ProcessingCancellationManager:
         if session_id in self._local_cancellation_tokens:
             token = self._local_cancellation_tokens[session_id]
             if token.is_set():
-                logger.info(f"Processing cancelled during {stage} for session {session_id} (local token)")
+                logger.info(
+                    f"Processing cancelled during {stage} for session {session_id} (local token)"
+                )
                 raise ProcessingCancelledException(f"Processing cancelled during {stage}")
 
         # Check local state
         if session_id in self._processing_states:
             state = self._processing_states[session_id]
             if state.cancellation_token and state.cancellation_token.is_set():
-                logger.info(f"Processing cancelled during {stage} for session {session_id} (local state)")
+                logger.info(
+                    f"Processing cancelled during {stage} for session {session_id} (local state)"
+                )
                 raise ProcessingCancelledException(f"Processing cancelled during {stage}")
 
         # Also check Redis for cross-process cancellation
@@ -406,7 +414,9 @@ class ProcessingCancellationManager:
             try:
                 cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
                 if self._store._r.get(cancel_key):
-                    logger.info(f"Processing cancelled during {stage} for session {session_id} (Redis flag)")
+                    logger.info(
+                        f"Processing cancelled during {stage} for session {session_id} (Redis flag)"
+                    )
                     raise ProcessingCancelledException(f"Processing cancelled during {stage}")
             except ProcessingCancelledException:
                 raise  # Re-raise the cancellation

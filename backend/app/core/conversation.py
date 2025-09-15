@@ -66,9 +66,7 @@ def run_agent_turn(
                 )
     except Exception:
         # Never block the turn on rate limiter failures
-        logger.warning(
-            "Rate limiter check failed; proceeding without limiting", exc_info=True
-        )
+        logger.warning("Rate limiter check failed; proceeding without limiting", exc_info=True)
 
     history = None
     if hasattr(app_context.store, "get_message_history"):

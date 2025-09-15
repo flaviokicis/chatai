@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import UUID
-from dataclasses import dataclass, field
 
 from sqlalchemy.exc import SQLAlchemyError
 from tenacity import (
@@ -43,23 +43,24 @@ class HandoffServiceError(Exception):
 @dataclass(slots=True)
 class HandoffData:
     """Data structure for handoff requests."""
-    id: UUID = field(default_factory=uuid7)
+
     tenant_id: UUID
     reason: HandoffReason
     context: HandoffContext
-    
+    id: UUID = field(default_factory=uuid7)
+
     # Core identifiers
     flow_id: UUID | None = None
     thread_id: UUID | None = None
     contact_id: UUID | None = None
     channel_instance_id: UUID | None = None
     session_id: str | None = None
-    
+
     # Snapshot of state at handoff time
     current_node_id: str | None = None
     user_message: str | None = None
     collected_answers: dict[str, Any] = field(default_factory=dict)
-    
+
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     def to_dict(self) -> dict[str, Any]:
@@ -72,7 +73,9 @@ class HandoffData:
             "flow_id": str(self.flow_id) if self.flow_id else None,
             "thread_id": str(self.thread_id) if self.thread_id else None,
             "contact_id": str(self.contact_id) if self.contact_id else None,
-            "channel_instance_id": str(self.channel_instance_id) if self.channel_instance_id else None,
+            "channel_instance_id": str(self.channel_instance_id)
+            if self.channel_instance_id
+            else None,
             "current_node_id": self.current_node_id,
             "user_message": self.user_message,
             "collected_answers": self.collected_answers,
@@ -91,7 +94,9 @@ class HandoffData:
             flow_id=UUID(data["flow_id"]) if data.get("flow_id") else None,
             thread_id=UUID(data["thread_id"]) if data.get("thread_id") else None,
             contact_id=UUID(data["contact_id"]) if data.get("contact_id") else None,
-            channel_instance_id=UUID(data["channel_instance_id"]) if data.get("channel_instance_id") else None,
+            channel_instance_id=UUID(data["channel_instance_id"])
+            if data.get("channel_instance_id")
+            else None,
             current_node_id=data.get("current_node_id"),
             user_message=data.get("user_message"),
             collected_answers=data.get("collected_answers", {}),
@@ -103,7 +108,7 @@ class HandoffData:
 class HandoffService:
     """
     Robust handoff tracking service.
-    
+
     Implements a database-first, Redis-fallback strategy with Tenacity retries
     to ensure handoff requests are never lost.
     """
@@ -204,7 +209,7 @@ class HandoffService:
     def save_handoff_request(self, handoff_data: HandoffData) -> bool:
         """
         Save handoff request with database-first, Redis-fallback strategy.
-        
+
         Returns True if saved to at least one storage system.
         """
         database_success = False
@@ -265,9 +270,7 @@ class HandoffService:
         """Get handoff requests from database."""
         try:
             with next(get_db_session()) as session:
-                query = session.query(HandoffRequest).filter(
-                    HandoffRequest.tenant_id == tenant_id
-                )
+                query = session.query(HandoffRequest).filter(HandoffRequest.tenant_id == tenant_id)
 
                 if acknowledged is not None:
                     if acknowledged:
@@ -288,9 +291,9 @@ class HandoffService:
         """Mark a handoff request as acknowledged."""
         try:
             with next(get_db_session()) as session:
-                handoff = session.query(HandoffRequest).filter(
-                    HandoffRequest.id == handoff_id
-                ).first()
+                handoff = (
+                    session.query(HandoffRequest).filter(HandoffRequest.id == handoff_id).first()
+                )
 
                 if not handoff:
                     logger.warning("Handoff request %s not found for acknowledgment", handoff_id)

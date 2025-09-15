@@ -2,12 +2,14 @@
 """
 Test the exact repository function used by the API.
 """
+
 import os
 import sys
 from uuid import UUID
 
 # Add the backend directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 
 def test_api_function():
     """Test the exact function used by the admin API."""
@@ -62,6 +64,7 @@ def test_api_function():
                 except Exception as e:
                     print(f"💥 Error creating API response: {e}")
                     import traceback
+
                     traceback.print_exc()
 
             else:
@@ -76,8 +79,10 @@ def test_api_function():
     except Exception as e:
         print(f"💥 Error: {e}")
         import traceback
+
         traceback.print_exc()
         return None
+
 
 if __name__ == "__main__":
     test_api_function()

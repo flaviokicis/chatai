@@ -5,6 +5,7 @@ Revises: 8405d74fc303
 Create Date: 2025-09-10 18:42:58.253283
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -29,9 +30,13 @@ def upgrade() -> None:
         sa.Column("thread_id", sa.UUID(), nullable=True),
         sa.Column("contact_id", sa.UUID(), nullable=True),
         sa.Column("channel_instance_id", sa.UUID(), nullable=True),
-        sa.Column("reason", sa.Text(), nullable=True),  # EncryptedString will be handled by the model
+        sa.Column(
+            "reason", sa.Text(), nullable=True
+        ),  # EncryptedString will be handled by the model
         sa.Column("current_node_id", sa.String(255), nullable=True),
-        sa.Column("user_message", sa.Text(), nullable=True),  # EncryptedString will be handled by the model
+        sa.Column(
+            "user_message", sa.Text(), nullable=True
+        ),  # EncryptedString will be handled by the model
         sa.Column("collected_answers", sa.JSON(), nullable=True),
         sa.Column("acknowledged_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
@@ -39,12 +44,14 @@ def upgrade() -> None:
         sa.Column("conversation_context", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(["channel_instance_id"], ["channel_instances.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["channel_instance_id"], ["channel_instances.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(["contact_id"], ["contacts.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["flow_id"], ["flows.id"], ondelete="SET NULL"),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["thread_id"], ["chat_threads.id"], ondelete="SET NULL"),
-        sa.PrimaryKeyConstraint("id")
+        sa.PrimaryKeyConstraint("id"),
     )
     # ### end Alembic commands ###
 

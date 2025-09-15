@@ -7,19 +7,48 @@ It ensures the LLM is always aware of the actual results of tool executions.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from ..actions import ActionRegistry, ActionResult
 from ..constants import META_NAV_TYPE, META_RESTART
-from ..result_types import ToolExecutionResult
 from ..state import FlowContext
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ToolExecutionResult:
+    """Result of tool execution with proper external action feedback.
+
+    Typed result used across runner/responder to avoid dicts and ensure stability.
+    """
+
+    # Core execution results
+    updates: dict[str, Any] = field(default_factory=dict)
+    navigation: dict[str, Any] | None = None
+    escalate: bool = False
+    terminal: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    # External action results
+    external_action_executed: bool = False
+    external_action_result: ActionResult | None = None
+
+    @property
+    def has_updates(self) -> bool:
+        """Check if there are any answer updates."""
+        return bool(self.updates)
+
+    @property
+    def requires_llm_feedback(self) -> bool:
+        """Check if this result requires LLM feedback."""
+        return self.external_action_executed and self.external_action_result is not None
+
+
 class ToolExecutionService:
     """Service for executing flow tools with external action support.
-    
+
     This service provides clean separation between:
     - Internal actions (navigation, updates) - executed immediately
     - External actions (flow modification, calendar) - executed with feedback
@@ -27,7 +56,7 @@ class ToolExecutionService:
 
     def __init__(self, action_registry: ActionRegistry):
         """Initialize the tool execution service.
-        
+
         Args:
             action_registry: Registry of external action executors
         """
@@ -41,13 +70,13 @@ class ToolExecutionService:
         pending_field: str | None = None,
     ) -> ToolExecutionResult:
         """Execute a tool and process its result.
-        
+
         Args:
             tool_name: Name of the tool to execute
             tool_data: Tool parameters from LLM
             context: Current flow context
             pending_field: Currently pending field (if any)
-            
+
         Returns:
             Execution result with updates and potential external action results
         """
@@ -64,9 +93,7 @@ class ToolExecutionService:
 
         except Exception as e:
             logger.error(f"Tool execution failed for {tool_name}: {e}", exc_info=True)
-            return ToolExecutionResult(
-                metadata={"error": str(e), "tool_name": tool_name}
-            )
+            return ToolExecutionResult(metadata={"error": str(e), "tool_name": tool_name})
 
     async def _handle_perform_action(
         self,
@@ -102,10 +129,7 @@ class ToolExecutionService:
         return result
 
     def _handle_update_action(
-        self,
-        tool_data: dict[str, Any],
-        result: ToolExecutionResult,
-        pending_field: str | None
+        self, tool_data: dict[str, Any], result: ToolExecutionResult, pending_field: str | None
     ) -> None:
         """Handle answer updates."""
         updates = tool_data.get("updates", {})
@@ -113,7 +137,9 @@ class ToolExecutionService:
             result.updates[pending_field] = updates.get(pending_field)
             logger.info(f"Updated field '{pending_field}' with value")
 
-    def _handle_navigate_action(self, tool_data: dict[str, Any], result: ToolExecutionResult) -> None:
+    def _handle_navigate_action(
+        self, tool_data: dict[str, Any], result: ToolExecutionResult
+    ) -> None:
         """Handle navigation actions."""
         target_node_id = tool_data.get("target_node_id")
         if target_node_id:
@@ -129,7 +155,9 @@ class ToolExecutionService:
         result.metadata[META_NAV_TYPE] = "stay"
         logger.info("Staying on current node")
 
-    def _handle_handoff_action(self, tool_data: dict[str, Any], result: ToolExecutionResult) -> None:
+    def _handle_handoff_action(
+        self, tool_data: dict[str, Any], result: ToolExecutionResult
+    ) -> None:
         """Handle handoff actions."""
         result.escalate = True
         handoff_reason = tool_data.get("handoff_reason", "user_requested")
@@ -155,7 +183,7 @@ class ToolExecutionService:
         result: ToolExecutionResult,
     ) -> None:
         """Handle external actions that require feedback.
-        
+
         Args:
             action_name: Name of the external action
             tool_data: Tool parameters
@@ -174,7 +202,7 @@ class ToolExecutionService:
             result.external_action_result = ActionResult(
                 success=False,
                 message=f"❌ Erro interno: ação '{action_name}' não suportada",
-                error=f"No executor registered for action: {action_name}"
+                error=f"No executor registered for action: {action_name}",
             )
             return
 
@@ -207,9 +235,7 @@ class ToolExecutionService:
             logger.error(f"❌ External action '{action_name}' raised exception: {e}", exc_info=True)
             result.external_action_executed = True
             result.external_action_result = ActionResult(
-                success=False,
-                message=f"❌ Erro interno ao executar {action_name}",
-                error=str(e)
+                success=False, message=f"❌ Erro interno ao executar {action_name}", error=str(e)
             )
 
     def _handle_handoff_request(self, tool_data: dict[str, Any]) -> ToolExecutionResult:
@@ -221,5 +247,5 @@ class ToolExecutionService:
                 "reason": tool_data.get("reason", "user_requested"),
                 "urgency": tool_data.get("urgency", "medium"),
                 "tool_name": "RequestHumanHandoff",
-            }
+            },
         )

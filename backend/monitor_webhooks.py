@@ -23,6 +23,7 @@ from datetime import datetime
 
 WEBHOOK_DIR = "/tmp/webhook-calls"
 
+
 def list_webhook_files(sender_filter=None, limit=10):
     """List webhook files, optionally filtered by sender."""
     if not os.path.exists(WEBHOOK_DIR):
@@ -39,17 +40,20 @@ def list_webhook_files(sender_filter=None, limit=10):
 
             filepath = os.path.join(WEBHOOK_DIR, filename)
             stat = os.stat(filepath)
-            files.append({
-                "name": filename,
-                "path": filepath,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime)
-            })
+            files.append(
+                {
+                    "name": filename,
+                    "path": filepath,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime),
+                }
+            )
 
     # Sort by modification time (newest first)
     files.sort(key=lambda x: x["modified"], reverse=True)
 
     return files[:limit] if limit else files
+
 
 def show_webhook_summary(files):
     """Show a summary of webhook files."""
@@ -98,6 +102,7 @@ def show_webhook_summary(files):
 
         print("-" * 40)
 
+
 def show_webhook_content(filename):
     """Show full content of a webhook file."""
     filepath = os.path.join(WEBHOOK_DIR, filename)
@@ -116,6 +121,7 @@ def show_webhook_content(filename):
 
     except Exception as e:
         print(f"❌ Error reading file: {e}")
+
 
 def monitor_webhooks():
     """Continuously monitor for new webhook files."""
@@ -162,6 +168,7 @@ def monitor_webhooks():
     except KeyboardInterrupt:
         print("\n👋 Monitoring stopped")
 
+
 def main():
     parser = argparse.ArgumentParser(description="Monitor WhatsApp webhooks")
     parser.add_argument("--tail", action="store_true", help="Continuously monitor for new webhooks")
@@ -178,6 +185,7 @@ def main():
     else:
         files = list_webhook_files(sender_filter=args.sender, limit=args.limit)
         show_webhook_summary(files)
+
 
 if __name__ == "__main__":
     main()

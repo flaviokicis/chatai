@@ -22,7 +22,7 @@ ENCRYPTION RULES FOR PERSONAL DATA:
 
 📝 EXAMPLES OF ENCRYPTED FIELDS:
 - owner_first_name, owner_last_name (tenant owner names)
-- phone_number (contact phone numbers) 
+- phone_number (contact phone numbers)
 - display_name (user display names)
 - message.text (conversation content)
 - external_id (if format like "whatsapp:+5511999999999")
@@ -233,11 +233,11 @@ class Flow(Base, TimestampMixin):
     # Optimistic locking version
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
-
-
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="flows")
     versions: Mapped[list[FlowVersion]] = relationship(
-        back_populates="flow", cascade="all, delete-orphan", order_by="FlowVersion.version_number.desc()"
+        back_populates="flow",
+        cascade="all, delete-orphan",
+        order_by="FlowVersion.version_number.desc()",
     )
 
 
@@ -312,10 +312,12 @@ class ChatThread(Base, TimestampMixin):
     # Flow completion and human handoff tracking
     flow_completion_data: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    human_handoff_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    human_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
+    human_handoff_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    human_reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     channel_instance: Mapped[ChannelInstance] = relationship(back_populates="threads")
     contact: Mapped[Contact] = relationship(back_populates="threads")
@@ -405,7 +407,9 @@ class HandoffRequest(Base, TimestampMixin):
     id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
     flow_id: Mapped[UUID | None] = mapped_column(ForeignKey("flows.id", ondelete="SET NULL"))
-    thread_id: Mapped[UUID | None] = mapped_column(ForeignKey("chat_threads.id", ondelete="SET NULL"))
+    thread_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("chat_threads.id", ondelete="SET NULL")
+    )
     contact_id: Mapped[UUID | None] = mapped_column(ForeignKey("contacts.id", ondelete="SET NULL"))
     channel_instance_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("channel_instances.id", ondelete="SET NULL")

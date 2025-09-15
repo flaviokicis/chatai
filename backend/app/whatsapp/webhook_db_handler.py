@@ -49,7 +49,7 @@ class ConversationSetup:
 class WebhookDatabaseHandler:
     """
     Handles all database operations for WhatsApp webhook processing.
-    
+
     Encapsulates tenant resolution, channel setup, contact/thread management,
     and flow selection in clean, transactional operations.
     """
@@ -59,23 +59,21 @@ class WebhookDatabaseHandler:
         self.tenant_service = TenantConfigService(session)
 
     def setup_conversation(
-        self,
-        sender_number: str,
-        receiver_number: str
+        self, sender_number: str, receiver_number: str
     ) -> ConversationSetup | None:
         """
         Set up complete conversation context from database.
-        
+
         Handles:
         1. Tenant configuration resolution
-        2. Channel instance lookup  
+        2. Channel instance lookup
         3. Contact/thread creation or retrieval
         4. Active flow selection
-        
+
         Args:
             sender_number: WhatsApp sender number (with whatsapp: prefix)
             receiver_number: WhatsApp receiver number (with whatsapp: prefix)
-            
+
         Returns:
             ConversationSetup with all required data, or None if setup failed
         """
@@ -86,7 +84,9 @@ class WebhookDatabaseHandler:
             )
 
             if not project_context:
-                logger.warning("No tenant configuration found for WhatsApp number: %s", receiver_number)
+                logger.warning(
+                    "No tenant configuration found for WhatsApp number: %s", receiver_number
+                )
                 return None
 
             tenant_id = project_context.tenant_id
@@ -95,8 +95,11 @@ class WebhookDatabaseHandler:
             # Step 2: Get channel instance
             channel_instance = find_channel_instance_by_identifier(self.session, receiver_number)
             if not channel_instance:
-                logger.error("No channel instance found for number %s (tenant %s)",
-                           receiver_number, tenant_id)
+                logger.error(
+                    "No channel instance found for number %s (tenant %s)",
+                    receiver_number,
+                    tenant_id,
+                )
                 return None
 
             # Step 3: Ensure contact/thread exist
@@ -124,8 +127,12 @@ class WebhookDatabaseHandler:
             # Commit all database changes
             self.session.commit()
 
-            logger.info("Using flow '%s' (flow_id='%s') for tenant %s",
-                       selected_flow.name, selected_flow.flow_id, tenant_id)
+            logger.info(
+                "Using flow '%s' (flow_id='%s') for tenant %s",
+                selected_flow.name,
+                selected_flow.flow_id,
+                tenant_id,
+            )
 
             # Extract flow definition while session is active
             flow_definition = selected_flow.definition
@@ -155,30 +162,32 @@ class WebhookDatabaseHandler:
             return None
 
     def _select_active_flow(
-        self,
-        channel_instance: ChannelInstance,
-        tenant_id: UUID
+        self, channel_instance: ChannelInstance, tenant_id: UUID
     ) -> FlowModel | None:
         """
         Select the first active flow for the given channel instance.
-        
+
         Args:
             channel_instance: Channel instance to find flows for
             tenant_id: Tenant ID for logging
-            
+
         Returns:
             Selected active flow or None if no active flows found
         """
         flows = get_flows_by_channel_instance(self.session, channel_instance.id)
         if not flows:
-            logger.error("No flows found for channel instance %s (tenant %s)",
-                        channel_instance.id, tenant_id)
+            logger.error(
+                "No flows found for channel instance %s (tenant %s)", channel_instance.id, tenant_id
+            )
             return None
 
         active_flows = [f for f in flows if f.is_active]
         if not active_flows:
-            logger.error("No active flows found for channel instance %s (tenant %s)",
-                        channel_instance.id, tenant_id)
+            logger.error(
+                "No active flows found for channel instance %s (tenant %s)",
+                channel_instance.id,
+                tenant_id,
+            )
             return None
 
         return active_flows[0]

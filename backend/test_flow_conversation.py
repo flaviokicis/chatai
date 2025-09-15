@@ -11,15 +11,20 @@ def run_conversation():
     # Start the CLI process
     proc = subprocess.Popen(
         [
-            sys.executable, "-m", "app.flow_core.cli",
-            "--llm", "--model", "gpt-5",
-            "--tenant", "068b37cd-c090-710d-b0b6-5ca37c2887ff"
+            sys.executable,
+            "-m",
+            "app.flow_core.cli",
+            "--llm",
+            "--model",
+            "gpt-5",
+            "--tenant",
+            "068b37cd-c090-710d-b0b6-5ca37c2887ff",
         ],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        bufsize=0
+        bufsize=0,
     )
 
     # Conversation sequence
@@ -57,17 +62,20 @@ def run_conversation():
             pass
 
     # Print relevant output
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("CONVERSATION OUTPUT:")
-    print("="*60)
+    print("=" * 60)
 
     for line in output_lines:
         # Filter for assistant messages and state changes
-        if any(marker in line for marker in ["🤖", "Node:", "nome", "email", "altura", "marquise", "ilhas"]):
+        if any(
+            marker in line
+            for marker in ["🤖", "Node:", "nome", "email", "altura", "marquise", "ilhas"]
+        ):
             print(line)
+
 
 if __name__ == "__main__":
     print("Running flow conversation test...")
     print("This will test: Greeting -> Quadra -> Correction to Gas Station")
     run_conversation()
-

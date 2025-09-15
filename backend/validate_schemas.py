@@ -15,7 +15,7 @@ def test_tool_schemas():
     """Test that all tool schemas can be instantiated correctly."""
     print("🧪 Testing Tool Schemas...")
 
-    from app.flow_core.types import GPT5Response, PerformActionCall, RequestHumanHandoffCall
+    from app.flow_core.flow_types import GPT5Response, PerformActionCall, RequestHumanHandoffCall
 
     # Test data
     test_messages = [{"text": "Test message", "delay_ms": 0}]
@@ -27,7 +27,7 @@ def test_tool_schemas():
             actions=["stay"],
             messages=test_messages,
             reasoning="Test reasoning",
-            confidence=0.8
+            confidence=0.8,
         )
         print("✅ PerformActionCall schema valid")
     except Exception as e:
@@ -42,7 +42,7 @@ def test_tool_schemas():
             reasoning="Test handoff",
             confidence=0.9,
             reason="explicit_request",
-            context_summary="User requested human assistance"
+            context_summary="User requested human assistance",
         )
         print("✅ RequestHumanHandoffCall schema valid")
     except Exception as e:
@@ -50,10 +50,7 @@ def test_tool_schemas():
         return False
     # Test GPT5Response
     try:
-        response = GPT5Response(
-            tools=[perform_action],
-            reasoning="Test response reasoning"
-        )
+        response = GPT5Response(tools=[perform_action], reasoning="Test response reasoning")
         print("✅ GPT5Response schema valid")
     except Exception as e:
         print(f"❌ GPT5Response schema error: {e}")
@@ -78,14 +75,16 @@ def test_responder_data_flow():
         # Mock the LLM response
         mock_llm_response = {
             "content": "Test response",
-            "tool_calls": [{
-                "name": "PerformAction",
-                "arguments": {
-                    "actions": ["stay"],
-                    "reasoning": "Test reasoning",
-                    "confidence": 0.8
+            "tool_calls": [
+                {
+                    "name": "PerformAction",
+                    "arguments": {
+                        "actions": ["stay"],
+                        "reasoning": "Test reasoning",
+                        "confidence": 0.8,
+                    },
                 }
-            }]
+            ],
         }
 
         # Mock the _call_langchain method to return our test data
@@ -101,7 +100,7 @@ def test_responder_data_flow():
                 prompt="Test prompt",
                 pending_field=None,
                 context=context,
-                user_message="Test user message"
+                user_message="Test user message",
             )
 
             print("✅ Responder data flow working")
@@ -112,6 +111,7 @@ def test_responder_data_flow():
     except Exception as e:
         print(f"❌ Responder data flow error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -124,7 +124,7 @@ def test_whatsapp_integration():
         from unittest.mock import MagicMock
 
         from app.whatsapp.message_processor import WhatsAppMessageProcessor
-        from app.whatsapp.twilio_adapter import TwilioWhatsAppAdapter
+        from app.whatsapp.whatsapp_api_adapter import WhatsAppApiAdapter
 
         # Create mock adapter
         mock_settings = MagicMock()
@@ -133,13 +133,13 @@ def test_whatsapp_integration():
         mock_settings.whatsapp_provider = "twilio"
         mock_settings.debug = False
 
-        adapter = TwilioWhatsAppAdapter(mock_settings)
+        adapter = WhatsAppApiAdapter(mock_settings)
         processor = WhatsAppMessageProcessor(adapter)
 
         # Test retry detection method
         mock_message_data = {
             "message_text": "test message",
-            "sender_number": "whatsapp:+1234567890"
+            "sender_number": "whatsapp:+1234567890",
         }
         mock_app_context = MagicMock()
         mock_app_context.store = None
@@ -152,6 +152,7 @@ def test_whatsapp_integration():
     except Exception as e:
         print(f"❌ WhatsApp integration error: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 
@@ -161,11 +162,7 @@ def main():
     print("🚀 Running Comprehensive Schema Validation...")
     print("=" * 60)
 
-    tests = [
-        test_tool_schemas,
-        test_responder_data_flow,
-        test_whatsapp_integration
-    ]
+    tests = [test_tool_schemas, test_responder_data_flow, test_whatsapp_integration]
 
     passed = 0
     failed = 0

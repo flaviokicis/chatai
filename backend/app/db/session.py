@@ -34,7 +34,7 @@ def _engine():
             "connect_timeout": 10,  # 10s connection timeout
             "application_name": "chatai_backend",
             "options": "-c jit=off",  # Disable JIT for faster simple queries
-        }
+        },
     )
 
 
@@ -54,7 +54,7 @@ def get_db_session() -> Generator[Session, None, None]:
 def create_session() -> Session:
     """
     Create a new database session.
-    
+
     Use this when you need a session outside of FastAPI dependency injection.
     Remember to close the session when done.
     """
@@ -70,10 +70,10 @@ def get_engine():
 def db_session() -> Iterator[Session]:
     """
     Context manager for database sessions with guaranteed cleanup.
-    
+
     This is the RECOMMENDED way to handle database sessions.
     Ensures proper resource cleanup even if exceptions occur.
-    
+
     Usage:
         with db_session() as session:
             # Do database work
@@ -99,9 +99,9 @@ def db_session() -> Iterator[Session]:
 def db_transaction() -> Iterator[Session]:
     """
     Context manager for database transactions with automatic commit/rollback.
-    
+
     Automatically commits on success, rolls back on exception.
-    
+
     Usage:
         with db_transaction() as session:
             user = User(name="John")

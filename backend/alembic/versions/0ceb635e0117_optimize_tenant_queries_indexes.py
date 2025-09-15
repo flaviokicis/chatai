@@ -5,6 +5,7 @@ Revises: f4db6466c728
 Create Date: 2025-09-02 13:21:16.245701
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -25,7 +26,7 @@ def upgrade() -> None:
         "ix_channel_instances_tenant_id_active",
         "channel_instances",
         ["tenant_id"],
-        postgresql_where=sa.text("deleted_at IS NULL")
+        postgresql_where=sa.text("deleted_at IS NULL"),
     )
 
     # Index for tenant_id on flows (for counting flows by tenant)
@@ -33,15 +34,11 @@ def upgrade() -> None:
         "ix_flows_tenant_id_active",
         "flows",
         ["tenant_id"],
-        postgresql_where=sa.text("deleted_at IS NULL")
+        postgresql_where=sa.text("deleted_at IS NULL"),
     )
 
     # Composite index for tenants active status queries
-    op.create_index(
-        "ix_tenants_deleted_at_id",
-        "tenants",
-        ["deleted_at", "id"]
-    )
+    op.create_index("ix_tenants_deleted_at_id", "tenants", ["deleted_at", "id"])
 
 
 def downgrade() -> None:

@@ -41,9 +41,15 @@ class BaseAgent(Agent):
         if hasattr(self.deps.store, "clear_chat_history"):
             try:
                 deleted_keys = self.deps.store.clear_chat_history(self.user_id, self.agent_type)
-                logger.info("Cleared %d chat history keys for user %s after handoff", deleted_keys, self.user_id)
+                logger.info(
+                    "Cleared %d chat history keys for user %s after handoff",
+                    deleted_keys,
+                    self.user_id,
+                )
             except Exception as e:
-                logger.warning("Failed to clear chat history after handoff for user %s: %s", self.user_id, e)
+                logger.warning(
+                    "Failed to clear chat history after handoff for user %s: %s", self.user_id, e
+                )
 
         return AgentResult(
             outbound=OutboundMessage(
@@ -196,7 +202,7 @@ class FlowAgent(BaseAgent):
                 new_runner = FlowTurnRunner(new_flow, self.deps.llm, strict_mode=self._strict_mode)
                 old_answers = ctx.answers.copy()
                 old_history = ctx.history.copy()
-                ctx = new_runner.initialize_context() # Re-assign ctx
+                ctx = new_runner.initialize_context()  # Re-assign ctx
                 ctx.answers.update(old_answers)
                 ctx.history = old_history
                 # Produce next prompt in the new path (no new user input)

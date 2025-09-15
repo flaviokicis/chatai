@@ -37,13 +37,13 @@ class MessageGenerationService:
         max_messages: int = MAX_MESSAGES_PER_TURN,
     ) -> list[dict[str, Any]]:
         """Generate WhatsApp-style messages from content.
-        
+
         Args:
             content: The main content to convey
             context: Optional context about the conversation state
             project_context: Optional project-specific context and style
             max_messages: Maximum number of message bubbles to generate
-            
+
         Returns:
             List of message objects with text and delay_ms
         """
@@ -60,11 +60,11 @@ class MessageGenerationService:
         has_custom_style: bool = False,
     ) -> str:
         """Build instructions for message generation.
-        
+
         Args:
             is_completion: Whether this is a flow completion message
             has_custom_style: Whether custom communication style is provided
-            
+
         Returns:
             Instruction text for the LLM
         """
@@ -96,7 +96,7 @@ DEFAULT STYLE:
 - Professional but warm
 - Natural Brazilian Portuguese
 - Like a receptionist you enjoy talking to
-- Use contractions naturally: {', '.join(repr(c) for c in BR_CONTRACTIONS[:2])}
+- Use contractions naturally: {", ".join(repr(c) for c in BR_CONTRACTIONS[:2])}
 - End questions simply with '?'
 """)
 
@@ -104,12 +104,13 @@ DEFAULT STYLE:
 
     def format_messages_json(self, messages: list[dict[str, Any]]) -> str:
         """Format messages as JSON for the response.
-        
+
         Args:
             messages: List of message objects
-            
+
         Returns:
             JSON string representation
         """
         import json
+
         return json.dumps(messages, ensure_ascii=False, indent=2)

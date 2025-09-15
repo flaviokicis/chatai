@@ -96,7 +96,9 @@ class WhatsAppInteractiveMessage(BaseModel):
 
     @field_validator("sections")
     @classmethod
-    def validate_sections(cls, v: list[WhatsAppListSection] | None) -> list[WhatsAppListSection] | None:
+    def validate_sections(
+        cls, v: list[WhatsAppListSection] | None
+    ) -> list[WhatsAppListSection] | None:
         """Validate list sections."""
         if v is not None:
             if len(v) == 0:
@@ -121,7 +123,9 @@ class WhatsAppTemplateParameter(BaseModel):
     # Currency parameters
     fallback_value: str | None = Field(default=None, description="Fallback text for currency")
     code: str | None = Field(default=None, description="Currency code (e.g., USD)")
-    amount_1000: int | None = Field(default=None, description="Amount in smallest currency unit * 1000")
+    amount_1000: int | None = Field(
+        default=None, description="Amount in smallest currency unit * 1000"
+    )
 
     # Date/time parameters
     fallback_value_datetime: str | None = Field(default=None, description="Fallback for datetime")
@@ -305,10 +309,7 @@ def create_button_message(
     footer: str | None = None,
 ) -> WhatsAppMessagePayload:
     """Helper function to create a button message payload."""
-    button_objects = [
-        WhatsAppButton(id=btn_id, title=title)
-        for btn_id, title in buttons
-    ]
+    button_objects = [WhatsAppButton(id=btn_id, title=title) for btn_id, title in buttons]
 
     interactive = WhatsAppInteractiveMessage(
         type="button",
@@ -326,7 +327,9 @@ def create_button_message(
 
 def create_list_message(
     body: str,
-    sections: list[tuple[str | None, list[tuple[str, str, str | None]]]],  # (title, [(id, title, desc)])
+    sections: list[
+        tuple[str | None, list[tuple[str, str, str | None]]]
+    ],  # (title, [(id, title, desc)])
     button_text: str = "Ver opções",
     header: str | None = None,
     footer: str | None = None,
@@ -338,9 +341,7 @@ def create_list_message(
             WhatsAppListItem(id=item_id, title=title, description=desc)
             for item_id, title, desc in items
         ]
-        section_objects.append(
-            WhatsAppListSection(title=section_title, rows=item_objects)
-        )
+        section_objects.append(WhatsAppListSection(title=section_title, rows=item_objects))
 
     interactive = WhatsAppInteractiveMessage(
         type="list",

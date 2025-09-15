@@ -1,0 +1,32 @@
+repos:
+# Ruff lint and format with auto-fix
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  rev: v0.12.8
+  hooks:
+  - id: ruff
+    name: Ruff linter
+    args: ["--fix", "--exit-non-zero-on-fix"]
+  - id: ruff-format
+    name: Ruff formatter
+
+# MyPy type checking - catches function signature mismatches!
+- repo: local
+  hooks:
+  - id: mypy
+    name: MyPy type checker
+    entry: bash
+    args: ['-c', 'cd /Users/jessica/me/chatai && source .venv/bin/activate && cd backend && mypy app/ --ignore-missing-imports --show-error-codes']
+    language: system
+    files: ^backend/app/.*\.py$
+    pass_filenames: false
+
+# Pytest unit tests (backend unit only)
+- repo: local
+  hooks:
+  - id: pytest-unit
+    name: Pytest unit tests (backend)
+    entry: bash
+    args: ['-c', 'cd /Users/jessica/me/chatai && source .venv/bin/activate && cd backend && pytest -q tests/unit']
+    language: system
+    files: ^backend/(app|tests)/.*\.py$
+    pass_filenames: false

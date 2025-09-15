@@ -13,18 +13,15 @@ class FeedbackPromptBuilder:
     """Builds prompts for LLM feedback based on external action results."""
 
     def build_action_result_prompt(
-        self,
-        action_name: str,
-        result: ActionResult,
-        original_instruction: str | None = None
+        self, action_name: str, result: ActionResult, original_instruction: str | None = None
     ) -> str:
         """Build a prompt informing the LLM about an action result.
-        
+
         Args:
             action_name: Name of the action that was executed
             result: Result of the action execution
             original_instruction: Original instruction from the LLM (if available)
-            
+
         Returns:
             Formatted prompt for the LLM
         """
@@ -35,41 +32,49 @@ class FeedbackPromptBuilder:
         ]
 
         if original_instruction:
-            lines.extend([
-                f"Original instruction: {original_instruction[:200]}{'...' if len(original_instruction) > 200 else ''}",
-            ])
+            lines.extend(
+                [
+                    f"Original instruction: {original_instruction[:200]}{'...' if len(original_instruction) > 200 else ''}",
+                ]
+            )
 
         if result.is_success:
-            lines.extend([
-                f"Result: {result.message}",
-            ])
+            lines.extend(
+                [
+                    f"Result: {result.message}",
+                ]
+            )
             if result.data:
                 lines.append(f"Additional data: {result.data}")
         else:
-            lines.extend([
-                f"Error: {result.message}",
-            ])
+            lines.extend(
+                [
+                    f"Error: {result.message}",
+                ]
+            )
             if result.error:
                 lines.append(f"Technical details: {result.error}")
 
-        lines.extend([
-            "",
-            "IMPORTANT: You MUST acknowledge this actual result in your response.",
-            "Do NOT assume success if the status shows FAILED.",
-            "Do NOT make claims about actions that failed.",
-            "Base your response on the ACTUAL result shown above.",
-            "========================================",
-        ])
+        lines.extend(
+            [
+                "",
+                "IMPORTANT: You MUST acknowledge this actual result in your response.",
+                "Do NOT assume success if the status shows FAILED.",
+                "Do NOT make claims about actions that failed.",
+                "Base your response on the ACTUAL result shown above.",
+                "========================================",
+            ]
+        )
 
         return "\n".join(lines)
 
     def build_action_feedback_instruction(self, action_name: str, result: ActionResult) -> str:
         """Build instruction for how the LLM should handle the result.
-        
+
         Args:
             action_name: Name of the action
             result: Action result
-            
+
         Returns:
             Instruction text for the LLM
         """

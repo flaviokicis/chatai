@@ -142,6 +142,17 @@ export default function ChatDetailPage() {
     try {
       if (showRefreshing) setRefreshing(true);
       const data = await api.chats.getThread(undefined, threadId);
+      
+      // Debug logging to check message data
+      console.log(`Loaded thread ${threadId}:`, {
+        messageCount: data.messages?.length || 0,
+        firstFewMessages: data.messages?.slice(0, 5).map(m => ({
+          id: m.id,
+          direction: m.direction,
+          text: m.text?.substring(0, 50)
+        }))
+      });
+      
       setThread(data);
       setError(null);
     } catch (error) {
@@ -318,9 +329,17 @@ export default function ChatDetailPage() {
         <div className="p-6">
           {thread.messages && thread.messages.length > 0 ? (
             <div className="space-y-1">
-              {thread.messages.map((message) => (
-                <MessageBubble key={message.id} message={message} />
-              ))}
+              {(() => {
+                console.log(`Rendering ${thread.messages.length} messages`);
+                return thread.messages.map((message, index) => {
+                  console.log(`Rendering message ${index + 1}:`, {
+                    id: message.id,
+                    direction: message.direction,
+                    text: message.text?.substring(0, 30)
+                  });
+                  return <MessageBubble key={message.id} message={message} />;
+                });
+              })()}
             </div>
           ) : (
             <div className="text-center py-12">

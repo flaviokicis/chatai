@@ -29,9 +29,7 @@ class WhatsAppApiAdapter:
         self._last_sender = ""
         self._last_receiver = ""
 
-    async def validate_and_parse(
-        self, request: Request, x_signature: str | None
-    ) -> dict[str, Any]:
+    async def validate_and_parse(self, request: Request, x_signature: str | None) -> dict[str, Any]:
         """Validate and parse WhatsApp Cloud API webhook requests."""
 
         # For webhook verification (GET requests), we handle this in the router/webhook handler
@@ -174,6 +172,7 @@ class WhatsAppApiAdapter:
         plan: list[dict[str, object]] | None,
         reply_id: str | None = None,
         store: object = None,
+        conversation_setup: object = None,
     ) -> None:
         """Send follow-up messages using WhatsApp Cloud API."""
 
@@ -184,13 +183,9 @@ class WhatsAppApiAdapter:
         clean_to = to_number.replace("whatsapp:", "")
 
         def _run() -> None:
-            for i, msg in enumerate(
-                plan[1:], start=1
-            ):  # Skip first message (already sent)
+            for i, msg in enumerate(plan[1:], start=1):  # Skip first message (already sent)
                 try:
-                    delay_ms = (
-                        int(msg.get("delay_ms", 800)) if isinstance(msg, dict) else 800
-                    )
+                    delay_ms = int(msg.get("delay_ms", 800)) if isinstance(msg, dict) else 800
                     text = str(msg.get("text", "")) if isinstance(msg, dict) else ""
                     if not text:
                         continue
@@ -208,6 +203,7 @@ class WhatsAppApiAdapter:
                     if reply_id and store:
                         try:
                             from app.core.redis_keys import redis_keys
+
                             current_reply_key = redis_keys.current_reply_key(to_number)
                             key_suffix = current_reply_key.replace("chatai:state:system:", "")
                             current_data = store.load("system", key_suffix)
@@ -216,7 +212,10 @@ class WhatsAppApiAdapter:
                                 if current_reply_id != reply_id:
                                     logger.info(
                                         "Cancelling WhatsApp follow-up #%d to %s (user sent new message, reply_id changed %s -> %s)",
-                                        i, to_number, reply_id, current_reply_id
+                                        i,
+                                        to_number,
+                                        reply_id,
+                                        current_reply_id,
                                     )
                                     return  # Stop sending remaining follow-ups
                         except Exception as e:
@@ -226,6 +225,42 @@ class WhatsAppApiAdapter:
                     # Use the phone_number_id from the original message
                     phone_number_id = from_number.replace("whatsapp:", "")
                     self._send_message_via_api(clean_to, text, phone_number_id)
+                    
+                    # Log the follow-up message to database
+                    if conversation_setup:
+                        try:
+                            import asyncio
+                            from datetime import UTC, datetime
+                            
+                            from app.db.models import MessageDirection, MessageStatus
+                            from app.services.message_logging_service import message_logging_service
+                            
+                            # Create a new event loop for this thread if needed
+                            try:
+                                loop = asyncio.get_event_loop()
+                            except RuntimeError:
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                            
+                            # Log the follow-up message asynchronously
+                            loop.run_until_complete(
+                                message_logging_service.save_message_async(
+                                    tenant_id=conversation_setup.tenant_id,
+                                    channel_instance_id=conversation_setup.channel_instance_id,
+                                    thread_id=conversation_setup.thread_id,
+                                    contact_id=conversation_setup.contact_id,
+                                    text=text,
+                                    direction=MessageDirection.outbound,
+                                    status=MessageStatus.sent,
+                                    sent_at=datetime.now(UTC),
+                                )
+                            )
+                            
+                            logger.debug(f"Logged follow-up message #{i} to database")
+                            
+                        except Exception as log_error:
+                            logger.warning(f"Failed to log follow-up message #{i}: {log_error}")
+                            # Don't fail the message sending if logging fails
 
                 except Exception as e:
                     logger.warning(
@@ -254,12 +289,12 @@ class WhatsAppApiAdapter:
                 "messaging_product": "whatsapp",
                 "status": "read",
                 "message_id": message_id,
-                "typing_indicator": {
-                    "type": "text"
-                }
+                "typing_indicator": {"type": "text"},
             }
 
-            logger.debug("Sending WhatsApp typing indicator to %s for message %s", to_phone, message_id)
+            logger.debug(
+                "Sending WhatsApp typing indicator to %s for message %s", to_phone, message_id
+            )
             response = requests.post(url, headers=headers, json=payload, timeout=10)
 
             if response.status_code == 200:
@@ -298,8 +333,11 @@ class WhatsAppApiAdapter:
                     # Since we can't reliably determine mobile vs landline from the number alone,
                     # we'll try adding the 9 prefix and fall back to original if it fails
                     converted_phone = to_phone[:4] + "9" + to_phone[4:]
-                    logger.debug("Will try Brazilian number with 9-digit format: %s -> %s",
-                               original_phone, converted_phone)
+                    logger.debug(
+                        "Will try Brazilian number with 9-digit format: %s -> %s",
+                        original_phone,
+                        converted_phone,
+                    )
                     to_phone = converted_phone
 
             # WhatsApp Cloud API endpoint - use the Phone Number ID from our database
@@ -324,7 +362,9 @@ class WhatsAppApiAdapter:
             elif response.status_code == 400 and converted_phone and "131030" in response.text:
                 # If we get the "recipient not in allowed list" error and we tried a conversion,
                 # fall back to the original number format
-                logger.warning("9-digit format failed, trying original 8-digit format: %s", original_phone)
+                logger.warning(
+                    "9-digit format failed, trying original 8-digit format: %s", original_phone
+                )
                 payload["to"] = original_phone
                 response = requests.post(url, headers=headers, json=payload, timeout=10)
 

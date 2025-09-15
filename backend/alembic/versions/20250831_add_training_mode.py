@@ -5,6 +5,7 @@ Revises: add_flow_chat_session
 Create Date: 2025-08-31
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -21,26 +22,26 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     # Add training_password to flows (encrypted LargeBinary)
-    op.add_column(
-        "flows",
-        sa.Column("training_password", sa.LargeBinary(), nullable=True)
-    )
+    op.add_column("flows", sa.Column("training_password", sa.LargeBinary(), nullable=True))
 
     # Add training mode fields to chat_threads
     op.add_column(
         "chat_threads",
-        sa.Column("training_mode", sa.Boolean(), nullable=False, server_default=sa.text("false"))
+        sa.Column("training_mode", sa.Boolean(), nullable=False, server_default=sa.text("false")),
     )
     op.add_column(
-        "chat_threads",
-        sa.Column("training_mode_since", sa.DateTime(timezone=True), nullable=True)
+        "chat_threads", sa.Column("training_mode_since", sa.DateTime(timezone=True), nullable=True)
     )
     op.add_column(
-        "chat_threads",
-        sa.Column("training_flow_id", postgresql.UUID(as_uuid=True), nullable=True)
+        "chat_threads", sa.Column("training_flow_id", postgresql.UUID(as_uuid=True), nullable=True)
     )
     op.create_foreign_key(
-        "fk_chat_threads_training_flow", "chat_threads", "flows", ["training_flow_id"], ["id"], ondelete="SET NULL"
+        "fk_chat_threads_training_flow",
+        "chat_threads",
+        "flows",
+        ["training_flow_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
 
 
@@ -53,5 +54,3 @@ def downgrade() -> None:
 
     # Drop training_password from flows
     op.drop_column("flows", "training_password")
-
-

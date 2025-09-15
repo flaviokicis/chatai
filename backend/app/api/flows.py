@@ -157,8 +157,7 @@ async def get_example_flow_compiled() -> dict[str, Any]:
 
 @router.get("/{flow_id}/compiled")
 async def get_flow_compiled(
-    flow_id: UUID = Path(...),
-    session: Session = Depends(get_db_session)
+    flow_id: UUID = Path(...), session: Session = Depends(get_db_session)
 ) -> dict[str, Any]:
     """Return a specific flow compiled to CompiledFlow format."""
     try:
@@ -182,6 +181,4 @@ async def get_flow_compiled(
         return _sanitize_compiled(compiled)
 
     except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to compile flow: {exc}"
-        ) from exc
+        raise HTTPException(status_code=500, detail=f"Failed to compile flow: {exc}") from exc

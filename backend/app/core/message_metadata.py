@@ -120,5 +120,3 @@ class AgentResultMetadata(MessageMetadata):
     handoff_reason: str | None = None
     handoff_urgency: str | None = None
     handoff_context: dict[str, Any] = field(default_factory=dict)
-
-

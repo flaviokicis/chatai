@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class MessageDeduplicationService:
     """
     Service for handling message deduplication across different messaging platforms.
-    
+
     Prevents duplicate processing of webhooks by tracking message IDs and
     fallback heuristics for platforms that don't provide reliable message IDs.
     """
@@ -36,18 +36,18 @@ class MessageDeduplicationService:
         sender_number: str,
         receiver_number: str,
         params: dict[str, Any],
-        client_ip: str = "unknown"
+        client_ip: str = "unknown",
     ) -> bool:
         """
         Check if a message has already been processed recently.
-        
+
         Args:
             message_id: Platform-specific message identifier
-            sender_number: Sender's phone number  
+            sender_number: Sender's phone number
             receiver_number: Receiver's phone number
             params: Full webhook parameters for fallback hashing
             client_ip: Client IP for logging
-            
+
         Returns:
             True if message should be skipped as duplicate, False otherwise
         """
@@ -57,7 +57,8 @@ class MessageDeduplicationService:
             return self._check_message_id_duplicate(message_id, current_time, client_ip)
         logger.warning(
             "No message ID found for deduplication in webhook from IP=%s, params keys: %s",
-            client_ip, list(params.keys())
+            client_ip,
+            list(params.keys()),
         )
         return self._check_fallback_duplicate(
             sender_number, receiver_number, params, current_time, client_ip
@@ -77,7 +78,9 @@ class MessageDeduplicationService:
             if current_time - processed_at < self.MESSAGE_ID_TTL_SECONDS:
                 logger.info(
                     "Skipping duplicate webhook for message_id=%s from IP=%s (processed %ds ago)",
-                    message_id, client_ip, int(current_time - processed_at)
+                    message_id,
+                    client_ip,
+                    int(current_time - processed_at),
                 )
                 return True
 
@@ -92,7 +95,7 @@ class MessageDeduplicationService:
         receiver_number: str,
         params: dict[str, Any],
         current_time: float,
-        client_ip: str
+        client_ip: str,
     ) -> bool:
         """Check for duplicates using fallback heuristics when no message ID available."""
         fallback_key = f"{sender_number}:{receiver_number}:{hash(str(params))}"
@@ -104,7 +107,8 @@ class MessageDeduplicationService:
             if current_time - processed_at < self.FALLBACK_TTL_SECONDS:
                 logger.info(
                     "Skipping likely duplicate webhook (no message_id) from IP=%s (processed %ds ago)",
-                    client_ip, int(current_time - processed_at)
+                    client_ip,
+                    int(current_time - processed_at),
                 )
                 return True
 

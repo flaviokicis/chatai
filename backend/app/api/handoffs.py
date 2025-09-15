@@ -80,7 +80,7 @@ async def get_handoff_requests(
     tenant_id: UUID = Path(..., description="Tenant ID"),
     acknowledged: bool | None = Query(
         None,
-        description="Filter by acknowledgment status. None=all, True=acknowledged, False=pending"
+        description="Filter by acknowledgment status. None=all, True=acknowledged, False=pending",
     ),
     limit: int = Query(50, ge=1, le=200, description="Number of handoffs to return"),
     offset: int = Query(0, ge=0, description="Number of handoffs to skip"),
@@ -88,7 +88,7 @@ async def get_handoff_requests(
 ) -> HandoffListResponse:
     """
     Get handoff requests for the current tenant.
-    
+
     Supports filtering by acknowledgment status and pagination.
     """
     try:
@@ -108,10 +108,7 @@ async def get_handoff_requests(
             handoffs = handoffs[:-1]  # Remove the extra item
 
         # Convert to response models
-        handoff_responses = [
-            HandoffRequestResponse.from_orm(handoff)
-            for handoff in handoffs
-        ]
+        handoff_responses = [HandoffRequestResponse.from_orm(handoff) for handoff in handoffs]
 
         # For total count, we'd need a separate query, but for now estimate
         total = offset + len(handoff_responses) + (1 if has_more else 0)
@@ -126,10 +123,7 @@ async def get_handoff_requests(
 
     except Exception as e:
         logger.error(f"Failed to fetch handoff requests for tenant {tenant_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch handoff requests"
-        )
+        raise HTTPException(status_code=500, detail="Failed to fetch handoff requests")
 
 
 @router.post("/tenants/{tenant_id}/acknowledge")
@@ -139,7 +133,7 @@ async def acknowledge_handoff(
 ) -> dict[str, Any]:
     """
     Acknowledge a handoff request.
-    
+
     This marks the handoff as seen/acknowledged by the tenant.
     """
     try:
@@ -147,16 +141,17 @@ async def acknowledge_handoff(
 
         # Verify the handoff belongs to this tenant
         with next(get_db_session()) as session:
-            handoff = session.query(HandoffRequest).filter(
-                HandoffRequest.id == request.handoff_id,
-                HandoffRequest.tenant_id == tenant_id,
-            ).first()
+            handoff = (
+                session.query(HandoffRequest)
+                .filter(
+                    HandoffRequest.id == request.handoff_id,
+                    HandoffRequest.tenant_id == tenant_id,
+                )
+                .first()
+            )
 
             if not handoff:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Handoff request not found"
-                )
+                raise HTTPException(status_code=404, detail="Handoff request not found")
 
             if handoff.acknowledged_at is not None:
                 return {
@@ -174,19 +169,13 @@ async def acknowledge_handoff(
                 "message": "Handoff acknowledged successfully",
                 "acknowledged_at": datetime.utcnow().isoformat(),
             }
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to acknowledge handoff"
-        )
+        raise HTTPException(status_code=500, detail="Failed to acknowledge handoff")
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to acknowledge handoff {request.handoff_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to acknowledge handoff"
-        )
+        raise HTTPException(status_code=500, detail="Failed to acknowledge handoff")
 
 
 @router.get("/tenants/{tenant_id}/stats")
@@ -226,14 +215,10 @@ async def get_handoff_stats(
             "pending": len(pending_handoffs),
             "acknowledged": len(acknowledged_handoffs),
             "acknowledgment_rate": (
-                len(acknowledged_handoffs) / len(total_handoffs)
-                if total_handoffs else 0
+                len(acknowledged_handoffs) / len(total_handoffs) if total_handoffs else 0
             ),
         }
 
     except Exception as e:
         logger.error(f"Failed to fetch handoff stats for tenant {tenant_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to fetch handoff statistics"
-        )
+        raise HTTPException(status_code=500, detail="Failed to fetch handoff statistics")

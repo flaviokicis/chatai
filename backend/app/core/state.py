@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 try:
     from langchain_community.chat_message_histories import (
-        RedisChatMessageHistory,  # type: ignore[import-not-found]
+        RedisChatMessageHistory,
     )
 except Exception:  # pragma: no cover - optional import
     RedisChatMessageHistory = None
@@ -24,19 +24,21 @@ except Exception:  # pragma: no cover - optional import
 if TYPE_CHECKING:
     from .agent_base import AgentState
 
+from app.core.types import EventDict
+
 
 class ConversationStore(Protocol):
     def load(self, user_id: str, agent_type: str) -> AgentState | None: ...
 
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None: ...
 
-    def append_event(self, user_id: str, event: dict) -> None: ...
+    def append_event(self, user_id: str, event: EventDict) -> None: ...
 
 
 class InMemoryStore:
     def __init__(self) -> None:
         self._states: dict[tuple[str, str], AgentState] = {}
-        self._events: dict[str, list[dict]] = {}
+        self._events: dict[str, list[EventDict]] = {}
 
     def load(self, user_id: str, agent_type: str) -> AgentState | None:
         return self._states.get((user_id, agent_type))
@@ -44,7 +46,14 @@ class InMemoryStore:
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None:
         self._states[(user_id, agent_type)] = state
 
-    def append_event(self, user_id: str, event: dict) -> None:
+    def append_event(self, user_id: str, event: EventDict) -> None:
+        """Append typed event to the event list."""
+        # Validate event has required fields
+        if "timestamp" not in event:
+            import time
+            event["timestamp"] = time.time()
+        if "type" not in event:
+            raise ValueError("Event must have a 'type' field")
         self._events.setdefault(user_id, []).append(event)
 
 
@@ -80,15 +89,38 @@ class RedisStore:
         return f"{self._ns}:events:{user_id}"  # Events use simple pattern
 
     def load(self, user_id: str, agent_type: str) -> AgentState | None:
+        """Load agent state with proper typing and validation."""
         raw = self._r.get(self._state_key(user_id, agent_type))
         if not raw:
             return None
         try:
             body = raw.decode("utf-8") if isinstance(raw, bytes | bytearray) else raw
             data = json.loads(body)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to decode state for {user_id}/{agent_type}: {e}")
             return None
-        return data  # type: ignore[no-any-return]
+        
+        # For flow agents, try to convert to FlowContext which implements AgentState
+        if agent_type == "flow_agent" and isinstance(data, dict):
+            # Import here to avoid circular dependency
+            from app.flow_core.state import FlowContext
+            try:
+                # FlowContext has from_dict method
+                if hasattr(FlowContext, 'from_dict'):
+                    return FlowContext.from_dict(data)
+                # Otherwise return the dict - it should implement the protocol
+                # This is a temporary fallback until all agents properly implement AgentState
+                return data  # type: ignore[return-value]
+            except Exception as e:
+                logger.error(f"Failed to reconstruct FlowContext: {e}")
+                return None
+        
+        # For other agent types, return the data if it implements the protocol
+        # In practice, agents return dicts that follow the AgentState protocol
+        if isinstance(data, dict):
+            return data  # type: ignore[return-value]
+        
+        return None
 
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None:
         # state may be a dict-like as our concrete agents store dicts
@@ -105,7 +137,15 @@ class RedisStore:
         else:
             self._r.set(key, body)
 
-    def append_event(self, user_id: str, event: dict) -> None:
+    def append_event(self, user_id: str, event: EventDict) -> None:
+        """Append typed event with validation."""
+        # Validate event has required fields
+        if "timestamp" not in event:
+            import time
+            event["timestamp"] = time.time()
+        if "type" not in event:
+            raise ValueError("Event must have a 'type' field")
+        
         key = self._events_key(user_id)
         try:
             self._r.rpush(key, json.dumps(event))

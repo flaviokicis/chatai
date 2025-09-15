@@ -30,7 +30,7 @@ class FlowChatServiceResponse(NamedTuple):
 
 class FlowChatService:
     """Service layer for flow chat using v2 single-tool architecture.
-    
+
     This service coordinates between the UI, database, and the v2 agent
     that uses a single LLM call with batch actions.
     """
@@ -53,16 +53,16 @@ class FlowChatService:
         flow_id: UUID,
         content: str,
         simplified_view_enabled: bool = False,
-        active_path: str | None = None
+        active_path: str | None = None,
     ) -> FlowChatServiceResponse:
         """Process a user message and modify the flow as needed.
-        
+
         Args:
             flow_id: UUID of the flow to modify
             content: User's message content
             simplified_view_enabled: Whether simplified view is active
             active_path: Currently active path in simplified view
-            
+
         Returns:
             FlowChatServiceResponse with messages and modification status
         """
@@ -73,7 +73,9 @@ class FlowChatService:
         logger.info("📨 FLOW CHAT SERVICE: Processing user message")
         logger.info("=" * 80)
         logger.info(f"Flow ID: {flow_id}")
-        logger.info(f"Content preview: {content[:200]}..." if len(content) > 200 else f"Content: {content}")
+        logger.info(
+            f"Content preview: {content[:200]}..." if len(content) > 200 else f"Content: {content}"
+        )
         logger.info(f"Simplified view: {simplified_view_enabled}")
         logger.info(f"Active path: {active_path}")
         logger.info("=" * 80)
@@ -81,10 +83,7 @@ class FlowChatService:
         try:
             # Save user message to database
             create_flow_chat_message(
-                self.session,
-                flow_id=flow_id,
-                role=FlowChatRole.user,
-                content=content
+                self.session, flow_id=flow_id, role=FlowChatRole.user, content=content
             )
 
             # Get flow definition and history
@@ -97,10 +96,7 @@ class FlowChatService:
 
             flow_def = flow.definition
             history = list_flow_chat_messages(self.session, flow_id)
-            history_dicts = [
-                {"role": msg.role.value, "content": msg.content}
-                for msg in history
-            ]
+            history_dicts = [{"role": msg.role.value, "content": msg.content} for msg in history]
 
             # Process with v2 agent
             logger.info(f"🤖 Calling v2 agent with {len(history_dicts)} history messages")
@@ -112,7 +108,7 @@ class FlowChatService:
                     flow_id=flow_id,
                     session=self.session,
                     simplified_view_enabled=simplified_view_enabled,
-                    active_path=active_path
+                    active_path=active_path,
                 )
             except Exception as e:
                 logger.error("❌ AGENT PROCESSING FAILED")
@@ -135,10 +131,7 @@ class FlowChatService:
             saved_messages = []
             for message in agent_response.messages:
                 saved_msg = create_flow_chat_message(
-                    self.session,
-                    flow_id=flow_id,
-                    role=FlowChatRole.assistant,
-                    content=message
+                    self.session, flow_id=flow_id, role=FlowChatRole.assistant, content=message
                 )
                 saved_messages.append(saved_msg)
 
@@ -166,7 +159,7 @@ class FlowChatService:
             return FlowChatServiceResponse(
                 messages=saved_messages,
                 flow_was_modified=agent_response.flow_was_modified,
-                modification_summary=agent_response.modification_summary
+                modification_summary=agent_response.modification_summary,
             )
 
         except Exception as e:
@@ -186,14 +179,12 @@ class FlowChatService:
                     self.session,
                     flow_id=flow_id,
                     role=FlowChatRole.assistant,
-                    content="❌ Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."
+                    content="❌ Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente.",
                 )
                 self.session.commit()
 
                 return FlowChatServiceResponse(
-                    messages=[error_msg],
-                    flow_was_modified=False,
-                    modification_summary=None
+                    messages=[error_msg], flow_was_modified=False, modification_summary=None
                 )
             except Exception as save_error:
                 logger.error(f"Failed to save error message: {save_error}")

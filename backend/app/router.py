@@ -22,7 +22,7 @@ api_router.include_router(flow_versions_router)
 api_router.include_router(channels_router)  # User-accessible channel endpoints
 api_router.include_router(whatsapp_router)
 api_router.include_router(tenants_router)  # Public tenant endpoints
-api_router.include_router(admin_router)    # Protected admin endpoints
+api_router.include_router(admin_router)  # Protected admin endpoints
 api_router.include_router(tenant_admin_router)
 api_router.include_router(chats_router)
 api_router.include_router(handoffs_router)  # Human handoff tracking

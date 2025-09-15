@@ -14,7 +14,7 @@ from dataclasses import dataclass
 class RedisKeyBuilder:
     """
     Centralized Redis key builder for consistent key generation.
-    
+
     This ensures all parts of the application use the same key patterns
     for the same purposes, eliminating the chaos of inconsistent keys.
     """
@@ -24,11 +24,11 @@ class RedisKeyBuilder:
     def conversation_state_key(self, user_id: str, session_id: str) -> str:
         """
         Build conversation state key.
-        
+
         Args:
             user_id: User identifier (e.g., "whatsapp:5522988544370")
             session_id: Session identifier (e.g., "flow:whatsapp:5522988544370:flow.atendimento_luminarias")
-            
+
         Returns:
             Redis key for conversation state
         """
@@ -37,11 +37,11 @@ class RedisKeyBuilder:
     def conversation_meta_key(self, user_id: str, agent_type: str) -> str:
         """
         Build conversation metadata key.
-        
+
         Args:
             user_id: User identifier
             agent_type: Agent type (e.g., "flow", "chat", etc.)
-            
+
         Returns:
             Redis key for conversation metadata
         """
@@ -50,10 +50,10 @@ class RedisKeyBuilder:
     def conversation_history_key(self, session_id: str) -> str:
         """
         Build conversation history key for LangChain.
-        
+
         Args:
             session_id: Session identifier
-            
+
         Returns:
             Redis key for conversation history
         """
@@ -62,10 +62,10 @@ class RedisKeyBuilder:
     def current_reply_key(self, user_id: str) -> str:
         """
         Build current reply key for interruption handling.
-        
+
         Args:
             user_id: User identifier
-            
+
         Returns:
             Redis key for current reply tracking
         """
@@ -74,11 +74,11 @@ class RedisKeyBuilder:
     def get_conversation_patterns(self, user_id: str, flow_id: str | None = None) -> list[str]:
         """
         Get all Redis key patterns for a conversation to enable proper cleanup.
-        
+
         Args:
             user_id: User identifier (e.g., "whatsapp:5522988544370")
             flow_id: Optional flow identifier (e.g., "flow.atendimento_luminarias")
-            
+
         Returns:
             List of Redis key patterns for deletion
         """
@@ -89,26 +89,30 @@ class RedisKeyBuilder:
 
         if flow_id:
             # Flow-specific patterns
-            patterns.extend([
-                # Match any state key containing the phone number and flow
-                f"{self.namespace}:state:*{phone_number}*{flow_id}*",
-                # Match full user_id patterns
-                f"{self.namespace}:state:*{user_id}*{flow_id}*",
-                # Meta keys for flow
-                f"{self.namespace}:state:{user_id}:meta:flow",
-                f"{self.namespace}:state:{user_id}:meta:*",
-                # History patterns
-                f"{self.namespace}:history:*{phone_number}*{flow_id}*",
-                f"{self.namespace}:history:*{user_id}*{flow_id}*",
-            ])
+            patterns.extend(
+                [
+                    # Match any state key containing the phone number and flow
+                    f"{self.namespace}:state:*{phone_number}*{flow_id}*",
+                    # Match full user_id patterns
+                    f"{self.namespace}:state:*{user_id}*{flow_id}*",
+                    # Meta keys for flow
+                    f"{self.namespace}:state:{user_id}:meta:flow",
+                    f"{self.namespace}:state:{user_id}:meta:*",
+                    # History patterns
+                    f"{self.namespace}:history:*{phone_number}*{flow_id}*",
+                    f"{self.namespace}:history:*{user_id}*{flow_id}*",
+                ]
+            )
         else:
             # All conversations for user
-            patterns.extend([
-                f"{self.namespace}:state:*{phone_number}*",
-                f"{self.namespace}:state:*{user_id}*",
-                f"{self.namespace}:history:*{phone_number}*",
-                f"{self.namespace}:history:*{user_id}*",
-            ])
+            patterns.extend(
+                [
+                    f"{self.namespace}:state:*{phone_number}*",
+                    f"{self.namespace}:state:*{user_id}*",
+                    f"{self.namespace}:history:*{phone_number}*",
+                    f"{self.namespace}:history:*{user_id}*",
+                ]
+            )
 
         # Always include current reply key
         patterns.append(self.current_reply_key(user_id))
@@ -121,10 +125,10 @@ class RedisKeyBuilder:
     def parse_conversation_key(self, redis_key: str) -> dict[str, str] | None:
         """
         Parse a Redis conversation key to extract components.
-        
+
         Args:
             redis_key: Full Redis key
-            
+
         Returns:
             Dict with parsed components or None if not a conversation key
         """
@@ -132,7 +136,7 @@ class RedisKeyBuilder:
             return None
 
         # Remove namespace prefix
-        remainder = redis_key[len(f"{self.namespace}:state:"):]
+        remainder = redis_key[len(f"{self.namespace}:state:") :]
 
         # Skip system keys
         if remainder.startswith("system:"):
@@ -146,7 +150,7 @@ class RedisKeyBuilder:
         flow_match = remainder.find(":flow:")
         if flow_match != -1:
             user_id = remainder[:flow_match]
-            session_id = remainder[flow_match + 1:]  # Include "flow:" prefix
+            session_id = remainder[flow_match + 1 :]  # Include "flow:" prefix
 
             # Extract flow_id from session_id
             flow_parts = session_id.split(":")
@@ -162,7 +166,7 @@ class RedisKeyBuilder:
                 "session_id": session_id,
                 "agent_type": agent_type,
                 "flow_id": flow_id,
-                "redis_key": redis_key
+                "redis_key": redis_key,
             }
 
         # Legacy format
@@ -173,7 +177,7 @@ class RedisKeyBuilder:
                 "session_id": parts[1],
                 "agent_type": parts[1],
                 "flow_id": "unknown",
-                "redis_key": redis_key
+                "redis_key": redis_key,
             }
 
         return None

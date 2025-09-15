@@ -32,7 +32,7 @@ class EngineResponse:
 class LLMFlowEngine:
     """
     Simplified flow engine that acts as a pure state machine.
-    
+
     Key principles:
     1. No LLM decision-making - just tracks state
     2. Provides current state and available navigation
@@ -139,10 +139,12 @@ class LLMFlowEngine:
         edges = self._get_edges_from_node(node.id)
         edge_info = []
         for edge in edges:
-            edge_info.append({
-                "target_node_id": edge.target,
-                "description": self._get_edge_description(edge),
-            })
+            edge_info.append(
+                {
+                    "target_node_id": edge.target,
+                    "description": self._get_edge_description(edge),
+                }
+            )
 
         # Return prompt with navigation options
         return EngineResponse(
@@ -181,11 +183,13 @@ class LLMFlowEngine:
             if ":" in description:
                 path_name = description.split(":", 1)[1].strip()
             path_options.append(path_name)
-            edge_info.append({
-                "target_node_id": edge.target,
-                "description": description,
-                "path_name": path_name,
-            })
+            edge_info.append(
+                {
+                    "target_node_id": edge.target,
+                    "description": description,
+                    "path_name": path_name,
+                }
+            )
 
         ctx.available_paths = path_options
 
@@ -203,7 +207,8 @@ class LLMFlowEngine:
         # Return decision prompt with options
         return EngineResponse(
             kind="prompt",
-            message=getattr(node, "decision_prompt", None) or self._generate_decision_prompt(node, path_options),
+            message=getattr(node, "decision_prompt", None)
+            or self._generate_decision_prompt(node, path_options),
             node_id=node.id,
             metadata={
                 "needs_path_selection": True,
@@ -302,7 +307,12 @@ class LLMFlowEngine:
         node = self._flow.nodes.get(ctx.current_node_id)
 
         # Ensure pending_field is synchronized with current question node
-        if node and hasattr(node, "key") and hasattr(node, "__class__") and node.__class__.__name__ == "QuestionNode":
+        if (
+            node
+            and hasattr(node, "key")
+            and hasattr(node, "__class__")
+            and node.__class__.__name__ == "QuestionNode"
+        ):
             if ctx.pending_field != node.key:
                 ctx.pending_field = node.key
 
@@ -332,12 +342,14 @@ class LLMFlowEngine:
         for node_id, node in self._flow.nodes.items():
             if isinstance(node, QuestionNode):
                 if node.key not in ctx.answers or ctx.answers[node.key] in (None, ""):
-                    unanswered.append({
-                        "id": node.id,
-                        "key": node.key,
-                        "prompt": node.prompt,
-                        "priority": getattr(node, "priority", 100),
-                    })
+                    unanswered.append(
+                        {
+                            "id": node.id,
+                            "key": node.key,
+                            "prompt": node.prompt,
+                            "priority": getattr(node, "priority", 100),
+                        }
+                    )
 
         return sorted(unanswered, key=lambda x: x["priority"])
 

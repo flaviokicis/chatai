@@ -26,12 +26,9 @@ class FlowTool(BaseModel):
         default=DEFAULT_CONFIDENCE,
         ge=MIN_CONFIDENCE,
         le=MAX_CONFIDENCE,
-        description="Confidence level in this action (0-1)"
+        description="Confidence level in this action (0-1)",
     )
-    reasoning: str = Field(
-        ...,
-        description="Brief explanation of why this tool was chosen"
-    )
+    reasoning: str = Field(..., description="Brief explanation of why this tool was chosen")
 
 
 class RequestHumanHandoff(FlowTool):
@@ -44,88 +41,71 @@ class RequestHumanHandoff(FlowTool):
     - Technical issues prevent progress
     """
 
-    reason: Literal[
-        "user_frustrated",
-        "explicit_request",
-        "too_complex",
-        "technical_issue"
-    ] = Field(
-        ...,
-        description="Categorized reason for handoff"
+    reason: Literal["user_frustrated", "explicit_request", "too_complex", "technical_issue"] = (
+        Field(..., description="Categorized reason for handoff")
     )
 
     context_summary: str = Field(
         ...,
         max_length=MAX_CONTEXT_SUMMARY_LENGTH,
-        description="Brief summary of the conversation for the human agent"
+        description="Brief summary of the conversation for the human agent",
     )
 
     urgency: Literal["low", "medium", "high"] = Field(
-        default=DEFAULT_URGENCY,
-        description="Urgency level of the handoff"
+        default=DEFAULT_URGENCY, description="Urgency level of the handoff"
     )
-
-
 
 
 class PerformAction(FlowTool):
     """Unified action tool that combines all necessary actions and messages.
-    
+
     This tool handles the complete response including:
     - Staying on current node or navigating
     - Updating answers if needed
     - Sending messages to the user
     - Modifying the flow (admin only)
-    
+
     ALWAYS use this tool for any response.
     """
 
-    actions: list[Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow"]] = Field(
+    actions: list[
+        Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow"]
+    ] = Field(
         ...,
-        description="Actions to take in sequence (e.g., ['update', 'navigate'] to save answer then navigate)"
+        description="Actions to take in sequence (e.g., ['update', 'navigate'] to save answer then navigate)",
     )
 
     messages: list[dict[str, Any]] = Field(
-        description="WhatsApp messages to send to the user",
-        min_length=1,
-        max_length=5
+        description="WhatsApp messages to send to the user", min_length=1, max_length=5
     )
 
     # Optional fields based on action
     updates: dict[str, Any] | None = Field(
-        default=None,
-        description="Field updates when action is 'update'"
+        default=None, description="Field updates when action is 'update'"
     )
 
     target_node_id: str | None = Field(
-        default=None,
-        description="Target node when action is 'navigate'"
+        default=None, description="Target node when action is 'navigate'"
     )
 
     clarification_reason: str | None = Field(
-        default=None,
-        description="Reason when action is 'stay'"
+        default=None, description="Reason when action is 'stay'"
     )
 
-    handoff_reason: str | None = Field(
-        default=None,
-        description="Reason when action is 'handoff'"
-    )
+    handoff_reason: str | None = Field(default=None, description="Reason when action is 'handoff'")
 
     # Flow modification fields (admin only)
     flow_modification_instruction: str | None = Field(
         default=None,
-        description="Instruction for modifying the flow when action is 'modify_flow' (admin only)"
+        description="Instruction for modifying the flow when action is 'modify_flow' (admin only)",
     )
 
     flow_modification_target: str | None = Field(
-        default=None,
-        description="Target node for flow modification (optional)"
+        default=None, description="Target node for flow modification (optional)"
     )
 
     flow_modification_type: Literal["prompt", "routing", "validation", "general"] | None = Field(
-        default=None,
-        description="Type of flow modification (optional)"
+        default=None, description="Type of flow modification (optional)"
     )
 
     @field_validator("messages")  # type: ignore[misc]

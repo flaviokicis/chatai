@@ -5,6 +5,7 @@ Revises: 1e2c0e3c4626
 Create Date: 2025-09-10 19:52:23.687310
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -34,7 +35,8 @@ def downgrade() -> None:
     # This is only for emergency rollback scenarios.
 
     # Recreate agent_conversation_traces table
-    op.create_table("agent_conversation_traces",
+    op.create_table(
+        "agent_conversation_traces",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("tenant_id", sa.UUID(), nullable=False),
         sa.Column("user_id", sa.String(), nullable=False),  # EncryptedString
@@ -49,7 +51,7 @@ def downgrade() -> None:
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("tenant_id", "user_id", "agent_type", name="uq_trace_per_user_agent")
+        sa.UniqueConstraint("tenant_id", "user_id", "agent_type", name="uq_trace_per_user_agent"),
     )
 
     # Create indexes for agent_conversation_traces
@@ -57,7 +59,8 @@ def downgrade() -> None:
     op.create_index("ix_trace_last_activity", "agent_conversation_traces", ["last_activity_at"])
 
     # Recreate agent_thoughts table
-    op.create_table("agent_thoughts",
+    op.create_table(
+        "agent_thoughts",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("conversation_trace_id", sa.UUID(), nullable=False),
         sa.Column("user_message", sa.String(), nullable=False),  # EncryptedString
@@ -76,10 +79,14 @@ def downgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
-        sa.ForeignKeyConstraint(["conversation_trace_id"], ["agent_conversation_traces.id"], ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id")
+        sa.ForeignKeyConstraint(
+            ["conversation_trace_id"], ["agent_conversation_traces.id"], ondelete="CASCADE"
+        ),
+        sa.PrimaryKeyConstraint("id"),
     )
 
     # Create indexes for agent_thoughts
-    op.create_index("ix_thought_trace_timestamp", "agent_thoughts", ["conversation_trace_id", "created_at"])
+    op.create_index(
+        "ix_thought_trace_timestamp", "agent_thoughts", ["conversation_trace_id", "created_at"]
+    )
     op.create_index("ix_thought_tool_name", "agent_thoughts", ["selected_tool"])

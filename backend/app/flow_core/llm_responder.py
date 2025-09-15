@@ -122,7 +122,9 @@ class LLMFlowResponder:
             metadata["messages"] = [dict(msg) for msg in output.messages]
 
         return UnifiedFlowResponse(
-            result=FlowProcessingResult.CONTINUE if not result.terminal and not result.escalate else (
+            result=FlowProcessingResult.CONTINUE
+            if not result.terminal and not result.escalate
+            else (
                 FlowProcessingResult.ESCALATE if result.escalate else FlowProcessingResult.TERMINAL
             ),
             message=primary_message,

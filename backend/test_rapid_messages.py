@@ -87,7 +87,9 @@ async def simulate_rapid_messages():
 
     print()
     print("🎯 Test completed!")
-    print("Summary: 3 rapid messages were aggregated into: 'Hello I want to buy lights for my warehouse'")
+    print(
+        "Summary: 3 rapid messages were aggregated into: 'Hello I want to buy lights for my warehouse'"
+    )
 
 
 async def test_time_window():

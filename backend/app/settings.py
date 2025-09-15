@@ -38,7 +38,9 @@ class Settings(BaseSettings):
     admin_username: str = Field(default="super@inboxed.com", alias="ADMIN_USERNAME")
     admin_password: str | None = Field(default=None, alias="ADMIN_PASSWORD")
     # Audio validation
-    max_audio_duration_seconds: int = Field(default=300, alias="MAX_AUDIO_DURATION_SECONDS")  # 5 minutes
+    max_audio_duration_seconds: int = Field(
+        default=300, alias="MAX_AUDIO_DURATION_SECONDS"
+    )  # 5 minutes
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -81,7 +83,7 @@ def get_settings() -> Settings:
 def is_debug_enabled() -> bool:
     """
     DEPRECATED: Use is_development_mode() instead.
-    
+
     This function is kept for backward compatibility only.
     """
     return is_development_mode()
@@ -90,11 +92,11 @@ def is_debug_enabled() -> bool:
 def is_development_mode() -> bool:
     """
     Unified function to check if we're in development mode.
-    
+
     This should be used throughout the codebase for ANY development-only features.
-    
+
     Returns True ONLY if DEVELOPMENT_MODE=true environment variable is set.
-    
+
     This is the single source of truth for development vs production mode.
     """
     try:

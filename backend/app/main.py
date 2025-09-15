@@ -30,6 +30,7 @@ from app.settings import get_settings
 
 setup_logging()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Modern FastAPI lifespan event handler for startup/shutdown."""
@@ -47,7 +48,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     ctx = get_app_context(app)
     ctx.llm = LangChainToolsLLM(chat)
     ctx.llm_model = settings.llm_model
-    logger.info("Default LLM initialized: model=%s provider=%s", settings.llm_model, settings.llm_provider)
+    logger.info(
+        "Default LLM initialized: model=%s provider=%s", settings.llm_model, settings.llm_provider
+    )
 
     # Load multitenant config from JSON if provided
     config_path = os.environ.get("CONFIG_JSON_PATH") or os.getenv("CONFIG_JSON_PATH")
@@ -89,6 +92,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize cancellation manager for rapid message handling
     try:
         from app.services.processing_cancellation_manager import ProcessingCancellationManager
+
         ctx.cancellation_manager = ProcessingCancellationManager(store=ctx.store)
         logger.info("Message cancellation manager initialized")
     except Exception as e:
@@ -111,11 +115,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Shutdown (if needed)
     logger.info("Application shutting down")
 
+
 app = FastAPI(
     title="ChatAI Backend API",
     version="0.3.0",
     description="Modern ChatAI backend with admin panel and GDPR compliance",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Enable CORS for the Next.js frontend (localhost dev defaults)
@@ -180,8 +185,7 @@ app.include_router(whatsapp_router)
 # In development, frontend runs separately on port 3000
 # Override with SERVE_FRONTEND=true for local production testing
 serve_frontend = (
-    os.getenv("NODE_ENV") == "production" or
-    os.getenv("SERVE_FRONTEND", "").lower() == "true"
+    os.getenv("NODE_ENV") == "production" or os.getenv("SERVE_FRONTEND", "").lower() == "true"
 )
 
 if serve_frontend:
@@ -190,7 +194,9 @@ if serve_frontend:
         # Serve Next.js static assets (JS, CSS, images)
         static_assets_dir = os.path.join(static_dir, "static")
         if os.path.exists(static_assets_dir):
-            app.mount("/_next/static", StaticFiles(directory=static_assets_dir), name="nextjs_assets")
+            app.mount(
+                "/_next/static", StaticFiles(directory=static_assets_dir), name="nextjs_assets"
+            )
             logger.info("Next.js static assets mounted from %s", static_assets_dir)
 
         # Custom SPA handler for client-side routing
@@ -204,9 +210,11 @@ if serve_frontend:
             """Handle SPA routing - serve appropriate HTML file or fallback to index."""
 
             # CRITICAL: Skip ALL API routes to prevent conflicts
-            if (full_path.startswith("api/") or
-                full_path.startswith("webhooks/") or
-                full_path.startswith("health")):
+            if (
+                full_path.startswith("api/")
+                or full_path.startswith("webhooks/")
+                or full_path.startswith("health")
+            ):
                 raise HTTPException(status_code=404, detail="Not Found")
 
             # Try to find the specific HTML file for this route
