@@ -51,6 +51,7 @@ class InMemoryStore:
         # Validate event has required fields
         if "timestamp" not in event:
             import time
+
             event["timestamp"] = time.time()
         if "type" not in event:
             raise ValueError("Event must have a 'type' field")
@@ -99,14 +100,15 @@ class RedisStore:
         except Exception as e:
             logger.warning(f"Failed to decode state for {user_id}/{agent_type}: {e}")
             return None
-        
+
         # For flow agents, try to convert to FlowContext which implements AgentState
         if agent_type == "flow_agent" and isinstance(data, dict):
             # Import here to avoid circular dependency
             from app.flow_core.state import FlowContext
+
             try:
                 # FlowContext has from_dict method
-                if hasattr(FlowContext, 'from_dict'):
+                if hasattr(FlowContext, "from_dict"):
                     return FlowContext.from_dict(data)
                 # Otherwise return the dict - it should implement the protocol
                 # This is a temporary fallback until all agents properly implement AgentState
@@ -114,12 +116,12 @@ class RedisStore:
             except Exception as e:
                 logger.error(f"Failed to reconstruct FlowContext: {e}")
                 return None
-        
+
         # For other agent types, return the data if it implements the protocol
         # In practice, agents return dicts that follow the AgentState protocol
         if isinstance(data, dict):
             return data  # type: ignore[return-value]
-        
+
         return None
 
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None:
@@ -142,10 +144,11 @@ class RedisStore:
         # Validate event has required fields
         if "timestamp" not in event:
             import time
+
             event["timestamp"] = time.time()
         if "type" not in event:
             raise ValueError("Event must have a 'type' field")
-        
+
         key = self._events_key(user_id)
         try:
             self._r.rpush(key, json.dumps(event))

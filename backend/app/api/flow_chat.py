@@ -1,4 +1,4 @@
-"""Flow chat API endpoints using v2 single-tool architecture."""
+"""Flow chat API endpoints using single-tool architecture."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.agents.flow_chat_agent_v2 import FlowChatAgentV2, FlowChatResponse
+from app.agents.flow_chat_agent import FlowChatAgent, FlowChatResponse
 from app.core.app_context import get_app_context
 from app.core.llm import LLMClient
 from app.db.models import FlowChatMessage as DBFlowChatMessage
@@ -66,9 +66,9 @@ def list_messages(
     return [FlowChatMessage.from_db(msg) for msg in messages]
 
 
-def _build_agent(llm: LLMClient) -> FlowChatAgentV2:
-    """Build the v2 flow chat agent with single-tool architecture."""
-    return FlowChatAgentV2(llm=llm)
+def _build_agent(llm: LLMClient) -> FlowChatAgent:
+    """Build the flow chat agent with single-tool architecture."""
+    return FlowChatAgent(llm=llm)
 
 
 @router.post("/send", response_model=FlowChatResponse)
@@ -80,7 +80,7 @@ async def send_message(
 ) -> FlowChatResponse:
     """Send a message to the flow chat and get AI response.
 
-    This endpoint uses the v2 architecture with:
+    This endpoint uses single-tool architecture with:
     - Single LLM call
     - Batch actions in one tool
     - Automatic retries
@@ -103,10 +103,10 @@ async def send_message(
             f"active_path: {req.active_path}"
         )
 
-        # Create service with v2 agent
+        # Create service with agent
         service = FlowChatService(session, agent=_build_agent(ctx.llm))
 
-        # Process with timeout (shorter for v2 since it's more efficient)
+        # Process with timeout
         try:
             service_response = await asyncio.wait_for(
                 service.send_user_message(

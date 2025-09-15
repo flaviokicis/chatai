@@ -84,7 +84,8 @@ class FeedbackLoop:
             logger.info("🤖 Requesting LLM feedback response...")
             # Use responder.respond (async) to generate a truthful response based on action result
             responder_output = await self._responder.respond(
-                prompt=current_prompt or f"Action '{action_name}' completed: {action_result.message}",
+                prompt=current_prompt
+                or f"Action '{action_name}' completed: {action_result.message}",
                 pending_field=context.pending_field,
                 context=feedback_context,
                 user_message=result_prompt,  # The action result becomes the "message" to respond to

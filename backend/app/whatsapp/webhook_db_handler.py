@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from app.db.models import Flow as FlowModel
@@ -136,8 +136,6 @@ class WebhookDatabaseHandler:
 
             # Extract flow definition while session is active
             flow_definition = selected_flow.definition
-            if isinstance(flow_definition, dict) and flow_definition.get("schema_version") != "v2":
-                flow_definition["schema_version"] = "v2"
 
             return ConversationSetup(
                 tenant_id=tenant_id,

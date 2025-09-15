@@ -10,7 +10,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from app.agents.flow_chat_agent_v2 import FlowChatAgentV2
+from app.agents.flow_chat_agent import FlowChatAgent
 from app.core.llm import LLMClient
 from app.db.session import create_session
 from app.services.flow_chat_service import FlowChatService
@@ -126,7 +126,7 @@ class FlowModificationExecutor(ActionExecutor):
         """
         try:
             # Create agent and service in a new event loop context
-            agent = FlowChatAgentV2(llm=self._llm_client)
+            agent = FlowChatAgent(llm=self._llm_client)
 
             with create_session() as session:
                 service = FlowChatService(session, agent=agent)

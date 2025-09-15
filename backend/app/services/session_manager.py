@@ -57,7 +57,7 @@ class RedisSessionManager(SessionManager):
                     logger.warning("Failed to deserialize flow context, creating new: %s", e)
 
         return None
-    
+
     def get_context(self, session_id: str) -> FlowContext | None:
         """Get flow context for a session (alias for load_context)."""
         return self.load_context(session_id)

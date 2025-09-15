@@ -75,6 +75,7 @@ from enum import Enum
 from uuid import UUID
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -184,6 +185,14 @@ class TenantProjectConfig(Base, TimestampMixin):
     project_description: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_audience: Mapped[str | None] = mapped_column(Text, nullable=True)
     communication_style: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    wait_time_before_replying_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    typing_indicator_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    min_typing_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
+    max_typing_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=5000)
+    message_reset_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    natural_delays_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    delay_variance_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
 
     tenant: Mapped[Tenant] = relationship(back_populates="project_config")
 

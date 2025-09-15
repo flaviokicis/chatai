@@ -17,23 +17,23 @@ from app.db.session import db_session
 def debug_lookup():
     """Debug channel lookup."""
     phone = "+15550489424"
-    
+
     with db_session() as session:
         print(f"🔍 Looking for: {phone}")
-        
+
         # Method 1: find_channel_instance_by_identifier
         identifier = f"whatsapp:{phone}"
         print(f"\n1. Trying find_channel_instance_by_identifier with: {identifier}")
         channel = find_channel_instance_by_identifier(session, identifier)
         print(f"   Result: {channel}")
-        
+
         # Method 2: Direct query by phone_number
         print(f"\n2. Trying direct query by phone_number = '{phone}'")
-        channel = session.query(ChannelInstance).filter(
-            ChannelInstance.phone_number == phone
-        ).first()
+        channel = (
+            session.query(ChannelInstance).filter(ChannelInstance.phone_number == phone).first()
+        )
         print(f"   Result: {channel}")
-        
+
         # Method 3: Show all channels with details
         print("\n3. All channels in database:")
         channels = session.query(ChannelInstance).all()
@@ -42,10 +42,13 @@ def debug_lookup():
             print(f"   Identifier: {ch.identifier}")
             print(f"   Phone Number (encrypted field): {ch.phone_number}")
             print(f"   Raw Phone Number: {ch.phone_number!r}")
-            
+
             # Try different comparisons
             print(f"   phone == ch.phone_number: {phone == ch.phone_number}")
-            print(f"   phone in str(ch.phone_number): {phone in str(ch.phone_number) if ch.phone_number else False}")
+            print(
+                f"   phone in str(ch.phone_number): {phone in str(ch.phone_number) if ch.phone_number else False}"
+            )
+
 
 if __name__ == "__main__":
     debug_lookup()

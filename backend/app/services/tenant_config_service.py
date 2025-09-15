@@ -29,6 +29,15 @@ class ProjectContext:
     target_audience: str | None = None
     communication_style: str | None = None
 
+    # Timing and response behavior configuration
+    wait_time_before_replying_ms: int = 2000
+    typing_indicator_enabled: bool = True
+    min_typing_duration_ms: int = 1000
+    max_typing_duration_ms: int = 5000
+    message_reset_enabled: bool = True
+    natural_delays_enabled: bool = True
+    delay_variance_percent: int = 20
+
     def has_decision_context(self) -> bool:
         """Check if we have context for decision-making LLM."""
         return self.project_description is not None or self.target_audience is not None
@@ -151,4 +160,21 @@ class TenantConfigService:
             project_description=project_config.project_description if project_config else None,
             target_audience=project_config.target_audience if project_config else None,
             communication_style=project_config.communication_style if project_config else None,
+            wait_time_before_replying_ms=project_config.wait_time_before_replying_ms
+            if project_config
+            else 2000,
+            typing_indicator_enabled=project_config.typing_indicator_enabled
+            if project_config
+            else True,
+            min_typing_duration_ms=project_config.min_typing_duration_ms
+            if project_config
+            else 1000,
+            max_typing_duration_ms=project_config.max_typing_duration_ms
+            if project_config
+            else 5000,
+            message_reset_enabled=project_config.message_reset_enabled if project_config else True,
+            natural_delays_enabled=project_config.natural_delays_enabled
+            if project_config
+            else True,
+            delay_variance_percent=project_config.delay_variance_percent if project_config else 20,
         )

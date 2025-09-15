@@ -1,7 +1,7 @@
 """Simplified tool schemas for flow interactions.
 
 This module contains only the essential tools needed for flow navigation and control.
-Each tool has a single, clear responsibility following FAANG-level architecture principles.
+Each tool has a single, clear responsibility.
 """
 
 from __future__ import annotations

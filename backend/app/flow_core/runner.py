@@ -27,7 +27,7 @@ TurnResult = ToolExecutionResult
 
 
 class FlowTurnRunner:
-    """Clean flow runner with external action feedback loops.
+    """Flow turn runner with external action feedback loops.
 
     This runner ensures that:
     1. External actions are actually executed
@@ -36,23 +36,29 @@ class FlowTurnRunner:
     4. Users receive accurate information about what happened
     """
 
-    def __init__(self, llm_client: LLMClient, compiled_flow: Any):
+    def __init__(
+        self,
+        llm_client: LLMClient,
+        compiled_flow: Any,
+        action_registry: ActionRegistry | None = None,
+    ):
         """Initialize the flow runner.
 
         Args:
             llm_client: LLM client for generating responses
             compiled_flow: Compiled flow definition
+            action_registry: Optional pre-created action registry (for reuse)
         """
         self._llm_client = llm_client
         self._compiled_flow = compiled_flow
 
-        # Initialize clean architecture components
-        self._action_registry = ActionRegistry(llm_client)
+        # Initialize components - reuse action registry if provided
+        self._action_registry = action_registry or ActionRegistry(llm_client)
         self._responder = EnhancedFlowResponder(llm_client)
         self._tool_executor = ToolExecutionService(self._action_registry)
         self._feedback_loop = FeedbackLoop(self._responder)
 
-        logger.info("FlowTurnRunner initialized with clean architecture")
+        logger.info("FlowTurnRunner initialized")
 
     def initialize_context(self, existing_context: FlowContext | None = None) -> FlowContext:
         """Initialize or update flow context.

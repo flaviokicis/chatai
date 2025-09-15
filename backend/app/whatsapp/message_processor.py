@@ -41,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 class WhatsAppMessageProcessor:
     """
-    WhatsApp message processor with clean architecture.
+    WhatsApp message processor for handling incoming messages.
 
     Responsibilities:
     - WhatsApp message parsing and validation
@@ -103,7 +103,13 @@ class WhatsAppMessageProcessor:
                 "Desculpe, este número do WhatsApp não está configurado."
             )
 
-        # Step 6: Check for rapid message coordination BEFORE flow processing
+        # Step 6: Get tenant configuration for timing settings
+        tenant_config = self._get_tenant_timing_config(conversation_setup)
+
+        # Step 7: Wait before processing and optionally send typing indicator
+        await self._wait_and_send_typing_indicator(message_data, tenant_config)
+
+        # Step 8: Check for rapid message coordination BEFORE flow processing
         session_id = self._build_session_id(
             message_data["sender_number"], conversation_setup.flow_id or "unknown"
         )
@@ -142,7 +148,7 @@ class WhatsAppMessageProcessor:
                 message_data["is_aggregated"] = True
                 message_data["original_message_count"] = len(aggregated_message.split("\n"))
 
-        # Step 7: Process through flow processor with dependency injection
+        # Step 9: Process through flow processor with dependency injection
         flow_response = await self._process_through_flow_processor(
             message_data, conversation_setup, app_context
         )
@@ -424,16 +430,47 @@ class WhatsAppMessageProcessor:
             logger.warning(f"Failed to check retry status: {e}")
             return False
 
-    async def _send_whatsapp_typing_indicator(self, message_data: dict[str, Any]) -> None:
-        """Send WhatsApp typing indicator."""
+    async def _wait_and_send_typing_indicator(
+        self, message_data: dict[str, Any], tenant_config: dict[str, Any] | None = None
+    ) -> None:
+        """Wait before processing and send typing indicator based on tenant config.
+
+        Args:
+            message_data: Message information
+            tenant_config: Tenant timing configuration
+        """
+        # Get configuration with defaults
+        if tenant_config is None:
+            tenant_config = {}
+
+        wait_ms = tenant_config.get("wait_time_before_replying_ms", 2000)
+        typing_enabled = tenant_config.get("typing_indicator_enabled", True)
+        natural_delays = tenant_config.get("natural_delays_enabled", True)
+        variance_percent = tenant_config.get("delay_variance_percent", 20)
+
+        # Add natural variance if enabled
+        if natural_delays and variance_percent > 0:
+            import secrets
+
+            # Use cryptographically secure random for timing variance
+            variance = (secrets.randbelow(2 * variance_percent + 1) - variance_percent) / 100
+            wait_ms = int(wait_ms * (1 + variance))
+
+        # Ensure within reasonable bounds (100ms to 10s)
+        wait_ms = max(100, min(wait_ms, 10000))
+
+        # Wait for the configured duration
+        logger.debug(f"Waiting {wait_ms}ms before processing message")
+        await asyncio.sleep(wait_ms / 1000.0)
+
+        # Send typing indicator if enabled
         if (
-            self.settings.whatsapp_provider == "cloud_api"
+            typing_enabled
+            and self.settings.whatsapp_provider == "cloud_api"
             and message_data["message_id"]
             and hasattr(self.adapter, "send_typing_indicator")
         ):
             try:
-                await asyncio.sleep(1.0)
-
                 clean_to = message_data["sender_number"].replace("whatsapp:", "")
                 clean_from = message_data["receiver_number"].replace("whatsapp:", "")
 
@@ -457,6 +494,47 @@ class WhatsAppMessageProcessor:
         except Exception as e:
             logger.error("Failed to setup WhatsApp conversation context: %s", e)
             return None
+
+    def _get_tenant_timing_config(self, conversation_setup: Any) -> dict[str, Any]:
+        """Get tenant timing configuration from conversation setup.
+
+        Args:
+            conversation_setup: ConversationSetup with project_context
+
+        Returns:
+            Timing configuration dictionary
+        """
+        try:
+            # Access project_context directly from conversation_setup
+            if (
+                hasattr(conversation_setup, "project_context")
+                and conversation_setup.project_context
+            ):
+                pc = conversation_setup.project_context
+                return {
+                    "wait_time_before_replying_ms": getattr(
+                        pc, "wait_time_before_replying_ms", 2000
+                    ),
+                    "typing_indicator_enabled": getattr(pc, "typing_indicator_enabled", True),
+                    "min_typing_duration_ms": getattr(pc, "min_typing_duration_ms", 1000),
+                    "max_typing_duration_ms": getattr(pc, "max_typing_duration_ms", 5000),
+                    "message_reset_enabled": getattr(pc, "message_reset_enabled", True),
+                    "natural_delays_enabled": getattr(pc, "natural_delays_enabled", True),
+                    "delay_variance_percent": getattr(pc, "delay_variance_percent", 20),
+                }
+        except Exception as e:
+            logger.warning(f"Failed to get tenant timing config: {e}")
+
+        # Return defaults if config not available
+        return {
+            "wait_time_before_replying_ms": 2000,
+            "typing_indicator_enabled": True,
+            "min_typing_duration_ms": 1000,
+            "max_typing_duration_ms": 5000,
+            "message_reset_enabled": True,
+            "natural_delays_enabled": True,
+            "delay_variance_percent": 20,
+        }
 
     async def _process_through_flow_processor(
         self, message_data: dict[str, Any], conversation_setup: Any, app_context: Any
@@ -635,7 +713,7 @@ class WhatsAppMessageProcessor:
         flow_response,
     ) -> list[dict[str, Any]]:
         """Get WhatsApp messages from flow response."""
-        # After refactor, messages are always stored in metadata by flow processor
+        # Messages are stored in metadata by flow processor
         if hasattr(flow_response, "metadata") and flow_response.metadata:
             metadata_messages = flow_response.metadata.get("messages")
             if metadata_messages and isinstance(metadata_messages, list):

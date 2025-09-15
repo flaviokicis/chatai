@@ -45,10 +45,10 @@ class ThreadStatusUpdater(ABC):
 
 
 class FlowProcessor:
-    """Clean flow processor with external action feedback loops.
+    """Flow processor with external action feedback loops.
 
-    This processor eliminates the complex interception logic and ensures
-    that all external actions are properly executed with LLM feedback.
+    This processor ensures that all external actions are properly
+    executed with LLM feedback.
     """
 
     def __init__(
@@ -68,10 +68,15 @@ class FlowProcessor:
         self._session_manager = session_manager
         self._cancellation_manager = cancellation_manager
 
-        logger.info("FlowProcessor initialized with clean architecture")
+        # Create action registry once and reuse it
+        from app.flow_core.actions import ActionRegistry
+
+        self._action_registry = ActionRegistry(llm_client)
+
+        logger.info("FlowProcessor initialized")
 
     async def process_flow(self, request: FlowRequest, app_context: Any) -> FlowResponse:
-        """Process a flow request with clean external action handling.
+        """Process a flow request with external action handling.
 
         Args:
             request: Flow processing request
@@ -125,8 +130,8 @@ class FlowProcessor:
             # Check admin status
             is_admin = self._check_admin_status(request)
 
-            # Create clean runner
-            runner = FlowTurnRunner(self._llm, compiled_flow)
+            # Create runner with shared action registry
+            runner = FlowTurnRunner(self._llm, compiled_flow, self._action_registry)
 
             # Initialize context
             ctx = runner.initialize_context(existing_context)
@@ -152,7 +157,7 @@ class FlowProcessor:
                 node_id=ctx.current_node_id,
             )
 
-            # Process the turn with clean architecture
+            # Process the turn
             result = await runner.process_turn(
                 ctx=ctx,
                 user_message=request.user_message,

@@ -49,18 +49,19 @@ def get_or_create_contact(
     # ROBUST APPROACH: Use advisory locks to prevent race conditions
     # Create a deterministic lock key based on tenant_id and external_id
     lock_key = abs(hash(f"{tenant_id}:{external_id}")) % (2**31)  # PostgreSQL advisory lock key
-    
+
     # Acquire an advisory lock to prevent concurrent creation of the same contact
     session.execute(text("SELECT pg_advisory_lock(:lock_key)"), {"lock_key": lock_key})
-    
+
     try:
         # Search all contacts for this tenant and decrypt external_id to find matches
-        all_contacts = session.execute(
-            select(Contact).where(
-                Contact.tenant_id == tenant_id,
-                Contact.deleted_at.is_(None)
+        all_contacts = (
+            session.execute(
+                select(Contact).where(Contact.tenant_id == tenant_id, Contact.deleted_at.is_(None))
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         # Search for existing contact by decrypting and comparing external_id
         for contact in all_contacts:
@@ -95,14 +96,17 @@ def get_or_create_contact(
             # This should be very rare now due to advisory locking
             session.rollback()
             logger.warning("Contact creation failed despite advisory lock: %s", e)
-            
+
             # Final attempt - search once more
-            all_contacts = session.execute(
-                select(Contact).where(
-                    Contact.tenant_id == tenant_id,
-                    Contact.deleted_at.is_(None)
+            all_contacts = (
+                session.execute(
+                    select(Contact).where(
+                        Contact.tenant_id == tenant_id, Contact.deleted_at.is_(None)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             for contact in all_contacts:
                 try:
@@ -113,7 +117,9 @@ def get_or_create_contact(
                     continue
 
             # Still not found - this should not happen
-            logger.error("Failed to create or find contact even with advisory lock: %s", external_id)
+            logger.error(
+                "Failed to create or find contact even with advisory lock: %s", external_id
+            )
             raise RuntimeError(f"Failed to create or find contact for external_id: {external_id}")
 
     finally:

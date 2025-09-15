@@ -120,7 +120,7 @@ class LLMFlowEngine:
                 answer = event["answer"]
                 ctx.answers[node.key] = answer
                 ctx.get_node_state(node.id).status = NodeStatus.COMPLETED
-                return self._advance_from_node(ctx, node, event, project_context)
+                return self._advance_from_node(ctx, node, project_context)
 
             # Handle tool events
             tool_name = event.get("tool_name")
@@ -237,7 +237,6 @@ class LLMFlowEngine:
         self,
         ctx: FlowContext,
         node: Any,
-        event: dict[str, Any] | None,
         project_context: ProjectContext | None = None,
     ) -> EngineResponse:
         """Advance from current node to next."""
