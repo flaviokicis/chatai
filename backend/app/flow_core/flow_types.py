@@ -85,16 +85,6 @@ class ToolCall(BaseModel):
     reasoning: str = Field(..., description="Reasoning for this tool choice")
 
 
-class RequestHumanHandoffCall(ToolCall):
-    """Tool call for RequestHumanHandoff."""
-
-    tool_name: Literal["RequestHumanHandoff"] = "RequestHumanHandoff"
-    reason: Literal["user_frustrated", "explicit_request", "too_complex", "technical_issue"] = (
-        Field(...)
-    )
-    context_summary: str = Field(..., max_length=MAX_CONTEXT_SUMMARY_LENGTH)
-    urgency: Literal["low", "medium", "high"] = Field(default=DEFAULT_URGENCY)
-
 
 class PerformActionCall(ToolCall):
     """Tool call for unified PerformAction."""
@@ -117,7 +107,7 @@ class PerformActionCall(ToolCall):
 
 
 # Union type for all possible tool calls
-ToolCallUnion = PerformActionCall | RequestHumanHandoffCall
+ToolCallUnion = PerformActionCall
 
 
 # GPT-5 response schema
@@ -219,8 +209,7 @@ def _create_tool_model(tool_name: str, tool_data: dict[str, Any]) -> ToolCallUni
     """Create the appropriate tool model based on tool name."""
     if tool_name == "PerformAction":
         return PerformActionCall(**tool_data)
-    if tool_name == "RequestHumanHandoff":
-        return RequestHumanHandoffCall(**tool_data)
+    # RequestHumanHandoff is deprecated: use PerformAction with action 'handoff'
 
     msg = f"Unknown tool name: {tool_name}"
     validation_errors = [f"Tool '{tool_name}' is not recognized"]
@@ -272,7 +261,6 @@ def validate_gpt5_response(raw_response: dict[str, Any]) -> GPT5Response:
         # Create the full response
         return GPT5Response(
             tools=tools_list,
-            messages=raw_response.get("messages", []),
             reasoning=raw_response.get("reasoning", ""),
         )
 
@@ -286,4 +274,4 @@ def validate_gpt5_response(raw_response: dict[str, Any]) -> GPT5Response:
 # Type aliases for common patterns
 AnswersDict = dict[str, Any]
 MetadataDict = dict[str, Any]
-ToolName = Literal["PerformAction", "RequestHumanHandoff", "ModifyFlowLive"]
+ToolName = Literal["PerformAction", "ModifyFlowLive"]

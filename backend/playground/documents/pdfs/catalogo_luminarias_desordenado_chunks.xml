@@ -1,0 +1,36 @@
+<chunks>
+  <chunk id="chunk_001">
+    <chunk_metadata>
+      <about>Visão geral do catálogo 2024: validade de preços, proposta de valor e certificações</about>
+      <category>general_info</category>
+      <keywords>catálogo 2024, preços válidos, INMETRO, luminárias LED, grandes volumes, soluções em iluminação</keywords>
+      <possible_questions>
+        <question id="q1">Até quando os preços do catálogo são válidos?</question>
+        <question id="q2">Todos os produtos possuem certificação INMETRO?</question>
+        <question id="q3">Há condições especiais para compras em grandes volumes?</question>
+      </possible_questions>
+    </chunk_metadata>
+    <chunk_content>
+      CATÁLOGO DE PRODUTOS 2024 — Luminárias LED - Soluções em Iluminação.
+      ATENÇÃO: Preços válidos até 31/12/2024.
+      Consulte condições especiais para grandes volumes!!!
+      Todos os produtos possuem certificação INMETRO.
+    </chunk_content>
+    <related_chunks>
+      <related_chunk id="chunk_009">
+        <relationship_reason>Condições comerciais detalham frete, prazos e pagamentos, complementando a validade de preços e condições para volumes.</relationship_reason>
+      </related_chunk>
+      <related_chunk id="chunk_008">
+        <relationship_reason>Resumo de promoções e descontos por volume conecta com o aviso de condições especiais para grandes volumes.</relationship_reason>
+      </related_chunk>
+      <related_chunk id="chunk_010">
+        <relationship_reason>Canal para contato e pedidos quando o cliente decide comprar com base nas informações gerais do catálogo.</relationship_reason>
+      </related_chunk>
+    </related_chunks>
+  </chunk>
+
+  <chunk id="chunk_002">
+    <chunk_metadata>
+      <about>Linha Industrial — HIGHBAY LED 200W: especificações, proteção IP, preço e garantia</about>
+      <category>product_specs</category>
+      <keywords>highbay 200W, 200 watts, 210W real, 28000lm, 90°, 120°, IP65, garantia 5 anos, preço R$ 890, 12x 89,90,

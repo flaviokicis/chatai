@@ -86,8 +86,7 @@ class ToolExecutionService:
             # Route to appropriate handler based on tool name
             if tool_name == "PerformAction":
                 return await self._handle_perform_action(tool_data, context, pending_field)
-            if tool_name == "RequestHumanHandoff":
-                return self._handle_handoff_request(tool_data)
+            # RequestHumanHandoff tool is deprecated; use PerformAction with action 'handoff'
             logger.warning(f"Unknown tool: {tool_name}")
             return ToolExecutionResult()
 
@@ -238,14 +237,4 @@ class ToolExecutionService:
                 success=False, message=f"❌ Erro interno ao executar {action_name}", error=str(e)
             )
 
-    def _handle_handoff_request(self, tool_data: dict[str, Any]) -> ToolExecutionResult:
-        """Handle RequestHumanHandoff tool."""
-        return ToolExecutionResult(
-            escalate=True,
-            terminal=False,
-            metadata={
-                "reason": tool_data.get("reason", "user_requested"),
-                "urgency": tool_data.get("urgency", "medium"),
-                "tool_name": "RequestHumanHandoff",
-            },
-        )
+    # Deprecated legacy handler removed: RequestHumanHandoff

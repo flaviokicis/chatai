@@ -80,7 +80,6 @@ HANDOFF_TOO_COMPLEX = "too_complex"
 HANDOFF_TECHNICAL = "technical_issue"
 
 # Tool names (for type safety)
-TOOL_REQUEST_HANDOFF = "RequestHumanHandoff"
 TOOL_PERFORM_ACTION = "PerformAction"
 
 # Model names

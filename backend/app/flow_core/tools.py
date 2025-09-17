@@ -31,30 +31,6 @@ class FlowTool(BaseModel):
     reasoning: str = Field(..., description="Brief explanation of why this tool was chosen")
 
 
-class RequestHumanHandoff(FlowTool):
-    """Request handoff to a human agent.
-
-    Use this when:
-    - User is frustrated or confused after multiple attempts
-    - User explicitly asks to speak to a human
-    - The request is too complex for the flow
-    - Technical issues prevent progress
-    """
-
-    reason: Literal["user_frustrated", "explicit_request", "too_complex", "technical_issue"] = (
-        Field(..., description="Categorized reason for handoff")
-    )
-
-    context_summary: str = Field(
-        ...,
-        max_length=MAX_CONTEXT_SUMMARY_LENGTH,
-        description="Brief summary of the conversation for the human agent",
-    )
-
-    urgency: Literal["low", "medium", "high"] = Field(
-        default=DEFAULT_URGENCY, description="Urgency level of the handoff"
-    )
-
 
 class PerformAction(FlowTool):
     """Unified action tool that combines all necessary actions and messages.
@@ -123,7 +99,6 @@ class PerformAction(FlowTool):
 # Tool registry - only essential tools
 FLOW_TOOLS = [
     PerformAction,
-    RequestHumanHandoff,
 ]
 
 

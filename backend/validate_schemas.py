@@ -15,7 +15,7 @@ def test_tool_schemas():
     """Test that all tool schemas can be instantiated correctly."""
     print("🧪 Testing Tool Schemas...")
 
-    from app.flow_core.flow_types import GPT5Response, PerformActionCall, RequestHumanHandoffCall
+    from app.flow_core.flow_types import GPT5Response, PerformActionCall
 
     # Test data
     test_messages = [{"text": "Test message", "delay_ms": 0}]
@@ -34,20 +34,7 @@ def test_tool_schemas():
         print(f"❌ PerformActionCall schema error: {e}")
         return False
 
-    # Test RequestHumanHandoffCall
-    try:
-        handoff_call = RequestHumanHandoffCall(
-            tool_name="RequestHumanHandoff",
-            messages=test_messages,
-            reasoning="Test handoff",
-            confidence=0.9,
-            reason="explicit_request",
-            context_summary="User requested human assistance",
-        )
-        print("✅ RequestHumanHandoffCall schema valid")
-    except Exception as e:
-        print(f"❌ RequestHumanHandoffCall schema error: {e}")
-        return False
+    # RequestHumanHandoff is deprecated; use PerformAction with action 'handoff'
     # Test GPT5Response
     try:
         response = GPT5Response(tools=[perform_action], reasoning="Test response reasoning")

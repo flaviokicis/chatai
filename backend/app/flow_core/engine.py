@@ -127,13 +127,7 @@ class LLMFlowEngine:
             if tool_name == "RestartConversation":
                 # This is now handled by PerformAction with "restart" action
                 return self._handle_restart(ctx, project_context)
-            if tool_name == "RequestHumanHandoff":
-                return EngineResponse(
-                    kind="escalate",
-                    message="Transferindo você para um atendente humano.",
-                    node_id=node.id,
-                    metadata={"reason": event.get("reason", "requested")},
-                )
+            # RequestHumanHandoff tool is deprecated; use PerformAction with action 'handoff'
 
         # Get available edges for navigation
         edges = self._get_edges_from_node(node.id)
