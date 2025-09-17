@@ -1,6 +1,7 @@
 """Enhanced chat model initialization with GPT-5 reasoning support."""
 
 from typing import Any, Literal
+
 from langchain.chat_models import init_chat_model
 from langchain_core.language_models.chat_models import BaseChatModel
 
@@ -13,13 +14,13 @@ def init_chat_model_with_reasoning(
 ) -> BaseChatModel:
     """
     Initialize a chat model with optional GPT-5 reasoning support.
-    
+
     Args:
         model: Model name (e.g., "gpt-5", "gpt-4", "gemini-2.5-flash")
         model_provider: Provider name (e.g., "openai", "google_genai", "anthropic")
         reasoning_effort: For GPT-5, set reasoning effort ("minimal", "medium", "high")
         **kwargs: Additional model configuration parameters
-        
+
     Returns:
         Initialized chat model
     """
@@ -29,5 +30,5 @@ def init_chat_model_with_reasoning(
         model_kwargs = kwargs.get("model_kwargs", {})
         model_kwargs["reasoning"] = {"effort": reasoning_effort}
         kwargs["model_kwargs"] = model_kwargs
-    
+
     return init_chat_model(model, model_provider=model_provider, **kwargs)

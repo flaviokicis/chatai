@@ -12,9 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from .constants import (
     DEFAULT_CONFIDENCE,
-    DEFAULT_URGENCY,
     MAX_CONFIDENCE,
-    MAX_CONTEXT_SUMMARY_LENGTH,
     MIN_CONFIDENCE,
 )
 
@@ -29,7 +27,6 @@ class FlowTool(BaseModel):
         description="Confidence level in this action (0-1)",
     )
     reasoning: str = Field(..., description="Brief explanation of why this tool was chosen")
-
 
 
 class PerformAction(FlowTool):

@@ -12,9 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.flow_core.constants import (
     DEFAULT_CONFIDENCE,
-    DEFAULT_URGENCY,
     MAX_CONFIDENCE,
-    MAX_CONTEXT_SUMMARY_LENGTH,
     MAX_FOLLOWUP_DELAY_MS,
     MAX_MESSAGE_LENGTH,
     MAX_VALIDATION_ERRORS_TO_SHOW,
@@ -83,7 +81,6 @@ class ToolCall(BaseModel):
         description="Confidence in this tool selection",
     )
     reasoning: str = Field(..., description="Reasoning for this tool choice")
-
 
 
 class PerformActionCall(ToolCall):

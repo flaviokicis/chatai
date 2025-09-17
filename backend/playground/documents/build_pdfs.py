@@ -45,9 +45,8 @@ def markdown_to_html(markdown_text: str) -> str:
                 html.append(f"<h2>{line[3:].strip()}</h2>")
             elif line.startswith("### "):
                 html.append(f"<h3>{line[4:].strip()}</h3>")
-            else:
-                if line.strip():
-                    html.append(f"<p>{line}</p>")
+            elif line.strip():
+                html.append(f"<p>{line}</p>")
         return "\n".join(html)
 
 
@@ -57,17 +56,16 @@ def html_to_pdf(html: str, out_file: Path) -> None:
     If not installed, raise a clear error with instructions.
     """
     try:
-        from xhtml2pdf import pisa  # type: ignore
         import io
+
+        from xhtml2pdf import pisa  # type: ignore
 
         with out_file.open("wb") as pdf_file:
             result = pisa.CreatePDF(io.StringIO(html), dest=pdf_file)
         if result.err:
             raise RuntimeError(f"xhtml2pdf failed to render {out_file.name}")
     except ModuleNotFoundError as exc:
-        raise SystemExit(
-            "xhtml2pdf is required. Install with: uv add xhtml2pdf"
-        ) from exc
+        raise SystemExit("xhtml2pdf is required. Install with: uv add xhtml2pdf") from exc
 
 
 def build_document(md_path: Path, out_dir: Path) -> Path:
@@ -119,9 +117,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    md_files = sorted(
-        p for p in args.src_dir.glob("*.md") if p.name.lower() != "readme.md"
-    )
+    md_files = sorted(p for p in args.src_dir.glob("*.md") if p.name.lower() != "readme.md")
     if not md_files:
         raise SystemExit(f"No Markdown files found in {args.src_dir}")
 
@@ -132,5 +128,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

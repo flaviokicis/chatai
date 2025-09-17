@@ -84,9 +84,7 @@ class LangChainToolsLLM(LLMClient):
             if calls:
                 chosen = None
                 # Prefer our simplified essential tools in this order
-                preferred = (
-                    "PerformAction",
-                )
+                preferred = ("PerformAction",)
                 for name in preferred:
                     chosen = next((c for c in calls if c.get("name") == name), None)
                     if chosen:
