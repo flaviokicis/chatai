@@ -32,3 +32,4 @@ def init_chat_model_with_reasoning(
         kwargs["model_kwargs"] = model_kwargs
 
     return init_chat_model(model, model_provider=model_provider, **kwargs)
+

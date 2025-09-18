@@ -450,3 +450,122 @@ class HandoffRequest(Base, TimestampMixin):
 
 
 # Thought tracing models removed - using Langfuse for observability instead
+
+
+# --- RAG System Models ---
+
+
+class TenantDocument(Base, TimestampMixin):
+    """Stores documents uploaded by tenants for RAG context."""
+
+    __tablename__ = "tenant_documents"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+
+    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_type: Mapped[str] = mapped_column(String(50), nullable=False)  # pdf, txt, md, etc.
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_content: Mapped[str | None] = mapped_column(Text, nullable=True)  # Original content
+    parsed_content: Mapped[str | None] = mapped_column(Text, nullable=True)  # Cleaned content
+    document_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # Relationships
+    tenant: Mapped[Tenant] = relationship()
+    chunks: Mapped[list[DocumentChunk]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class DocumentChunk(Base, TimestampMixin):
+    """Stores document chunks with embeddings for vector search."""
+
+    __tablename__ = "document_chunks"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    document_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenant_documents.id", ondelete="CASCADE")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Note: Vector column requires pgvector extension
+    # embedding: Mapped[list[float] | None] = mapped_column(Vector(3072), nullable=True)
+    chunk_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    possible_questions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+
+    # Relationships
+    document: Mapped[TenantDocument] = relationship(back_populates="chunks")
+    tenant: Mapped[Tenant] = relationship()
+    source_relationships: Mapped[list[ChunkRelationship]] = relationship(
+        foreign_keys="ChunkRelationship.source_chunk_id",
+        back_populates="source_chunk",
+        cascade="all, delete-orphan",
+    )
+    target_relationships: Mapped[list[ChunkRelationship]] = relationship(
+        foreign_keys="ChunkRelationship.target_chunk_id",
+        back_populates="target_chunk",
+        cascade="all, delete-orphan",
+    )
+
+
+class ChunkRelationship(Base, TimestampMixin):
+    """Tracks relationships between document chunks."""
+
+    __tablename__ = "chunk_relationships"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_chunk_id",
+            "target_chunk_id",
+            "relationship_type",
+            name="uq_chunk_relationship",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    source_chunk_id: Mapped[UUID] = mapped_column(
+        ForeignKey("document_chunks.id", ondelete="CASCADE")
+    )
+    target_chunk_id: Mapped[UUID] = mapped_column(
+        ForeignKey("document_chunks.id", ondelete="CASCADE")
+    )
+
+    relationship_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # related, extends, references
+    relationship_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    source_chunk: Mapped[DocumentChunk] = relationship(
+        foreign_keys=[source_chunk_id], back_populates="source_relationships"
+    )
+    target_chunk: Mapped[DocumentChunk] = relationship(
+        foreign_keys=[target_chunk_id], back_populates="target_relationships"
+    )
+
+
+class RetrievalSession(Base, TimestampMixin):
+    """Tracks RAG query sessions for analytics and optimization."""
+
+    __tablename__ = "retrieval_sessions"
+
+    id: Mapped[UUID] = mapped_column(PGUUID(as_uuid=True), primary_key=True, default=uuid7)
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"))
+    thread_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("chat_threads.id", ondelete="SET NULL")
+    )
+
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    # query_embedding: Mapped[list[float] | None] = mapped_column(Vector(3072), nullable=True)
+    retrieved_chunks: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    final_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    sufficient: Mapped[bool] = mapped_column(Boolean, default=False)
+    judge_reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    tenant: Mapped[Tenant] = relationship()
+    thread: Mapped[ChatThread | None] = relationship()

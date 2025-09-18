@@ -104,3 +104,4 @@ python test_gpt5_reasoning.py
 - The `reasoning` parameter is currently passed via `model_kwargs` 
 - Future versions of langchain-openai may support reasoning as a direct parameter
 - The implementation is production-ready and follows [[memory:5722349]] FAANG-level clean code principles
+

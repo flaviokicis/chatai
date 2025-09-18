@@ -80,3 +80,4 @@ WhatsApp: (11) 9XXXX-XXXX
 Email: vendas@luminariasledexemplo.com.br
 
 *Todos os produtos possuem certificação INMETRO
+

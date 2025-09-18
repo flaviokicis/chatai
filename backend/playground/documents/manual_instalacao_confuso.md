@@ -95,3 +95,4 @@ Para acionar a garantia:
 ---
 Revisão: Janeiro/2024
 Versão: 2.3
+
