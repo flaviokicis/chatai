@@ -42,7 +42,7 @@ class PerformAction(FlowTool):
     """
 
     actions: list[
-        Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow"]
+        Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow", "update_communication_style"]
     ] = Field(
         ...,
         description="Actions to take in sequence (e.g., ['update', 'navigate'] to save answer then navigate)",
@@ -79,6 +79,12 @@ class PerformAction(FlowTool):
 
     flow_modification_type: Literal["prompt", "routing", "validation", "general"] | None = Field(
         default=None, description="Type of flow modification (optional)"
+    )
+    
+    # Communication style fields (admin only)
+    communication_style_instruction: str | None = Field(
+        default=None,
+        description="Instruction for updating communication style when action is 'update_communication_style' (admin only, in Portuguese)",
     )
 
     @field_validator("messages")  # type: ignore[misc]

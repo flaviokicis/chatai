@@ -179,9 +179,25 @@ class FlowAgent(BaseAgent):
         # Process one turn
         result = runner.process_turn(ctx, message.text or "", project_context=project_context)
 
-        # Handle terminal state
+        # Handle terminal state - NO LONGER clear context, just mark as complete
         if result.terminal:
-            return self._escalate("checklist_complete", {"answers": ctx.answers})
+            # Mark context as complete but keep it active for follow-up questions
+            ctx._is_complete = True
+            # Store the completion state but don't escalate
+            stored_out = {
+                "flow_context": ctx.to_dict(),
+                "answers": ctx.answers,
+                "flow_completed": True,  # Track that flow reached terminal
+            }
+            stored_out = self.save_agent_state(stored_out, agent_state)
+            self.deps.store.save(self.user_id, self.agent_type, stored_out)
+            
+            # Return the terminal message without clearing context
+            return AgentResult(
+                outbound=OutboundMessage(text=result.assistant_message or ""),
+                handoff=None,
+                state_diff={},
+            )
 
         # Handle escalation request
         if result.escalate:

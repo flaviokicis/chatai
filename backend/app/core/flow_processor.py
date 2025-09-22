@@ -211,9 +211,29 @@ class FlowProcessor:
         Returns:
             True if user is admin, False otherwise
         """
-        # For now, all users are considered admin for flow modification
-        # This should be replaced with proper admin checking logic
-        return True
+        try:
+            from app.db.session import create_session
+            from app.services.admin_phone_service import AdminPhoneService
+            
+            # Check admin phone status
+            with create_session() as session:
+                admin_service = AdminPhoneService(session)
+                is_admin = admin_service.is_admin_phone(
+                    phone_number=request.user_id,
+                    tenant_id=request.tenant_id
+                )
+                
+                if is_admin:
+                    logger.info(f"✅ User {request.user_id} is admin for tenant {request.tenant_id}")
+                else:
+                    logger.info(f"❌ User {request.user_id} is NOT admin for tenant {request.tenant_id}")
+                
+                return is_admin
+                
+        except Exception as e:
+            logger.error(f"Error checking admin status: {e}")
+            # Default to non-admin on error for security
+            return False
 
     def _build_response(self, turn_result: Any, ctx: Any) -> FlowResponse:
         """Build flow response from turn result.

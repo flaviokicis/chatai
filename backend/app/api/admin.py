@@ -1001,3 +1001,75 @@ async def reset_conversation_context(
 
 
 # All thought tracing endpoints removed - functionality replaced by Langfuse observability
+
+
+# Personality Presets API
+class PersonalityPresetResponse(BaseModel):
+    """Response model for personality presets."""
+    id: str
+    name: str
+    description: str
+    examples: list[dict[str, str]]
+    avatar_url: str
+    recommended_for: list[str]
+
+
+class ApplyPersonalityRequest(BaseModel):
+    """Request to apply a personality preset to a tenant."""
+    personality_id: str
+
+
+@router.get("/personalities", response_model=list[PersonalityPresetResponse])
+def get_personality_presets(request: Request) -> list[PersonalityPresetResponse]:
+    """Get all available personality presets."""
+    require_admin_auth(request)
+    
+    from app.core.personality_presets import get_all_personalities
+    
+    personalities = get_all_personalities()
+    return [
+        PersonalityPresetResponse(
+            id=p.id,
+            name=p.name,
+            description=p.description,
+            examples=[{"context": e.context, "message": e.message} for e in p.examples],
+            avatar_url=p.avatar_url,
+            recommended_for=p.recommended_for
+        )
+        for p in personalities
+    ]
+
+
+@router.post("/tenants/{tenant_id}/apply-personality")
+def apply_personality_to_tenant(
+    request: Request,
+    tenant_id: str,
+    personality_req: ApplyPersonalityRequest,
+    db: Session = Depends(db_session),
+) -> dict[str, str]:
+    """Apply a personality preset to a tenant's communication style."""
+    require_admin_auth(request)
+    
+    from app.core.personality_presets import get_personality_by_id
+    
+    personality = get_personality_by_id(personality_req.personality_id)
+    if not personality:
+        raise HTTPException(status_code=404, detail="Personality preset not found")
+    
+    # Update tenant's communication style
+    updated_tenant = update_tenant(
+        db=db,
+        tenant_id=UUID(tenant_id),
+        communication_style=personality.communication_style
+    )
+    
+    if not updated_tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    db.commit()
+    
+    return {
+        "message": f"Successfully applied '{personality.name}' personality to tenant",
+        "personality_id": personality.id,
+        "tenant_id": tenant_id
+    }

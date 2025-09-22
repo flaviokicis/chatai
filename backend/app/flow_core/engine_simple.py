@@ -215,7 +215,7 @@ class SimpleFlowEngine:
         ctx.user_intent = None
         ctx.conversation_style = None
         ctx.clarification_count = 0
-        ctx.is_complete = False
+        ctx._is_complete = False  # Reset the internal complete flag
         ctx.escalation_reason = None
 
     # Private helper methods
@@ -325,7 +325,7 @@ class SimpleFlowEngine:
     def _build_terminal_state(self, ctx: FlowContext, node: TerminalNode) -> EngineState:
         """Build state for a terminal node."""
         ctx.mark_node_visited(node.id, NodeStatus.COMPLETED)
-        ctx.is_complete = True
+        ctx._is_complete = True  # Use internal field
 
         return EngineState(
             state=StateSnapshot(

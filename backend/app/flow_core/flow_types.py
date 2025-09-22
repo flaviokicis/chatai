@@ -88,7 +88,7 @@ class PerformActionCall(ToolCall):
 
     tool_name: Literal["PerformAction"] = "PerformAction"
     actions: list[
-        Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow"]
+        Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow", "update_communication_style"]
     ] = Field(..., description="Actions to take in sequence (e.g., ['update', 'navigate'])")
     # messages field inherited from ToolCall
     updates: dict[str, Any] | None = Field(default=None)
@@ -101,6 +101,8 @@ class PerformActionCall(ToolCall):
     flow_modification_type: Literal["prompt", "routing", "validation", "general"] | None = Field(
         default=None
     )
+    # Communication style fields (admin only)
+    communication_style_instruction: str | None = Field(default=None)
 
 
 # Union type for all possible tool calls

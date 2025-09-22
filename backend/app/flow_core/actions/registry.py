@@ -12,6 +12,7 @@ from app.core.llm import LLMClient
 
 from .base import ActionExecutor
 from .flow_modification import FlowModificationExecutor
+from .communication_style import CommunicationStyleExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,10 @@ class ActionRegistry:
         # Register flow modification executor
         flow_mod_executor = FlowModificationExecutor(llm_client)
         self.register(flow_mod_executor)
+        
+        # Register communication style executor
+        comm_style_executor = CommunicationStyleExecutor()
+        self.register(comm_style_executor)
 
         logger.info(f"Registered {len(self._executors)} action executors")
 

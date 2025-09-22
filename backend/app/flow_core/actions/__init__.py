@@ -7,6 +7,7 @@ interface to ensure proper result handling and truthful LLM responses.
 
 from .base import ActionExecutor, ActionResult
 from .flow_modification import FlowModificationExecutor
+from .communication_style import CommunicationStyleExecutor
 from .registry import ActionRegistry
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ActionRegistry",
     "ActionResult",
     "FlowModificationExecutor",
+    "CommunicationStyleExecutor",
 ]

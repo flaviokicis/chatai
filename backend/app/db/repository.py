@@ -344,7 +344,18 @@ def create_tenant_with_config(
     target_audience: str | None = None,
     communication_style: str | None = None,
 ) -> Tenant:
-    """Create a tenant with associated project configuration."""
+    """Create a tenant with associated project configuration.
+    
+    If no communication_style is provided, defaults to 'concise_direct' personality.
+    """
+    from app.core.personality_presets import get_personality_by_id
+    
+    # Set default communication style to 'concise_direct' if not provided
+    if communication_style is None:
+        default_personality = get_personality_by_id('concise_direct')
+        if default_personality:
+            communication_style = default_personality.communication_style
+    
     tenant = Tenant(
         owner_first_name=first_name,
         owner_last_name=last_name,

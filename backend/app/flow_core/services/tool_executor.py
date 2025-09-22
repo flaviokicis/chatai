@@ -122,6 +122,9 @@ class ToolExecutionService:
             elif action == "modify_flow":
                 # External action - execute with feedback
                 await self._handle_external_action(action, tool_data, context, result)
+            elif action == "update_communication_style":
+                # External action - update communication style
+                await self._handle_external_action(action, tool_data, context, result)
             else:
                 logger.warning(f"Unknown action: {action}")
 
@@ -139,40 +142,40 @@ class ToolExecutionService:
     def _handle_navigate_action(
         self, tool_data: dict[str, Any], result: ToolExecutionResult
     ) -> None:
-        """Handle navigation actions."""
-        target_node_id = tool_data.get("target_node_id")
-        if target_node_id:
-            result.navigation = {"target_node_id": target_node_id}
-            result.metadata[META_NAV_TYPE] = "navigate"
-            logger.info(f"Navigation to: {target_node_id}")
+        """Handle navigation to target node."""
+        target_node = tool_data.get("target_node_id")
+        if target_node:
+            result.navigation = {META_NAV_TYPE: target_node}
+            logger.info(f"Navigating to node '{target_node}'")
 
-    def _handle_stay_action(self, tool_data: dict[str, Any], result: ToolExecutionResult) -> None:
-        """Handle stay actions."""
+    def _handle_stay_action(
+        self, tool_data: dict[str, Any], result: ToolExecutionResult  
+    ) -> None:
+        """Handle staying on current node."""
         clarification_reason = tool_data.get("clarification_reason")
         if clarification_reason:
             result.metadata["clarification_reason"] = clarification_reason
-        result.metadata[META_NAV_TYPE] = "stay"
         logger.info("Staying on current node")
 
     def _handle_handoff_action(
         self, tool_data: dict[str, Any], result: ToolExecutionResult
     ) -> None:
-        """Handle handoff actions."""
+        """Handle handoff request."""
+        handoff_reason = tool_data.get("handoff_reason")
         result.escalate = True
-        handoff_reason = tool_data.get("handoff_reason", "user_requested")
         result.metadata["handoff_reason"] = handoff_reason
-        logger.info(f"Handoff requested: {handoff_reason}")
+        logger.info(f"Requesting handoff: {handoff_reason}")
 
     def _handle_complete_action(self, result: ToolExecutionResult) -> None:
-        """Handle completion actions."""
+        """Handle flow completion."""
         result.terminal = True
-        result.metadata["completion_type"] = "normal"
-        logger.info("Flow completion requested")
+        logger.info("Flow completed")
 
     def _handle_restart_action(self, result: ToolExecutionResult) -> None:
-        """Handle restart actions."""
-        result.metadata[META_RESTART] = True
-        logger.info("Flow restart requested")
+        """Handle flow restart."""
+        result.navigation = {META_RESTART: True}
+        logger.info("Restarting flow")
+
 
     async def _handle_external_action(
         self,

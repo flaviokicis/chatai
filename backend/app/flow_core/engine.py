@@ -218,7 +218,7 @@ class LLMFlowEngine:
     ) -> EngineResponse:
         """Process a terminal node."""
         ctx.mark_node_visited(node.id, NodeStatus.COMPLETED)
-        ctx.is_complete = True
+        ctx._is_complete = True  # Use internal field
 
         return EngineResponse(
             kind="terminal",
@@ -252,7 +252,7 @@ class LLMFlowEngine:
         """Find the next unanswered question."""
         unanswered = self._get_unanswered_questions(ctx)
         if not unanswered:
-            ctx.is_complete = True
+            ctx._is_complete = True  # Use internal field
             return EngineResponse(
                 kind="terminal",
                 message="Todas as perguntas foram respondidas. Obrigado!",
@@ -285,7 +285,7 @@ class LLMFlowEngine:
         ctx.user_intent = None
         ctx.conversation_style = None
         ctx.clarification_count = 0
-        ctx.is_complete = False
+        ctx._is_complete = False  # Reset the internal complete flag
         ctx.escalation_reason = None
 
         # Process from entry
