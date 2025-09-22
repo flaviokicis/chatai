@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from app.api.admin import router as admin_router
 from app.api.channels import router as channels_router
 from app.api.chats import router as chats_router
+from app.api.documents import router as documents_router
 from app.api.flow_chat import router as flow_chat_router
 from app.api.flow_chat import router_versions as flow_versions_router
 from app.api.flows import router as flows_router
@@ -22,6 +23,7 @@ api_router.include_router(flow_versions_router)
 api_router.include_router(channels_router)  # User-accessible channel endpoints
 api_router.include_router(whatsapp_router)
 api_router.include_router(tenants_router)  # Public tenant endpoints
+api_router.include_router(documents_router)  # Document upload for RAG
 api_router.include_router(admin_router)  # Protected admin endpoints
 api_router.include_router(tenant_admin_router)
 api_router.include_router(chats_router)

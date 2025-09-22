@@ -129,9 +129,12 @@ class FlowProcessor:
 
             # Check admin status
             is_admin = self._check_admin_status(request)
+            
+            # Get RAG service from app context if available
+            rag_service = app_context.rag_service if app_context and hasattr(app_context, 'rag_service') else None
 
-            # Create runner with shared action registry
-            runner = FlowTurnRunner(self._llm, compiled_flow, self._action_registry)
+            # Create runner with shared action registry and RAG service
+            runner = FlowTurnRunner(self._llm, compiled_flow, self._action_registry, rag_service)
 
             # Initialize context
             ctx = runner.initialize_context(existing_context)

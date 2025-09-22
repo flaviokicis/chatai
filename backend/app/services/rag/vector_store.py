@@ -515,6 +515,25 @@ class VectorStoreRepository:
             )
             return result.scalar() or 0
     
+    async def clear_tenant_documents(self, tenant_id: UUID):
+        """Clear all documents and chunks for a tenant.
+        
+        Args:
+            tenant_id: Tenant UUID
+        """
+        async with self.async_session() as session:
+            # Delete all documents for the tenant (cascades to chunks and relationships)
+            result = await session.execute(
+                select(TenantDocument).where(TenantDocument.tenant_id == tenant_id)
+            )
+            documents = result.scalars().all()
+            
+            for document in documents:
+                await session.delete(document)
+            
+            await session.commit()
+            logger.info(f"Cleared {len(documents)} documents for tenant {tenant_id}")
+    
     async def close(self):
         """Close the database connection."""
         await self.engine.dispose()

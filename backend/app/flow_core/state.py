@@ -81,6 +81,10 @@ class FlowContext:
     user_intent: str | None = None
     conversation_style: str | None = None  # formal, casual, technical, etc.
     clarification_count: int = 0
+    
+    # RAG context - documents retrieved for current query
+    rag_documents: list[dict[str, Any]] = field(default_factory=list)
+    rag_query_performed: bool = False
 
     # Flow control - renamed to avoid conflict with is_complete() method
     _is_complete: bool = field(default=False, init=False)
@@ -179,6 +183,8 @@ class FlowContext:
             "user_intent": self.user_intent,
             "conversation_style": self.conversation_style,
             "clarification_count": self.clarification_count,
+            "rag_documents": self.rag_documents,
+            "rag_query_performed": self.rag_query_performed,
             "is_complete": self._is_complete,
             "escalation_reason": self.escalation_reason,
             "created_at": self.created_at.isoformat(),
@@ -207,6 +213,8 @@ class FlowContext:
             conversation_style=data.get("conversation_style"),
             clarification_count=data.get("clarification_count", 0),
             escalation_reason=data.get("escalation_reason"),
+            rag_documents=data.get("rag_documents", []),
+            rag_query_performed=data.get("rag_query_performed", False),
             session_id=data.get("session_id"),
             pending_field=data.get("pending_field"),
         )

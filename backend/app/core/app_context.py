@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.core.session import SessionPolicy
     from app.core.state import ConversationStore
     from app.services.processing_cancellation_manager import ProcessingCancellationManager
+    from app.services.rag.rag_service import RAGService
     from app.services.rate_limiter import RateLimiter
 
 
@@ -23,6 +24,7 @@ class AppContext:
     session_policy: SessionPolicy | None = None
     rate_limiter: RateLimiter | None = None
     cancellation_manager: ProcessingCancellationManager | None = None
+    rag_service: RAGService | None = None
 
 
 def set_app_context(app: FastAPI, ctx: AppContext) -> None:

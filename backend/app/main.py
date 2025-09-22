@@ -102,6 +102,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Configure default session policy (stable); channels may override
     ctx.session_policy = StableSessionPolicy()
 
+    # Initialize RAG service if vector DB is configured
+    pg_vector_url = settings.pg_vector_database_url
+    if pg_vector_url and settings.openai_api_key:
+        try:
+            from app.services.rag.rag_service import RAGService
+            
+            ctx.rag_service = RAGService(
+                openai_api_key=settings.openai_api_key,
+                vector_db_url=pg_vector_url,
+                max_retrieval_attempts=3
+            )
+            logger.info("RAG service initialized with pgvector database")
+        except Exception as e:
+            logger.warning(f"Failed to initialize RAG service: {e}")
+            ctx.rag_service = None
+    else:
+        ctx.rag_service = None
+        logger.info("RAG service not initialized (PG_VECTOR_DATABASE_URL or OPENAI_API_KEY not configured)")
+
     # Initialize database tables
     try:
         engine = get_engine()

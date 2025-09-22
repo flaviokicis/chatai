@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.core.llm import LLMClient
+    from app.services.rag.rag_service import RAGService
     from app.services.tenant_config_service import ProjectContext
 
 from .actions import ActionRegistry
@@ -41,6 +42,7 @@ class FlowTurnRunner:
         llm_client: LLMClient,
         compiled_flow: Any,
         action_registry: ActionRegistry | None = None,
+        rag_service: RAGService | None = None,
     ):
         """Initialize the flow runner.
 
@@ -48,9 +50,11 @@ class FlowTurnRunner:
             llm_client: LLM client for generating responses
             compiled_flow: Compiled flow definition
             action_registry: Optional pre-created action registry (for reuse)
+            rag_service: Optional RAG service for document retrieval
         """
         self._llm_client = llm_client
         self._compiled_flow = compiled_flow
+        self._rag_service = rag_service
 
         # Initialize components - reuse action registry if provided
         self._action_registry = action_registry or ActionRegistry(llm_client)
@@ -58,7 +62,7 @@ class FlowTurnRunner:
         self._tool_executor = ToolExecutionService(self._action_registry)
         self._feedback_loop = FeedbackLoop(self._responder)
 
-        logger.info("FlowTurnRunner initialized")
+        logger.info("FlowTurnRunner initialized with RAG support" if rag_service else "FlowTurnRunner initialized")
 
     def initialize_context(self, existing_context: FlowContext | None = None) -> FlowContext:
         """Initialize or update flow context.
@@ -135,6 +139,56 @@ class FlowTurnRunner:
                 current_node = self._compiled_flow.nodes.get(ctx.current_node_id)
                 if current_node and hasattr(current_node, "data_key"):
                     pending_field = current_node.data_key
+
+            # Query RAG if available and tenant has documents
+            if self._rag_service and ctx.tenant_id and user_message:
+                try:
+                    logger.info("Querying RAG for relevant context")
+                    # Build chat history for RAG
+                    chat_history = [
+                        {"role": turn.role, "content": turn.content}
+                        for turn in ctx.history[-10:]  # Last 10 turns for context
+                    ]
+                    
+                    # Get business context from project_context if available
+                    business_context = None
+                    if project_context:
+                        business_context = {
+                            "business_name": project_context.business_name,
+                            "business_description": project_context.business_description,
+                            "business_category": project_context.business_category,
+                        }
+                    
+                    # Query RAG system
+                    rag_context = await self._rag_service.query(
+                        tenant_id=ctx.tenant_id,
+                        query=user_message,
+                        chat_history=chat_history,
+                        business_context=business_context,
+                        thread_id=ctx.session_id  # Use session_id as thread_id for tracking
+                    )
+                    
+                    # Store RAG results in context
+                    if rag_context and rag_context != "No documents available. The tenant hasn't uploaded any context documents yet.":
+                        ctx.rag_documents = [
+                            {
+                                "content": rag_context,
+                                "source": "RAG System",
+                                "query": user_message
+                            }
+                        ]
+                        ctx.rag_query_performed = True
+                        logger.info("RAG context retrieved and added to flow context")
+                    else:
+                        ctx.rag_documents = []
+                        ctx.rag_query_performed = True
+                        logger.info("No relevant RAG documents found")
+                        
+                except Exception as e:
+                    logger.warning(f"RAG query failed: {e}")
+                    # Continue without RAG context on error
+                    ctx.rag_documents = []
+                    ctx.rag_query_performed = False
 
             # Step 1: Get initial LLM response with full context
             responder_output = await self._responder.respond(
