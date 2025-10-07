@@ -30,7 +30,7 @@ class ProjectContext:
     communication_style: str | None = None
 
     # Timing and response behavior configuration
-    wait_time_before_replying_ms: int = 2000
+    wait_time_before_replying_ms: int = 60000
     typing_indicator_enabled: bool = True
     min_typing_duration_ms: int = 1000
     max_typing_duration_ms: int = 5000

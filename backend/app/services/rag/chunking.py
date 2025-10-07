@@ -49,8 +49,8 @@ class ChunkingService:
         # GPT-5 with high reasoning for intelligent chunking
         self.chunking_model = ChatOpenAI(
             model="gpt-5",
-            model_kwargs={"reasoning": {"effort": "high"}},
-            temperature=0,
+            temperature=1,
+            reasoning={"effort": "high"},
             api_key=openai_api_key,
         )
         

@@ -521,12 +521,12 @@ class WhatsAppSimulatorCLI:
         """Apply tenant-configured delay before processing (simulates typing)."""
         if not self.conversation_ctx or not self.conversation_ctx.project_context:
             # Default delay if no config available
-            await asyncio.sleep(2.0)
+            await asyncio.sleep(60.0)
             return
         
         # Get timing configuration from project context
         project_context = self.conversation_ctx.project_context
-        wait_ms = getattr(project_context, "wait_time_before_replying_ms", 2000)
+        wait_ms = getattr(project_context, "wait_time_before_replying_ms", 60000)
         natural_delays = getattr(project_context, "natural_delays_enabled", True)
         variance_percent = getattr(project_context, "delay_variance_percent", 20)
         
@@ -537,8 +537,8 @@ class WhatsAppSimulatorCLI:
             variance = (secrets.randbelow(2 * variance_percent + 1) - variance_percent) / 100
             wait_ms = int(wait_ms * (1 + variance))
         
-        # Ensure within reasonable bounds (100ms to 10s)
-        wait_ms = max(100, min(wait_ms, 10000))
+        # Ensure within reasonable bounds (100ms to 2 minutes)
+        wait_ms = max(100, min(wait_ms, 120000))
         
         # Apply the delay
         await asyncio.sleep(wait_ms / 1000.0)

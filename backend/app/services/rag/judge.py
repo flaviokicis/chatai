@@ -1,7 +1,9 @@
-"""Judge service for evaluating chunk relevance using GPT-5-mini.
+"""Judge service for evaluating retrieval exhaustion using GPT-5-mini.
 
-This service uses GPT-5-mini to assess whether retrieved chunks
-contain sufficient information to answer user queries.
+This service uses GPT-5-mini to assess whether the system can retrieve
+more relevant chunks or if retrieval is exhausted for the given query.
+It does NOT decide if the content is "good enough" to answer - that's
+the tool caller's responsibility.
 """
 
 import json
@@ -27,13 +29,13 @@ class ChunkContext:
 
 
 class JudgmentResult(BaseModel):
-    """Result of judging chunk relevance."""
-    sufficient: bool = Field(description="Whether chunks are sufficient")
+    """Result of judging retrieval exhaustion."""
+    sufficient: bool = Field(description="Whether retrieval is exhausted (true) or should continue (false)")
     confidence: float = Field(description="Confidence score 0-1")
-    reasoning: str = Field(description="Explanation of judgment")
-    missing_info: List[str] = Field(default_factory=list, description="What information is missing")
-    relevant_chunks: List[str] = Field(default_factory=list, description="IDs of relevant chunks")
-    suggestions: List[str] = Field(default_factory=list, description="Suggestions for better retrieval")
+    reasoning: str = Field(description="Explanation of retrieval decision")
+    missing_info: List[str] = Field(default_factory=list, description="Info that might exist but wasn't retrieved")
+    relevant_chunks: List[str] = Field(default_factory=list, description="IDs of relevant chunks found")
+    suggestions: List[str] = Field(default_factory=list, description="Suggestions for better retrieval if continuing")
 
 
 class JudgeService:
@@ -56,8 +58,11 @@ class JudgeService:
     
     def _create_judge_prompt(self) -> str:
         """Create the prompt for judging chunk relevance."""
-        return """You are a strict relevance judge for a RAG (Retrieval-Augmented Generation) system.
-Your task: Determine if retrieved chunks contain sufficient information to answer the user's query.
+        return """You are a retrieval evaluator for a RAG system.
+Your ONLY job: Determine if the system can retrieve MORE relevant content, or if retrieval is EXHAUSTED for this query.
+
+⚠️ CRITICAL: You are NOT deciding if the answer is "good enough" - that's the tool caller's responsibility.
+You are ONLY deciding: "Can I fetch more relevant chunks, or is this all I can possibly get?"
 
 CONTEXT:
 - User Query: {query}
@@ -65,33 +70,34 @@ CONTEXT:
 - Chat History: {chat_history}
 - Retrieved Chunks: {chunks}
 
-EVALUATION CRITERIA:
+DECISION CRITERIA:
 
-Mark as SUFFICIENT when:
-- Direct answer to the query exists
-- All key facts requested are present
-- Technical specifications match the query
-- Product information is complete
+Mark as "sufficient" (meaning: retrieval is exhausted, no point fetching more) when:
+- The chunks cover the topic/product mentioned in the query (even if incomplete)
+- Further retrieval attempts would likely return the same or less relevant chunks
+- You've seen chunks about the query topic, even if they lack specific details
 
-Mark as INSUFFICIENT when:
-- Only partial information available
-- Answer is vague or indirect
-- Missing critical technical specs or prices
-- Chunks discuss related but different topics
-- Information contradicts chat history
+Mark as "insufficient" (meaning: try fetching more) when:
+- No chunks even mention the topic/product in the query
+- Chunks are completely unrelated to the query
+- There's clear indication that more relevant chunks might exist
+- This is the first attempt and similarity scores are very low (<0.5)
 
 OUTPUT FORMAT (JSON):
 {{
-  "sufficient": true/false,
+  "sufficient": true/false,  // true = stop retrieving, false = try more
   "confidence": 0.0-1.0,
-  "reasoning": "Clear explanation of judgment",
-  "missing_info": ["what's missing"],
+  "reasoning": "Why retrieval should stop or continue",
+  "missing_info": ["Info that might exist but wasn't retrieved"],
   "relevant_chunks": ["chunk_001", "chunk_002"],
-  "suggestions": ["search for X", "need more on Y"]
+  "suggestions": ["Try searching for X", "Broaden query to Y"]
 }}
 
-BE STRICT: It's better to fetch more chunks than give incomplete answers.
-IMPORTANT: Include ALL relevant technical details, prices, and specifications in your reasoning so the tool caller LLM has maximum context."""
+REMEMBER:
+- "sufficient" means "I've exhausted retrieval", NOT "this answers the question well"
+- Even partial/incomplete information about the topic = mark sufficient (stop retrieval)
+- The tool caller will decide if the content is enough to answer responsibly
+"""
     
     async def judge_chunks(
         self,
@@ -100,7 +106,10 @@ IMPORTANT: Include ALL relevant technical details, prices, and specifications in
         chat_history: Optional[List[Dict]] = None,
         business_context: Optional[Dict] = None
     ) -> JudgmentResult:
-        """Judge if chunks are sufficient to answer the query.
+        """Judge if retrieval should continue or is exhausted.
+        
+        This determines ONLY whether more retrieval attempts would be useful,
+        NOT whether the current chunks are "good enough" to answer.
         
         Args:
             query: User's query
@@ -109,7 +118,7 @@ IMPORTANT: Include ALL relevant technical details, prices, and specifications in
             business_context: Business/tenant context
             
         Returns:
-            JudgmentResult with assessment
+            JudgmentResult with retrieval decision
         """
         logger.info(f"Judging {len(chunks)} chunks for query: {query}")
         
@@ -150,7 +159,7 @@ IMPORTANT: Include ALL relevant technical details, prices, and specifications in
             # Parse response
             result = self._parse_judgment(content_text)
             
-            logger.info(f"Judgment: sufficient={result.sufficient}, confidence={result.confidence}")
+            logger.info(f"Retrieval decision: exhausted={result.sufficient}, confidence={result.confidence}")
             
             return result
             

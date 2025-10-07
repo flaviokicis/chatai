@@ -186,7 +186,7 @@ class TenantProjectConfig(Base, TimestampMixin):
     target_audience: Mapped[str | None] = mapped_column(Text, nullable=True)
     communication_style: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    wait_time_before_replying_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    wait_time_before_replying_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=60000)
     typing_indicator_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     min_typing_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
     max_typing_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=5000)

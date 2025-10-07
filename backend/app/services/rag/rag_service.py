@@ -263,11 +263,12 @@ class RAGService:
                     # Skip saving session to prevent hanging
                     logger.debug(f"Skipped saving retrieval session: {e}")
             
-            # Return context or error message
+            # Return context or empty when insufficient; never emit user-facing text here
             if result.get('sufficient') and result.get('context'):
                 return result['context']
             else:
-                return "Nothing relevant was found for the query. We need to inform the user that we don't have an answer for this question and call a human using the performaction tool"
+                # Insufficient context; upstream caller should decide how to respond
+                return ""
                 
         except Exception as e:
             logger.error(f"Error in RAG query: {e}")

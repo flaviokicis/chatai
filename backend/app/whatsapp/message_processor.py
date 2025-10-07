@@ -106,47 +106,43 @@ class WhatsAppMessageProcessor:
         # Step 6: Get tenant configuration for timing settings
         tenant_config = self._get_tenant_timing_config(conversation_setup)
 
-        # Step 7: Wait before processing and optionally send typing indicator
-        await self._wait_and_send_typing_indicator(message_data, tenant_config)
-
-        # Step 8: Check for rapid message coordination BEFORE flow processing
+        # Step 7: Build session ID for message coordination
         session_id = self._build_session_id(
             message_data["sender_number"], conversation_setup.flow_id or "unknown"
         )
 
-        # Add to message buffer and check if we should wait for aggregation
+        # Step 8: Debounced message handling with aggregation
         cancellation_manager = getattr(app_context, "cancellation_manager", None)
         if cancellation_manager and message_data.get("message_text"):
-            # Add this message to buffer
-            cancellation_manager.add_message_to_buffer(session_id, message_data["message_text"])
-
-            # Check if there's ongoing processing that we should cancel
-            if cancellation_manager.should_cancel_processing(session_id):
-                logger.info(
-                    f"Detected rapid messages for session {session_id}, attempting aggregation"
-                )
-
-                # Wait a bit for more messages to arrive
-                await asyncio.sleep(1.0)
-
-                # Try to claim aggregation (only one webhook request will succeed)
-                aggregated_message = cancellation_manager.try_claim_aggregation(session_id)
-                if not aggregated_message:
-                    # Another request is handling aggregation, we should exit
+            # Add message to buffer with timestamp
+            message_id = cancellation_manager.add_message_to_buffer(
+                session_id, message_data["message_text"]
+            )
+            
+            # Wait for the configured delay, checking for new messages periodically
+            wait_ms = tenant_config.get("wait_time_before_replying_ms", 60000)
+            result = await self._debounced_wait(
+                cancellation_manager, session_id, message_id, wait_ms, message_data, tenant_config
+            )
+            
+            if result == "exit":
+                # A newer message arrived, let it handle processing
+                logger.info(f"Newer message detected for session {session_id}, exiting this webhook")
+                return PlainTextResponse("ok")
+            elif result == "process_aggregated":
+                # We're the latest message, get all buffered messages
+                aggregated_message = cancellation_manager.get_and_clear_messages(session_id)
+                if aggregated_message:
                     logger.info(
-                        f"Another request is handling aggregation for {session_id}, exiting"
+                        f"Processing aggregated messages for {session_id}: {aggregated_message[:100]}..."
                     )
-                    return PlainTextResponse("ok")
-
-                # We got the aggregated message, update our request
-                logger.info(
-                    f"Processing aggregated message for {session_id}: {aggregated_message[:100]}..."
-                )
-                message_data["message_text"] = aggregated_message
-
-                # Mark that this is an aggregated message for proper logging
-                message_data["is_aggregated"] = True
-                message_data["original_message_count"] = len(aggregated_message.split("\n"))
+                    message_data["message_text"] = aggregated_message
+                    message_data["is_aggregated"] = True
+                    message_data["original_message_count"] = len(aggregated_message.split("\n"))
+            # else: "process_single" - continue with single message
+        else:
+            # No cancellation manager, just wait normally
+            await self._wait_and_send_typing_indicator(message_data, tenant_config)
 
         # Step 9: Process through flow processor with dependency injection
         flow_response = await self._process_through_flow_processor(
@@ -430,6 +426,86 @@ class WhatsAppMessageProcessor:
             logger.warning(f"Failed to check retry status: {e}")
             return False
 
+    async def _debounced_wait(
+        self,
+        cancellation_manager: Any,
+        session_id: str,
+        message_id: str,
+        wait_ms: int,
+        message_data: dict[str, Any],
+        tenant_config: dict[str, Any],
+    ) -> str:
+        """Wait with debouncing - if a newer message arrives, return early.
+        
+        Args:
+            cancellation_manager: Manager for message coordination
+            session_id: Session identifier
+            message_id: ID of this message
+            wait_ms: Milliseconds to wait
+            message_data: Message information
+            tenant_config: Tenant timing configuration
+            
+        Returns:
+            "exit" if a newer message arrived, "process_aggregated" if we should process all messages,
+            "process_single" if just this message
+        """
+        typing_enabled = tenant_config.get("typing_indicator_enabled", True)
+        natural_delays = tenant_config.get("natural_delays_enabled", True)
+        variance_percent = tenant_config.get("delay_variance_percent", 20)
+        
+        # Add natural variance if enabled
+        if natural_delays and variance_percent > 0:
+            import secrets
+            variance = (secrets.randbelow(2 * variance_percent + 1) - variance_percent) / 100
+            wait_ms = int(wait_ms * (1 + variance))
+        
+        # Ensure within reasonable bounds (100ms to 2 minutes)
+        wait_ms = max(100, min(wait_ms, 120000))
+        
+        logger.info(f"Starting debounced wait of {wait_ms}ms for session {session_id}")
+        
+        # Send initial typing indicator if enabled
+        if (
+            typing_enabled
+            and self.settings.whatsapp_provider == "cloud_api"
+            and message_data.get("message_id")
+            and hasattr(self.adapter, "send_typing_indicator")
+        ):
+            try:
+                clean_to = message_data["sender_number"].replace("whatsapp:", "")
+                clean_from = message_data["receiver_number"].replace("whatsapp:", "")
+                self.adapter.send_typing_indicator(clean_to, clean_from, message_data["message_id"])  # type: ignore[attr-defined]
+            except Exception as e:
+                logger.warning("Failed to send typing indicator: %s", e)
+        
+        # Wait in chunks, checking for newer messages periodically
+        elapsed_ms = 0
+        check_interval_ms = 1000  # Check every second
+        
+        while elapsed_ms < wait_ms:
+            # Sleep for the check interval or remaining time, whichever is less
+            sleep_time_ms = min(check_interval_ms, wait_ms - elapsed_ms)
+            await asyncio.sleep(sleep_time_ms / 1000.0)
+            elapsed_ms += sleep_time_ms
+            
+            # Check if a newer message has arrived
+            if cancellation_manager.has_newer_message(session_id, message_id):
+                logger.info(
+                    f"Newer message detected for session {session_id}, "
+                    f"exiting after {elapsed_ms}ms of {wait_ms}ms wait"
+                )
+                return "exit"
+        
+        logger.info(f"Debounced wait completed ({wait_ms}ms) for session {session_id}")
+        
+        # Check if we have multiple messages to aggregate
+        message_count = cancellation_manager.get_message_count(session_id)
+        if message_count > 1:
+            logger.info(f"Aggregating {message_count} messages for session {session_id}")
+            return "process_aggregated"
+        else:
+            return "process_single"
+
     async def _wait_and_send_typing_indicator(
         self, message_data: dict[str, Any], tenant_config: dict[str, Any] | None = None
     ) -> None:
@@ -443,7 +519,7 @@ class WhatsAppMessageProcessor:
         if tenant_config is None:
             tenant_config = {}
 
-        wait_ms = tenant_config.get("wait_time_before_replying_ms", 2000)
+        wait_ms = tenant_config.get("wait_time_before_replying_ms", 60000)
         typing_enabled = tenant_config.get("typing_indicator_enabled", True)
         natural_delays = tenant_config.get("natural_delays_enabled", True)
         variance_percent = tenant_config.get("delay_variance_percent", 20)
@@ -456,8 +532,8 @@ class WhatsAppMessageProcessor:
             variance = (secrets.randbelow(2 * variance_percent + 1) - variance_percent) / 100
             wait_ms = int(wait_ms * (1 + variance))
 
-        # Ensure within reasonable bounds (100ms to 10s)
-        wait_ms = max(100, min(wait_ms, 10000))
+        # Ensure within reasonable bounds (100ms to 2 minutes)
+        wait_ms = max(100, min(wait_ms, 120000))
 
         # Wait for the configured duration
         logger.debug(f"Waiting {wait_ms}ms before processing message")
@@ -513,7 +589,7 @@ class WhatsAppMessageProcessor:
                 pc = conversation_setup.project_context
                 return {
                     "wait_time_before_replying_ms": getattr(
-                        pc, "wait_time_before_replying_ms", 2000
+                        pc, "wait_time_before_replying_ms", 60000
                     ),
                     "typing_indicator_enabled": getattr(pc, "typing_indicator_enabled", True),
                     "min_typing_duration_ms": getattr(pc, "min_typing_duration_ms", 1000),
@@ -527,7 +603,7 @@ class WhatsAppMessageProcessor:
 
         # Return defaults if config not available
         return {
-            "wait_time_before_replying_ms": 2000,
+            "wait_time_before_replying_ms": 60000,
             "typing_indicator_enabled": True,
             "min_typing_duration_ms": 1000,
             "max_typing_duration_ms": 5000,
