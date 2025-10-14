@@ -27,7 +27,9 @@ from app.services.rag.rag_service import RAGService
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/tenants/{tenant_id}/documents", tags=["documents"])
+# Mounted under the aggregated API router with prefix "/api"
+# Final path: /api/tenants/{tenant_id}/documents
+router = APIRouter(prefix="/tenants/{tenant_id}/documents", tags=["documents"])
 
 
 class DocumentUploadResponse(BaseModel):

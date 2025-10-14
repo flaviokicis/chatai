@@ -83,10 +83,9 @@ class ToolExecutionService:
         logger.info(f"🔧 Executing tool: {tool_name}")
 
         try:
-            # Route to appropriate handler based on tool name
             if tool_name == "PerformAction":
                 return await self._handle_perform_action(tool_data, context, pending_field)
-            # RequestHumanHandoff tool is deprecated; use PerformAction with action 'handoff'
+            
             logger.warning(f"Unknown tool: {tool_name}")
             return ToolExecutionResult()
 
@@ -120,10 +119,8 @@ class ToolExecutionService:
             elif action == "restart":
                 self._handle_restart_action(result)
             elif action == "modify_flow":
-                # External action - execute with feedback
                 await self._handle_external_action(action, tool_data, context, result)
             elif action == "update_communication_style":
-                # External action - update communication style
                 await self._handle_external_action(action, tool_data, context, result)
             else:
                 logger.warning(f"Unknown action: {action}")
@@ -175,7 +172,6 @@ class ToolExecutionService:
         """Handle flow restart."""
         result.navigation = {META_RESTART: True}
         logger.info("Restarting flow")
-
 
     async def _handle_external_action(
         self,

@@ -37,7 +37,10 @@ async def test_tool_execution_internal_actions_update_navigate():
 
     assert res.has_updates is True
     assert res.updates == {"email": "a@b.com"}
-    assert res.navigation == {"target_node_id": "q.next"}
+    # navigation now uses standardized metadata key from constants
+    from app.flow_core.constants import META_NAV_TYPE
+
+    assert res.navigation == {META_NAV_TYPE: "q.next"}
     assert res.escalate is False
     assert res.terminal is False
 
@@ -66,7 +69,9 @@ async def test_tool_execution_handoff_and_complete_and_restart_metadata():
     assert res.escalate is True
     assert res.terminal is True
     assert res.metadata.get("handoff_reason") == "user_requested"
-    assert res.metadata.get("restart") is True
+    # restart is represented via navigation metadata
+    from app.flow_core.constants import META_RESTART
+    assert res.navigation == {META_RESTART: True}
 
 
 @pytest.mark.unit
@@ -84,7 +89,6 @@ async def test_tool_execution_external_action_success_path():
         async def execute(
             self, parameters: dict[str, Any], context: dict[str, Any]
         ) -> ActionResult:  # type: ignore[override]
-            # Assert context propagation is correct and flow_id injected
             assert parameters.get("flow_id") == "f"
             assert context["user_id"] == "u"
             return ActionResult(success=True, message="done")
@@ -124,7 +128,10 @@ async def test_tool_execution_external_action_missing_executor_creates_failure_r
 
     res = await svc.execute_tool(
         tool_name="PerformAction",
-        tool_data={"actions": ["modify_flow"]},
+        tool_data={
+            "actions": ["modify_flow"],
+            "flow_modification_instruction": "do it"
+        },
         context=ctx,
         pending_field=None,
     )

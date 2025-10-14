@@ -32,7 +32,7 @@ async def test_flow_processor_happy_path_builds_response_and_saves_context():
         tool_name = "PerformAction"
         tool_args = {"confidence": 0.9, "messages": messages}
         answers_diff = {}
-        metadata = {"k": 1}
+        metadata = {"k": 1, "messages": messages}
         terminal = False
         escalate = False
         external_action_executed = False
@@ -65,7 +65,20 @@ async def test_flow_processor_happy_path_builds_response_and_saves_context():
         req = FlowRequest(
             user_id="u",
             user_message="hello",
-            flow_definition={"nodes": []},
+            flow_definition={
+                "schema_version": "v1",
+                "id": "flow.test",
+                "entry": "q.first",
+                "nodes": [
+                    {
+                        "id": "q.first",
+                        "kind": "Question",
+                        "key": "first",
+                        "prompt": "First?"
+                    }
+                ],
+                "edges": []
+            },
             flow_metadata={"selected_flow_id": "fid"},
             tenant_id="t",
             channel_id="whatsapp:+1",

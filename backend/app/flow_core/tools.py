@@ -37,6 +37,7 @@ class PerformAction(FlowTool):
     - Updating answers if needed
     - Sending messages to the user
     - Modifying the flow (admin only)
+    - Updating communication style (admin only)
 
     ALWAYS use this tool for any response.
     """
@@ -52,7 +53,6 @@ class PerformAction(FlowTool):
         description="WhatsApp messages to send to the user", min_length=1, max_length=5
     )
 
-    # Optional fields based on action
     updates: dict[str, Any] | None = Field(
         default=None, description="Field updates when action is 'update'"
     )
@@ -67,7 +67,6 @@ class PerformAction(FlowTool):
 
     handoff_reason: str | None = Field(default=None, description="Reason when action is 'handoff'")
 
-    # Flow modification fields (admin only)
     flow_modification_instruction: str | None = Field(
         default=None,
         description="Instruction for modifying the flow when action is 'modify_flow' (admin only)",
@@ -81,10 +80,9 @@ class PerformAction(FlowTool):
         default=None, description="Type of flow modification (optional)"
     )
     
-    # Communication style fields (admin only)
-    communication_style_instruction: str | None = Field(
+    updated_communication_style: str | None = Field(
         default=None,
-        description="Instruction for updating communication style when action is 'update_communication_style' (admin only, in Portuguese)",
+        description="COMPLETE new communication style when action is 'update_communication_style' (admin only). This REPLACES the current style entirely.",
     )
 
     @field_validator("messages")  # type: ignore[misc]

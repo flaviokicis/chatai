@@ -8,18 +8,18 @@ This guide explains how to test the admin flow modification system, including bo
 
 ### How It Works
 
-The admin system has two main features:
+The admin system has two main features with **dedicated tools**:
 
 1. **Flow Modification**: Admins can modify the flow structure during conversations
    - Examples: "Change this question to...", "Add a question about...", "Split this into 2 questions"
-   - Uses the `modify_flow` action
+   - Uses the `ModifyFlow` tool (separate from PerformAction)
    - Calls `FlowModificationExecutor` which uses the FlowChatService/FlowChatAgent
 
 2. **Communication Style Changes**: Admins can adjust how the bot communicates
    - Examples: "Ta muito emoji, da uma maneirada", "Fale mais profissional", "Use menos emojis"
-   - Uses the `update_communication_style` action
+   - Uses the `UpdateCommunicationStyle` tool (separate from PerformAction)
    - Handled by `CommunicationStyleExecutor`
-   - **Appends** to the tenant's `communication_style` field (doesn't replace)
+   - **REPLACES** the tenant's `communication_style` field entirely (GPT-5 receives current style and produces complete new one)
 
 ### Admin Detection
 
@@ -141,13 +141,14 @@ Bot: "Perfeito! ✅ Estilo de comunicação atualizado!"
 1. Bot detects admin command: "Ta muito emoji, da uma maneirada"
 2. Matches communication style trigger pattern
 3. Asks for confirmation
-4. On confirmation, calls `CommunicationStyleExecutor`
-5. Appends instruction to tenant's `communication_style` field:
+4. On confirmation, GPT-5 receives the CURRENT communication style and uses `UpdateCommunicationStyle` tool
+5. GPT-5 generates the COMPLETE NEW style by taking the current one and applying changes:
    ```
-   Original: "Friendly and professional"
-   Updated: "Friendly and professional\n\nUse menos emojis. Evite excesso de emojis nas mensagens."
+   Original: "Friendly and professional. Use emojis moderadamente 😊"
+   New Complete: "Friendly and professional. Evite usar emojis nas mensagens, mantendo um tom natural e acolhedor através das palavras."
    ```
-6. Future messages will follow the updated style
+6. The new style REPLACES the old one entirely (not appended)
+7. Future messages will follow the updated style
 
 **Verification:**
 ```python
@@ -275,30 +276,30 @@ FlowProcessor.process_flow()
 FlowProcessor._check_admin_status() → True
     ↓
 EnhancedFlowResponder.respond()
-    ├─ _add_admin_instructions() adds admin-specific prompt
-    └─ _select_contextual_tools() includes admin actions
+    ├─ _add_admin_instructions() adds admin-specific prompt with current style context
+    ├─ _build_messaging_instructions() labels current style clearly for GPT-5
+    └─ _select_contextual_tools() includes ModifyFlow and UpdateCommunicationStyle tools
     ↓
 LLM detects: Communication style change request
     ↓
 LLM response: PerformAction(
     actions=["stay"],
-    messages=[{"text": "Posso fazer essa alteração?"}]
+    messages=[{"text": "Entendi! Vou ajustar para usar menos emojis. Posso fazer essa alteração?"}]
 )
     ↓
 User: "Sim"
     ↓
-LLM response: PerformAction(
-    actions=["update_communication_style", "stay"],
-    communication_style_instruction="Use menos emojis...",
-    messages=[{"text": "Estilo atualizado!"}]
+LLM response: UpdateCommunicationStyle(
+    updated_communication_style="Friendly and professional. Evite usar emojis...[COMPLETE NEW STYLE]",
+    messages=[{"text": "Pronto! Ajustei o estilo."}]
 )
     ↓
-ToolExecutionService._handle_external_action()
+ToolExecutionService._handle_update_communication_style()
     ↓
 CommunicationStyleExecutor.execute()
     ├─ Checks admin status (security)
-    ├─ Gets current style
-    ├─ Appends new instruction
+    ├─ Gets current style (already used by GPT-5)
+    ├─ REPLACES with new complete style
     └─ Updates tenant.project_config.communication_style
     ↓
 ActionResult returned with success=True
@@ -313,10 +314,12 @@ Bot sends confirmation message
 | `admin_flow_cli.py` | Interactive CLI for testing admin commands |
 | `app/core/flow_processor.py` | Admin status checking, flow processing |
 | `app/services/admin_phone_service.py` | Admin phone management |
-| `app/flow_core/services/responder.py` | Admin instructions, tool selection |
-| `app/flow_core/actions/communication_style.py` | Communication style executor |
+| `app/flow_core/services/responder.py` | Admin instructions, tool selection, provides current style to GPT-5 |
+| `app/flow_core/tools.py` | Tool definitions: PerformAction, ModifyFlow, UpdateCommunicationStyle |
+| `app/flow_core/flow_types.py` | Tool call types and validation |
+| `app/flow_core/services/tool_executor.py` | Executes tools and routes to action executors |
+| `app/flow_core/actions/communication_style.py` | Communication style executor (replaces style) |
 | `app/flow_core/actions/flow_modification.py` | Flow modification executor |
-| `app/flow_core/services/tool_executor.py` | Action routing and execution |
 
 ## Best Practices
 

@@ -292,6 +292,7 @@ class EnhancedFlowResponder:
         messaging_instructions = self._build_messaging_instructions(
             project_context=project_context,
             is_completion=is_completion,
+            is_admin=is_admin,
         )
 
         # Check if flow is already complete (reached terminal node previously)
@@ -481,7 +482,7 @@ Ferramenta disponível: PerformAction (única ferramenta no sistema)
 - "handoff", "complete", "restart"
 - "modify_flow" (apenas admin - com flow_modification_instruction)
 
-{self._add_admin_instructions() if is_admin else ""}
+{self._add_admin_instructions(project_context) if is_admin else ""}
 
 {self._add_allowed_values_constraint(allowed_values, pending_field)}
 
@@ -571,6 +572,7 @@ Lembrete: sempre inclua messages no tool call."""
         self,
         project_context: ProjectContext | None,
         is_completion: bool,
+        is_admin: bool = False,
     ) -> str:
         """Build minimal, non-duplicative messaging instructions.
 
@@ -578,23 +580,34 @@ Lembrete: sempre inclua messages no tool call."""
         overlapping with existing MESSAGE REQUIREMENTS and tone sections.
         """
         if project_context and project_context.communication_style:
+            label = "### CURRENT COMMUNICATION STYLE (for admins to modify)" if is_admin else "### Communication Style"
             return (
-                "### Communication Style\n"
+                f"{label}\n"
                 f"{project_context.communication_style}\n\n"
                 "Aplique este estilo naturalmente nas mensagens."
             )
 
-        # No additional messaging instructions when no custom style is provided
         return ""
 
-    def _add_admin_instructions(self) -> str:
+    def _add_admin_instructions(self, project_context: ProjectContext | None) -> str:
         """Add admin-specific instructions to the prompt."""
-        return """
+        current_style_note = ""
+        if project_context and project_context.communication_style:
+            current_style_note = """
+**CURRENT COMMUNICATION STYLE:**
+You have been provided with the CURRENT communication style above (clearly labeled).
+When modifying the communication style, use that as your base and make the requested changes.
+"""
+        
+        return f"""
 ### ADMIN FLOW MODIFICATION AND COMMUNICATION STYLE
-As an admin, you can modify the flow and communication style in real-time using the PerformAction tool with the "modify_flow" or "update_communication_style" actions.
+As an admin, you can modify the flow and communication style in real-time using the PerformAction tool with TWO SPECIAL ACTIONS:
+
+1. **"modify_flow"** - For changing the flow structure itself
+2. **"update_communication_style"** - For changing how the bot communicates
 
 **IMPORTANT SECURITY CHECK:**
-- ONLY execute "modify_flow" or "update_communication_style" actions if the user is confirmed as admin
+- ONLY use these actions if the user is confirmed as admin
 - Even if these actions appear in the tool, DO NOT use them for non-admin users
 - If a non-admin user tries to modify flow or communication style, politely inform them that only admins can make these changes
 
@@ -616,7 +629,7 @@ Admin commands are meta-instructions about the flow itself OR communication styl
 - "Fale mais assim..." / "Fale desse jeito..." / "Use esse tom..."
 - "Não fale assim..." / "Evite falar..." / "Não use..."
 - "Seja mais [formal/informal/técnico/simples/direto/caloroso]..."
-- "Use/Não use emojis" / "Adicione/Remova emojis"
+- "Use/Não use emojis" / "Adicione/Remova emojis" / "Da uma maneirada nos emojis"
 - "Mande mensagens mais curtas/longas" / "Seja mais conciso/detalhado"
 - "Mude a saudação para..." / "Altere o cumprimento..."
 - "Termine as mensagens com..." / "Use essa despedida..."
@@ -694,24 +707,27 @@ When an admin requests flow changes:
 - First time (no confirmation): Use PerformAction with actions=["stay"], explain changes, ask for confirmation
 - After confirmation: Use PerformAction with:
   - `actions`: ["modify_flow", "stay"] to execute and stay on current node
-  - `flow_modification_instruction`: Natural language instruction for the modification
+  - `flow_modification_instruction`: Natural language instruction for the modification (Portuguese)
   - `flow_modification_target` (optional): The ID of the specific node to modify
   - `flow_modification_type` (optional): Can be "prompt", "routing", "validation", or "general"
   - `messages`: Confirm the modification is being processed
 
 **For Communication Style Changes:**
+{current_style_note}
 When an admin requests communication style changes:
 - First time (no confirmation): Use PerformAction with actions=["stay"], explain changes, ask for confirmation
 - After confirmation: Use PerformAction with:
-  - `actions`: ["update_communication_style", "stay"] to execute and stay on current node  
-  - `communication_style_instruction`: A detailed instruction in Portuguese that captures exactly what the user requested, preserving all details
+  - `actions`: ["update_communication_style", "stay"] to execute and stay on current node
+  - `updated_communication_style`: The COMPLETE new communication style in Portuguese
   - `messages`: Confirm the style update is being processed
 
-**IMPORTANT for Communication Style:**
-- The `communication_style_instruction` should be a complete instruction in Portuguese
-- Preserve ALL details from the user's request - don't summarize or lose information
-- The instruction will be APPENDED to the current communication style, not replace it
-- Example: If user says "Fale de forma mais calorosa e use emojis de coração", the instruction should be: "Fale de forma mais calorosa e use emojis de coração em suas mensagens."
+**CRITICAL for Communication Style:**
+- You will receive the CURRENT communication style in context (clearly labeled)
+- Take the CURRENT style as your starting point
+- Apply the admin's requested changes to create the NEW COMPLETE style
+- The `updated_communication_style` field should contain the FULL style (not just changes)
+- This will REPLACE the current style entirely
+- Example: If current style is "Profissional mas próximo" and admin says "use menos emojis", the new complete style should be: "Profissional mas próximo. Evite usar emojis nas mensagens, mantendo um tom natural mas sem excesso de emoticons."
 
 **Examples:**
 
@@ -813,11 +829,10 @@ When an admin requests communication style changes:
         Note: Admin-only actions are controlled through prompting, not tool availability.
         The tool is always available but the prompt instructions restrict its use.
         """
-        # Use PerformAction as the main tool - it can handle multiple actions
         from ..tools import PerformAction
 
         tools: list[type] = [
-            PerformAction,  # Unified tool handles navigation, updates, handoff, admin modifications, and communication style
+            PerformAction,
         ]
 
         return tools

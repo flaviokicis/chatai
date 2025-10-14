@@ -90,19 +90,16 @@ class PerformActionCall(ToolCall):
     actions: list[
         Literal["stay", "update", "navigate", "handoff", "complete", "restart", "modify_flow", "update_communication_style"]
     ] = Field(..., description="Actions to take in sequence (e.g., ['update', 'navigate'])")
-    # messages field inherited from ToolCall
     updates: dict[str, Any] | None = Field(default=None)
     target_node_id: str | None = Field(default=None)
     clarification_reason: str | None = Field(default=None)
     handoff_reason: str | None = Field(default=None)
-    # Flow modification fields (admin only)
     flow_modification_instruction: str | None = Field(default=None)
     flow_modification_target: str | None = Field(default=None)
     flow_modification_type: Literal["prompt", "routing", "validation", "general"] | None = Field(
         default=None
     )
-    # Communication style fields (admin only)
-    communication_style_instruction: str | None = Field(default=None)
+    updated_communication_style: str | None = Field(default=None)
 
 
 # Union type for all possible tool calls
@@ -208,7 +205,6 @@ def _create_tool_model(tool_name: str, tool_data: dict[str, Any]) -> ToolCallUni
     """Create the appropriate tool model based on tool name."""
     if tool_name == "PerformAction":
         return PerformActionCall(**tool_data)
-    # RequestHumanHandoff is deprecated: use PerformAction with action 'handoff'
 
     msg = f"Unknown tool name: {tool_name}"
     validation_errors = [f"Tool '{tool_name}' is not recognized"]

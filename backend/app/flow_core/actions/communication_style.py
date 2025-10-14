@@ -35,29 +35,25 @@ class CommunicationStyleExecutor(ActionExecutor):
         """Execute the communication style update action.
 
         Args:
-            parameters: Should contain 'communication_style_instruction'
+            parameters: Should contain 'updated_communication_style'
             context: Execution context with 'user_id', 'tenant_id', etc.
 
         Returns:
             ActionResult with success/failure status and user message
         """
         try:
-            # Extract parameters
-            instruction = parameters.get("communication_style_instruction")
-            if not instruction:
+            new_style = parameters.get("updated_communication_style")
+            if not new_style:
                 return ActionResult(
                     success=False,
-                    message="Erro: Instrução de estilo de comunicação não fornecida.",
-                    details={"error": "Missing communication_style_instruction"},
+                    message="Erro: Novo estilo de comunicação não fornecido.",
+                    details={"error": "Missing updated_communication_style"},
                 )
 
-            # Extract context - handle both dict and FlowContext objects
             if hasattr(context, 'user_id'):
-                # FlowContext object
                 user_id = context.user_id
                 tenant_id = context.tenant_id
             else:
-                # Dict context from tool executor
                 user_id = context.get("user_id")
                 tenant_id = context.get("tenant_id")
 
@@ -68,7 +64,6 @@ class CommunicationStyleExecutor(ActionExecutor):
                     details={"error": "Missing user_id or tenant_id"},
                 )
 
-            # Convert tenant_id to UUID if it's a string
             if isinstance(tenant_id, str):
                 try:
                     tenant_id = UUID(tenant_id)
@@ -79,7 +74,6 @@ class CommunicationStyleExecutor(ActionExecutor):
                         details={"error": "Invalid tenant_id format"},
                     )
 
-            # Check if user is admin
             with create_session() as session:
                 admin_service = AdminPhoneService(session)
                 is_admin = admin_service.is_admin_phone(
@@ -97,7 +91,6 @@ class CommunicationStyleExecutor(ActionExecutor):
                         details={"error": "User is not admin"},
                     )
 
-                # Get current tenant and project config
                 tenant = get_tenant_by_id(session, tenant_id)
                 if not tenant:
                     return ActionResult(
@@ -106,25 +99,12 @@ class CommunicationStyleExecutor(ActionExecutor):
                         details={"error": "Tenant not found"},
                     )
 
-                # Get current communication style
-                current_style = ""
-                if tenant.project_config and tenant.project_config.communication_style:
-                    current_style = tenant.project_config.communication_style
-
-                # Append the new instruction to the current style
-                # Add a separator if there's existing content
-                if current_style:
-                    updated_style = f"{current_style}\n\n{instruction}"
-                else:
-                    updated_style = instruction
-
-                # Update the project config
                 updated_tenant = update_tenant_project_config(
                     session,
                     tenant_id=tenant_id,
                     project_description=tenant.project_config.project_description if tenant.project_config else None,
                     target_audience=tenant.project_config.target_audience if tenant.project_config else None,
-                    communication_style=updated_style,
+                    communication_style=new_style,
                 )
 
                 session.commit()
@@ -135,9 +115,9 @@ class CommunicationStyleExecutor(ActionExecutor):
                     )
                     return ActionResult(
                         success=True,
-                        message="✅ Estilo de comunicação atualizado com sucesso! As próximas mensagens seguirão as novas instruções.",
+                        message="✅ Estilo de comunicação atualizado com sucesso! As próximas mensagens seguirão o novo estilo.",
                         details={
-                            "instruction_added": instruction,
+                            "new_style": new_style[:200] + "..." if len(new_style) > 200 else new_style,
                             "tenant_id": str(tenant_id),
                         },
                     )
