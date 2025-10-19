@@ -111,8 +111,15 @@ class WhatsAppMessageProcessor:
             message_data["sender_number"], conversation_setup.flow_id or "unknown"
         )
 
-        # Step 8: Debounced message handling with aggregation
+        # Step 8: Debounced message handling with aggregation (centralized)
         cancellation_manager = getattr(app_context, "cancellation_manager", None)
+        if not cancellation_manager:
+            try:
+                from app.services.processing_cancellation_manager import ProcessingCancellationManager
+                cancellation_manager = ProcessingCancellationManager(store=app_context.store)
+            except Exception:
+                cancellation_manager = None
+
         if cancellation_manager and message_data.get("message_text"):
             # Add message to buffer with timestamp
             message_id = cancellation_manager.add_message_to_buffer(
@@ -121,8 +128,12 @@ class WhatsAppMessageProcessor:
             
             # Wait for the configured delay, checking for new messages periodically
             wait_ms = tenant_config.get("wait_time_before_replying_ms", 60000)
-            result = await self._debounced_wait(
-                cancellation_manager, session_id, message_id, wait_ms, message_data, tenant_config
+            # Use centralized inactivity waiter
+            result = await cancellation_manager.wait_for_inactivity(
+                session_id=session_id,
+                since_message_id=message_id,
+                inactivity_ms=wait_ms,
+                check_interval_ms=1000,
             )
             
             if result == "exit":
@@ -130,7 +141,13 @@ class WhatsAppMessageProcessor:
                 logger.info(f"Newer message detected for session {session_id}, exiting this webhook")
                 return PlainTextResponse("ok")
             elif result == "process_aggregated":
-                # We're the latest message, get all buffered messages
+                # Save individual messages to database BEFORE aggregation
+                individual_messages = cancellation_manager.get_individual_messages(session_id)
+                await self._save_individual_messages(
+                    individual_messages, conversation_setup, message_data
+                )
+                
+                # Get aggregated message for LLM processing
                 aggregated_message = cancellation_manager.get_and_clear_messages(session_id)
                 if aggregated_message:
                     logger.info(
@@ -138,11 +155,11 @@ class WhatsAppMessageProcessor:
                     )
                     message_data["message_text"] = aggregated_message
                     message_data["is_aggregated"] = True
-                    message_data["original_message_count"] = len(aggregated_message.split("\n"))
-            # else: "process_single" - continue with single message
-        else:
-            # No cancellation manager, just wait normally
-            await self._wait_and_send_typing_indicator(message_data, tenant_config)
+                    message_data["original_message_count"] = len(individual_messages)
+                    message_data["skip_inbound_logging"] = True  # Don't log aggregated version
+            elif result == "process_single":
+                # Single message - will be saved normally
+                pass
 
         # Step 9: Process through flow processor with dependency injection
         flow_response = await self._process_through_flow_processor(
@@ -426,85 +443,7 @@ class WhatsAppMessageProcessor:
             logger.warning(f"Failed to check retry status: {e}")
             return False
 
-    async def _debounced_wait(
-        self,
-        cancellation_manager: Any,
-        session_id: str,
-        message_id: str,
-        wait_ms: int,
-        message_data: dict[str, Any],
-        tenant_config: dict[str, Any],
-    ) -> str:
-        """Wait with debouncing - if a newer message arrives, return early.
-        
-        Args:
-            cancellation_manager: Manager for message coordination
-            session_id: Session identifier
-            message_id: ID of this message
-            wait_ms: Milliseconds to wait
-            message_data: Message information
-            tenant_config: Tenant timing configuration
-            
-        Returns:
-            "exit" if a newer message arrived, "process_aggregated" if we should process all messages,
-            "process_single" if just this message
-        """
-        typing_enabled = tenant_config.get("typing_indicator_enabled", True)
-        natural_delays = tenant_config.get("natural_delays_enabled", True)
-        variance_percent = tenant_config.get("delay_variance_percent", 20)
-        
-        # Add natural variance if enabled
-        if natural_delays and variance_percent > 0:
-            import secrets
-            variance = (secrets.randbelow(2 * variance_percent + 1) - variance_percent) / 100
-            wait_ms = int(wait_ms * (1 + variance))
-        
-        # Ensure within reasonable bounds (100ms to 2 minutes)
-        wait_ms = max(100, min(wait_ms, 120000))
-        
-        logger.info(f"Starting debounced wait of {wait_ms}ms for session {session_id}")
-        
-        # Send initial typing indicator if enabled
-        if (
-            typing_enabled
-            and self.settings.whatsapp_provider == "cloud_api"
-            and message_data.get("message_id")
-            and hasattr(self.adapter, "send_typing_indicator")
-        ):
-            try:
-                clean_to = message_data["sender_number"].replace("whatsapp:", "")
-                clean_from = message_data["receiver_number"].replace("whatsapp:", "")
-                self.adapter.send_typing_indicator(clean_to, clean_from, message_data["message_id"])  # type: ignore[attr-defined]
-            except Exception as e:
-                logger.warning("Failed to send typing indicator: %s", e)
-        
-        # Wait in chunks, checking for newer messages periodically
-        elapsed_ms = 0
-        check_interval_ms = 1000  # Check every second
-        
-        while elapsed_ms < wait_ms:
-            # Sleep for the check interval or remaining time, whichever is less
-            sleep_time_ms = min(check_interval_ms, wait_ms - elapsed_ms)
-            await asyncio.sleep(sleep_time_ms / 1000.0)
-            elapsed_ms += sleep_time_ms
-            
-            # Check if a newer message has arrived
-            if cancellation_manager.has_newer_message(session_id, message_id):
-                logger.info(
-                    f"Newer message detected for session {session_id}, "
-                    f"exiting after {elapsed_ms}ms of {wait_ms}ms wait"
-                )
-                return "exit"
-        
-        logger.info(f"Debounced wait completed ({wait_ms}ms) for session {session_id}")
-        
-        # Check if we have multiple messages to aggregate
-        message_count = cancellation_manager.get_message_count(session_id)
-        if message_count > 1:
-            logger.info(f"Aggregating {message_count} messages for session {session_id}")
-            return "process_aggregated"
-        else:
-            return "process_single"
+    # Removed: _debounced_wait, use centralized method in ProcessingCancellationManager
 
     async def _wait_and_send_typing_indicator(
         self, message_data: dict[str, Any], tenant_config: dict[str, Any] | None = None
@@ -802,36 +741,64 @@ class WhatsAppMessageProcessor:
         # Final fallback
         return [{"text": "Entendi. Vou te ajudar com isso.", "delay_ms": 0}]
 
+    async def _save_individual_messages(
+        self,
+        individual_messages: list[dict[str, Any]],
+        conversation_setup: Any,
+        message_data: dict[str, Any],
+    ) -> None:
+        """Save individual messages to database before aggregation.
+        
+        Args:
+            individual_messages: List of individual message dicts from cancellation manager
+            conversation_setup: Conversation setup with tenant/channel/thread info
+            message_data: Original message data for provider_message_id
+        """
+        try:
+            for msg in individual_messages:
+                await message_logging_service.save_message_async(
+                    tenant_id=conversation_setup.tenant_id,
+                    channel_instance_id=conversation_setup.channel_instance_id,
+                    thread_id=conversation_setup.thread_id,
+                    contact_id=conversation_setup.contact_id,
+                    text=msg["content"],
+                    direction=MessageDirection.inbound,
+                    provider_message_id=msg["id"],
+                    payload={
+                        "sequence": msg["sequence"],
+                        "buffered_timestamp": msg["timestamp"],
+                    },
+                    status=MessageStatus.delivered,
+                    delivered_at=datetime.fromtimestamp(msg["timestamp"], UTC),
+                )
+                logger.info(
+                    f"Saved individual message #{msg['sequence']}: {msg['content'][:50]}..."
+                )
+        except Exception as exc:
+            logger.warning("Failed to save individual messages: %s", exc)
+
     async def _log_whatsapp_messages(
         self, message_data: dict[str, Any], conversation_setup: Any, sync_reply: str
     ) -> None:
         """Log WhatsApp messages asynchronously."""
         try:
-            # Prepare payload for aggregated messages
-            payload = None
-            if message_data.get("is_aggregated"):
-                payload = {
-                    "aggregated": True,
-                    "original_message_count": message_data.get("original_message_count", 1),
-                    "aggregation_method": "rapid_succession",
-                }
-
-            # Log inbound message (will be the aggregated version if applicable)
-            await message_logging_service.save_message_async(
-                tenant_id=conversation_setup.tenant_id,
-                channel_instance_id=conversation_setup.channel_instance_id,
-                thread_id=conversation_setup.thread_id,
-                contact_id=conversation_setup.contact_id,
-                text=message_data["message_text"],
-                direction=MessageDirection.inbound,
-                provider_message_id=(
-                    message_data["params"].get("SmsMessageSid")
-                    or message_data["params"].get("MessageSid")
-                ),
-                payload=payload,
-                status=MessageStatus.delivered,
-                delivered_at=datetime.now(UTC),
-            )
+            # Skip inbound logging if already saved as individual messages
+            if not message_data.get("skip_inbound_logging"):
+                # Log inbound message (single message only)
+                await message_logging_service.save_message_async(
+                    tenant_id=conversation_setup.tenant_id,
+                    channel_instance_id=conversation_setup.channel_instance_id,
+                    thread_id=conversation_setup.thread_id,
+                    contact_id=conversation_setup.contact_id,
+                    text=message_data["message_text"],
+                    direction=MessageDirection.inbound,
+                    provider_message_id=(
+                        message_data["params"].get("SmsMessageSid")
+                        or message_data["params"].get("MessageSid")
+                    ),
+                    status=MessageStatus.delivered,
+                    delivered_at=datetime.now(UTC),
+                )
 
             # Log outbound reply
             if sync_reply:

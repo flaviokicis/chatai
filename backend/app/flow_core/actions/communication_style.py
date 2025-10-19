@@ -47,7 +47,7 @@ class CommunicationStyleExecutor(ActionExecutor):
                 return ActionResult(
                     success=False,
                     message="Erro: Novo estilo de comunicação não fornecido.",
-                    details={"error": "Missing updated_communication_style"},
+                    error="Missing updated_communication_style",
                 )
 
             if hasattr(context, 'user_id'):
@@ -61,7 +61,7 @@ class CommunicationStyleExecutor(ActionExecutor):
                 return ActionResult(
                     success=False,
                     message="Erro: Informações de contexto insuficientes.",
-                    details={"error": "Missing user_id or tenant_id"},
+                    error="Missing user_id or tenant_id",
                 )
 
             if isinstance(tenant_id, str):
@@ -71,7 +71,7 @@ class CommunicationStyleExecutor(ActionExecutor):
                     return ActionResult(
                         success=False,
                         message="Erro: ID do inquilino inválido.",
-                        details={"error": "Invalid tenant_id format"},
+                        error="Invalid tenant_id format",
                     )
 
             with create_session() as session:
@@ -88,7 +88,7 @@ class CommunicationStyleExecutor(ActionExecutor):
                     return ActionResult(
                         success=False,
                         message="Desculpe, apenas administradores podem alterar o estilo de comunicação.",
-                        details={"error": "User is not admin"},
+                        error="User is not admin",
                     )
 
                 tenant = get_tenant_by_id(session, tenant_id)
@@ -96,7 +96,7 @@ class CommunicationStyleExecutor(ActionExecutor):
                     return ActionResult(
                         success=False,
                         message="Erro: Inquilino não encontrado.",
-                        details={"error": "Tenant not found"},
+                        error="Tenant not found",
                     )
 
                 updated_tenant = update_tenant_project_config(
@@ -116,7 +116,7 @@ class CommunicationStyleExecutor(ActionExecutor):
                     return ActionResult(
                         success=True,
                         message="✅ Estilo de comunicação atualizado com sucesso! As próximas mensagens seguirão o novo estilo.",
-                        details={
+                        data={
                             "new_style": new_style[:200] + "..." if len(new_style) > 200 else new_style,
                             "tenant_id": str(tenant_id),
                         },
@@ -125,7 +125,7 @@ class CommunicationStyleExecutor(ActionExecutor):
                     return ActionResult(
                         success=False,
                         message="Erro ao atualizar o estilo de comunicação.",
-                        details={"error": "Failed to update tenant config"},
+                        error="Failed to update tenant config",
                     )
 
         except Exception as e:
@@ -133,5 +133,5 @@ class CommunicationStyleExecutor(ActionExecutor):
             return ActionResult(
                 success=False,
                 message="Erro inesperado ao atualizar o estilo de comunicação.",
-                details={"error": str(e)},
+                error=str(e),
             )

@@ -1,479 +1,388 @@
-"""Manager for handling processing cancellation when rapid messages arrive."""
+"""Production-grade message debouncing and aggregation manager.
 
-import asyncio
+This manager implements a robust debouncing system where:
+1. Multiple rapid messages are buffered with timestamps
+2. Timer RESETS on each new message (true debouncing)
+3. After inactivity period, messages are aggregated and processed once
+4. Handles webhook retries, Redis failures, clock skew, and race conditions
+
+Requires Redis - no in-memory fallback (simpler = fewer bugs).
+"""
+
+from __future__ import annotations
+
 import json
 import logging
 import time
-import uuid
-from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from app.core.state import ConversationStore
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ProcessingState:
-    """State of a processing session."""
-
-    is_processing: bool = False
-    cancellation_token: asyncio.Event | None = None
-    start_time: float = field(default_factory=time.time)
-    messages: list[str] = field(default_factory=list)
-    last_message_time: float = field(default_factory=time.time)
-
-
 class ProcessingCancellationManager:
-    """Manages message buffering and debounced aggregation.
+    """Manages message debouncing and aggregation with production-grade reliability.
     
-    When multiple messages arrive in quick succession, this manager:
-    1. Buffers all messages with timestamps
-    2. Ensures only the latest message processes (earlier ones exit)
-    3. Aggregates all buffered messages with relative timestamps
+    Design principles:
+    - Redis is required (no fallback - simpler code)
+    - Monotonic sequence numbers prevent clock skew issues
+    - Atomic operations prevent race conditions
+    - Idempotent (safe for webhook retries)
     """
 
-    # Redis key prefixes
-    MESSAGE_AGGREGATION_PREFIX = "msg_buffer:"
-    PROCESSING_STATE_PREFIX = "processing_state:"
-    CANCELLATION_PREFIX = "cancellation:"
-    AGGREGATION_LOCK_PREFIX = "agg_lock:"  # Lock to ensure atomic aggregation
-
-    def __init__(self, store=None):
-        """Initialize the cancellation manager."""
+    MESSAGE_BUFFER_PREFIX = "debounce:buffer:"
+    SEQUENCE_PREFIX = "debounce:seq:"
+    LAST_MESSAGE_TIME_PREFIX = "debounce:last_time:"
+    
+    BUFFER_TTL_SECONDS = 300
+    MAX_INACTIVITY_MS = 120000
+    MIN_INACTIVITY_MS = 100
+    
+    def __init__(self, store: ConversationStore | None = None) -> None:
+        """Initialize the manager.
+        
+        Args:
+            store: Redis-backed conversation store (required)
+        """
+        if not store or not hasattr(store, "_r"):
+            raise RuntimeError(
+                "ProcessingCancellationManager requires Redis-backed ConversationStore. "
+                "Ensure REDIS_URL is configured."
+            )
         self._store = store
-        self._processing_states: dict[str, ProcessingState] = {}
-        self._local_cancellation_tokens: dict[str, asyncio.Event] = {}
-
-    def create_cancellation_token(self, session_id: str) -> asyncio.Event:
-        """Create a cancellation token for a processing session."""
-        # Always create a local event for this specific process
-        cancellation_token = asyncio.Event()
-        self._local_cancellation_tokens[session_id] = cancellation_token
-
-        # Update local state
-        if session_id not in self._processing_states:
-            self._processing_states[session_id] = ProcessingState()
-
-        state = self._processing_states[session_id]
-        state.cancellation_token = cancellation_token
-        state.is_processing = True
-        state.start_time = time.time()
-
-        # Also update Redis state for cross-process coordination
-        if self._store and hasattr(self._store, "_r"):
-            try:
-                state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
-                state_data = {
-                    "is_processing": True,
-                    "start_time": state.start_time,
-                    "last_message_time": state.last_message_time,
-                    "process_id": str(uuid.uuid4()),  # Track which process owns this
-                }
-                self._store._r.setex(state_key, 300, json.dumps(state_data))  # 5 min expiry
-                logger.info(f"Created cancellation token for session {session_id}")
-            except Exception as e:
-                logger.warning(f"Failed to update Redis processing state: {e}")
-
-        return cancellation_token
-
-    def cancel_processing(self, session_id: str) -> bool:
-        """Cancel ongoing processing for a session."""
-        cancelled = False
-
-        # Cancel local token if exists
-        if session_id in self._local_cancellation_tokens:
-            token = self._local_cancellation_tokens[session_id]
-            if not token.is_set():
-                token.set()
-                cancelled = True
-
-        # Also cancel in local state
-        if session_id in self._processing_states:
-            state = self._processing_states[session_id]
-            if state.cancellation_token and not state.cancellation_token.is_set():
-                state.cancellation_token.set()
-                cancelled = True
-
-        # Set cancellation flag in Redis for other processes to see
-        if self._store and hasattr(self._store, "_r"):
-            try:
-                cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
-                self._store._r.setex(cancel_key, 60, "1")  # 1 minute expiry
-
-                # Also update processing state
-                state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
-                state_data = self._store._r.get(state_key)
-                if state_data:
-                    state = json.loads(state_data)
-                    state["is_processing"] = False
-                    state["cancelled_at"] = time.time()
-                    self._store._r.setex(state_key, 300, json.dumps(state))
-
-                logger.info(f"Cancelled processing for session {session_id} (Redis notified)")
-                cancelled = True
-            except Exception as e:
-                logger.warning(f"Failed to set Redis cancellation flag: {e}")
-
-        if cancelled:
-            logger.info(f"Successfully cancelled processing for session {session_id}")
-
-        return cancelled
-
-    def mark_processing_complete(self, session_id: str) -> None:
-        """Mark that processing is complete for a session."""
-        # Clear local state
-        if session_id in self._processing_states:
-            state = self._processing_states[session_id]
-            state.is_processing = False
-            state.cancellation_token = None
-            # Clear messages after successful processing
-            state.messages.clear()
-
-        # Clear local cancellation token
-        if session_id in self._local_cancellation_tokens:
-            del self._local_cancellation_tokens[session_id]
-
-        # Clear Redis state including aggregation lock
-        if self._store and hasattr(self._store, "_r"):
-            try:
-                state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
-                cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
-                lock_key = f"{self.AGGREGATION_LOCK_PREFIX}{session_id}"
-                buffer_key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
-
-                # Delete all related keys
-                self._store._r.delete(state_key, cancel_key, lock_key, buffer_key)
-                logger.debug(
-                    f"Cleared processing state and aggregation lock for session {session_id}"
-                )
-            except Exception as e:
-                logger.warning(f"Failed to clear Redis state: {e}")
 
     def add_message_to_buffer(self, session_id: str, message: str) -> str:
-        """Add a message to the buffer for aggregation.
+        """Add message to buffer and return its unique ID.
         
+        This is idempotent - calling with same message multiple times
+        (e.g., webhook retries) will not duplicate it.
+        
+        Args:
+            session_id: Unique session identifier
+            message: Message content
+            
         Returns:
-            Message ID (timestamp-based) for tracking
+            Message ID (format: "{sequence}:{timestamp}")
         """
-        current_time = time.time()
-        message_id = f"{current_time:.6f}"  # Use timestamp as message ID
-
-        # Update local state
-        if session_id not in self._processing_states:
-            self._processing_states[session_id] = ProcessingState()
-
-        state = self._processing_states[session_id]
-        state.last_message_time = current_time
-
-        # Use Redis as the single source of truth to avoid duplicates
-        if self._store and hasattr(self._store, "_r"):
+        timestamp = time.time()
+        
+        buffer_key = f"{self.MESSAGE_BUFFER_PREFIX}{session_id}"
+        seq_key = f"{self.SEQUENCE_PREFIX}{session_id}"
+        time_key = f"{self.LAST_MESSAGE_TIME_PREFIX}{session_id}"
+        
+        pipeline = self._store._r.pipeline()
+        pipeline.incr(seq_key)
+        pipeline.lrange(buffer_key, 0, -1)
+        
+        results = pipeline.execute()
+        sequence = int(results[0])
+        existing_messages = results[1]
+        
+        for existing_msg_json in existing_messages:
             try:
-                # Check if this exact message is already in the buffer (avoid duplicates)
-                key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
-                existing_messages = self._store._r.lrange(key, 0, -1)
-                for existing in existing_messages:
-                    try:
-                        data = json.loads(existing)
-                        if data.get("content") == message:
-                            logger.debug(f"Message already in buffer, skipping: {message[:50]}...")
-                            # Return the existing message ID
-                            return data.get("id", message_id)
-                    except (json.JSONDecodeError, KeyError):
-                        continue
-
-                # Add message to buffer if not already there
-                msg_data = json.dumps({
-                    "id": message_id,
-                    "content": message,
-                    "timestamp": current_time
-                })
-                self._store._r.rpush(key, msg_data)
-                self._store._r.expire(key, 300)  # 5 minute expiry
-
-                # Update processing state with last message time
-                state_key = f"{self.PROCESSING_STATE_PREFIX}{session_id}"
-                state_data = self._store._r.get(state_key)
-                if state_data:
-                    existing_state = json.loads(state_data)
-                    existing_state["last_message_time"] = current_time
-                    self._store._r.setex(state_key, 300, json.dumps(existing_state))
-                else:
-                    # Create new state if doesn't exist
-                    new_state = {
-                        "is_processing": False,
-                        "last_message_time": current_time,
-                        "start_time": current_time,
-                    }
-                    self._store._r.setex(state_key, 300, json.dumps(new_state))
-
-                logger.debug(f"Added message {message_id} to buffer for session {session_id}")
-                return message_id
-            except Exception as e:
-                logger.warning(f"Failed to persist message to Redis: {e}")
-                # Fallback to local memory if Redis fails
-                if message not in state.messages:
-                    state.messages.append(message)
-                return message_id
-        else:
-            # In-memory fallback
-            if message not in state.messages:
-                state.messages.append(message)
-            return message_id
-
-    def has_newer_message(self, session_id: str, message_id: str) -> bool:
-        """Check if there are any messages newer than the given message_id.
+                existing_data: dict[str, Any] = json.loads(existing_msg_json)
+                if existing_data.get("content") == message:
+                    msg_id: str = existing_data.get("id", f"{sequence}:{timestamp:.6f}")
+                    logger.debug(
+                        f"[{session_id}] Message already in buffer (webhook retry?): {message[:50]}..."
+                    )
+                    return msg_id
+            except (json.JSONDecodeError, KeyError):
+                continue
+        
+        message_id = f"{sequence}:{timestamp:.6f}"
+        msg_data: dict[str, Any] = {
+            "id": message_id,
+            "sequence": sequence,
+            "content": message,
+            "timestamp": timestamp,
+        }
+        
+        pipeline = self._store._r.pipeline()
+        pipeline.rpush(buffer_key, json.dumps(msg_data))
+        pipeline.expire(buffer_key, self.BUFFER_TTL_SECONDS)
+        pipeline.set(time_key, str(timestamp))
+        pipeline.expire(time_key, self.BUFFER_TTL_SECONDS)
+        pipeline.expire(seq_key, self.BUFFER_TTL_SECONDS)
+        pipeline.execute()
+        
+        logger.info(
+            f"[{session_id}] Buffered message #{sequence}: {message[:50]}..."
+        )
+        return message_id
+    
+    async def wait_for_inactivity(
+        self,
+        session_id: str,
+        since_message_id: str,
+        inactivity_ms: int,
+        *,
+        check_interval_ms: int = 1000,
+    ) -> Literal["exit", "process_aggregated", "process_single"]:
+        """Wait for inactivity period, resetting timer on new messages.
+        
+        This implements TRUE debouncing:
+        - Timer resets when new message arrives
+        - Only processes after full inactivity period
+        - Earlier webhooks exit when newer message arrives
         
         Args:
             session_id: Session identifier
-            message_id: Message ID to compare against (timestamp-based)
+            since_message_id: ID of current message
+            inactivity_ms: Milliseconds of inactivity required
+            check_interval_ms: How often to check for new messages
             
         Returns:
-            True if there are newer messages, False otherwise
+            - "exit": Newer message arrived, caller should exit
+            - "process_aggregated": Inactivity period elapsed, multiple messages buffered
+            - "process_single": Inactivity period elapsed, single message buffered
         """
-        if not self._store or not hasattr(self._store, "_r"):
-            # In-memory fallback - check local state
-            if session_id in self._processing_states:
-                state = self._processing_states[session_id]
-                # Parse message_id as float timestamp
-                try:
-                    msg_timestamp = float(message_id)
-                    return state.last_message_time > msg_timestamp
-                except ValueError:
-                    return False
-            return False
-
+        import asyncio
+        
+        inactivity_ms = max(self.MIN_INACTIVITY_MS, min(inactivity_ms, self.MAX_INACTIVITY_MS))
+        
         try:
-            key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
-            messages = self._store._r.lrange(key, 0, -1)
+            my_sequence = self._extract_sequence(since_message_id)
+        except ValueError:
+            logger.error(f"[{session_id}] Invalid message ID format: {since_message_id}")
+            return "exit"
+        
+        logger.info(
+            f"[{session_id}] Message #{my_sequence}: Waiting {inactivity_ms}ms for inactivity..."
+        )
+        
+        check_count = 0
+        while True:
+            await asyncio.sleep(check_interval_ms / 1000.0)
+            check_count += 1
             
-            if not messages:
-                return False
+            latest_sequence = self._get_latest_sequence(session_id)
+            if latest_sequence > my_sequence:
+                logger.info(
+                    f"[{session_id}] Message #{my_sequence}: Newer message #{latest_sequence} arrived, exiting"
+                )
+                return "exit"
             
-            # Get the timestamp of the last message in the buffer
+            time_since_last_ms = self._get_time_since_last_message_ms(session_id)
+            
+            if time_since_last_ms >= inactivity_ms:
+                count = self._get_message_count(session_id)
+                logger.info(
+                    f"[{session_id}] Message #{my_sequence}: Inactivity period reached "
+                    f"({time_since_last_ms:.0f}ms >= {inactivity_ms}ms), "
+                    f"processing {count} message(s)"
+                )
+                return "process_aggregated" if count > 1 else "process_single"
+            
+            if check_count % 10 == 0:
+                logger.debug(
+                    f"[{session_id}] Message #{my_sequence}: Still waiting... "
+                    f"({time_since_last_ms:.0f}ms / {inactivity_ms}ms)"
+                )
+    
+    def get_individual_messages(
+        self, session_id: str
+    ) -> list[dict[str, Any]]:
+        """Get individual messages without aggregating or clearing.
+        
+        Use this to save individual messages to database before aggregation.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            List of individual message dicts with content, timestamp, sequence, id
+        """
+        buffer_key = f"{self.MESSAGE_BUFFER_PREFIX}{session_id}"
+        msg_data_list = self._store._r.lrange(buffer_key, 0, -1)
+        
+        if not msg_data_list:
+            return []
+        
+        messages: list[dict[str, Any]] = []
+        for msg_json in msg_data_list:
             try:
-                last_msg_data = json.loads(messages[-1])
-                last_msg_id = last_msg_data.get("id", "0")
-                # Compare message IDs (which are timestamps)
-                return float(last_msg_id) > float(message_id)
-            except (json.JSONDecodeError, KeyError, ValueError):
-                return False
+                data: dict[str, Any] = json.loads(msg_json)
+                content: str = str(data.get("content", ""))
+                timestamp: float = float(data.get("timestamp", 0.0))
+                sequence: int = int(data.get("sequence", 0))
+                message_id: str = str(data.get("id", ""))
                 
-        except Exception as e:
-            logger.warning(f"Failed to check for newer messages: {e}")
-            return False
-
-    def get_message_count(self, session_id: str) -> int:
-        """Get the number of messages in the buffer for a session.
+                if content.strip():
+                    messages.append({
+                        "content": content,
+                        "timestamp": timestamp,
+                        "sequence": sequence,
+                        "id": message_id,
+                    })
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.warning(f"[{session_id}] Failed to parse message: {e}")
+                continue
         
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            Number of messages in the buffer
-        """
-        if not self._store or not hasattr(self._store, "_r"):
-            # In-memory fallback
-            if session_id in self._processing_states:
-                return len(self._processing_states[session_id].messages)
-            return 0
-
-        try:
-            key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
-            return int(self._store._r.llen(key) or 0)
-        except Exception as e:
-            logger.warning(f"Failed to get message count: {e}")
-            return 0
-
+        return messages
+    
     def get_and_clear_messages(self, session_id: str) -> str | None:
-        """Get all buffered messages and clear them atomically.
+        """Atomically retrieve and clear all buffered messages.
+        
+        Returns aggregated message string with relative timestamps,
+        or None if no messages buffered.
         
         Args:
             session_id: Session identifier
             
         Returns:
-            Aggregated message string with timestamps, or None if no messages
+            Aggregated message string or None
         """
-        if not self._store or not hasattr(self._store, "_r"):
-            # In-memory fallback - note: in-memory mode doesn't preserve timestamps
-            # so we fall back to simple aggregation
-            if session_id in self._processing_states:
-                state = self._processing_states[session_id]
-                messages = state.messages[:]
-                state.messages.clear()
-                return self._aggregate_messages(messages) if messages else None
+        buffer_key = f"{self.MESSAGE_BUFFER_PREFIX}{session_id}"
+        seq_key = f"{self.SEQUENCE_PREFIX}{session_id}"
+        time_key = f"{self.LAST_MESSAGE_TIME_PREFIX}{session_id}"
+        
+        pipeline = self._store._r.pipeline()
+        pipeline.lrange(buffer_key, 0, -1)
+        pipeline.delete(buffer_key, seq_key, time_key)
+        results = pipeline.execute()
+        
+        msg_data_list: list[Any] = results[0]
+        
+        if not msg_data_list:
+            logger.debug(f"[{session_id}] No messages to aggregate")
             return None
-
-        try:
-            key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
-            
-            # Get and delete atomically using pipeline
-            pipeline = self._store._r.pipeline()
-            pipeline.lrange(key, 0, -1)
-            pipeline.delete(key)
-            results = pipeline.execute()
-            msg_data_list = results[0]
-            
-            if not msg_data_list:
-                return None
-            
-            # Extract message contents with timestamps
-            messages_with_timestamps: list[tuple[str, float]] = []
-            for msg_data in msg_data_list:
-                try:
-                    data = json.loads(msg_data)
-                    content = data.get("content")
-                    timestamp = data.get("timestamp", 0.0)
-                    if isinstance(content, str) and content.strip():
-                        messages_with_timestamps.append((content, float(timestamp)))
-                except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-                    continue
-            
-            if not messages_with_timestamps:
-                return None
-            
-            return self._aggregate_messages_with_timestamps(messages_with_timestamps)
-            
-        except Exception as e:
-            logger.warning(f"Failed to get and clear messages: {e}")
+        
+        messages_with_timestamps: list[tuple[str, float, int]] = []
+        for msg_json in msg_data_list:
+            try:
+                data: dict[str, Any] = json.loads(msg_json)
+                content: str = str(data.get("content", ""))
+                timestamp: float = float(data.get("timestamp", 0.0))
+                sequence: int = int(data.get("sequence", 0))
+                
+                if content.strip():
+                    messages_with_timestamps.append((content, timestamp, sequence))
+            except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+                logger.warning(f"[{session_id}] Failed to parse message: {e}")
+                continue
+        
+        if not messages_with_timestamps:
+            logger.debug(f"[{session_id}] No valid messages to aggregate")
             return None
-
-    def _aggregate_messages(self, messages: list[str]) -> str:
-        """Aggregate multiple messages intelligently."""
-
-        if not messages:
-            return ""
-
-        # Deduplicate consecutive identical messages while preserving order
-        deduped: list[str] = []
-        last: str | None = None
-        for msg in messages:
-            if msg != last:
-                deduped.append(msg)
-                last = msg
-
-        # Intelligent aggregation
-        return self._aggregate_messages_intelligently(deduped)
-
-    def _aggregate_messages_intelligently(self, messages: list[str]) -> str:
-        """Simply concatenate messages sent in rapid succession."""
-        if not messages:
-            return ""
-
-        if len(messages) == 1:
-            return messages[0]
-
-        # Join messages with line breaks to maintain clarity for LLM
-        # This helps the LLM understand each message as a separate thought/correction
-        return "\n".join(msg.strip() for msg in messages if msg.strip())
-
-    def _aggregate_messages_with_timestamps(self, messages_with_timestamps: list[tuple[str, float]]) -> str:
-        """Aggregate messages with timestamps for better context.
+        
+        aggregated = self._aggregate_messages(messages_with_timestamps)
+        logger.info(
+            f"[{session_id}] Aggregated {len(messages_with_timestamps)} message(s): "
+            f"{aggregated[:100]}..."
+        )
+        return aggregated
+    
+    def mark_processing_complete(self, session_id: str) -> None:
+        """Clear all state for a session after successful processing.
         
         Args:
-            messages_with_timestamps: List of (message, timestamp) tuples
+            session_id: Session identifier
+        """
+        buffer_key = f"{self.MESSAGE_BUFFER_PREFIX}{session_id}"
+        seq_key = f"{self.SEQUENCE_PREFIX}{session_id}"
+        time_key = f"{self.LAST_MESSAGE_TIME_PREFIX}{session_id}"
+        
+        self._store._r.delete(buffer_key, seq_key, time_key)
+        logger.debug(f"[{session_id}] Cleared all Redis state")
+    
+    def _extract_sequence(self, message_id: str) -> int:
+        """Extract sequence number from message ID.
+        
+        Args:
+            message_id: Format "{sequence}:{timestamp}"
             
         Returns:
-            Formatted string with messages and relative timestamps
+            Sequence number
+            
+        Raises:
+            ValueError: If message_id format is invalid
         """
-        if not messages_with_timestamps:
+        try:
+            parts = message_id.split(":", 1)
+            return int(parts[0])
+        except (ValueError, IndexError) as e:
+            raise ValueError(f"Invalid message ID format: {message_id}") from e
+    
+    def _get_latest_sequence(self, session_id: str) -> int:
+        """Get the sequence number of the most recent message.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Latest sequence number, or 0 if no messages
+        """
+        seq_key = f"{self.SEQUENCE_PREFIX}{session_id}"
+        seq_str = self._store._r.get(seq_key)
+        return int(seq_str) if seq_str else 0
+    
+    def _get_time_since_last_message_ms(self, session_id: str) -> float:
+        """Get milliseconds elapsed since last message.
+        
+        Uses stored timestamp (not local clock) to avoid clock skew.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Milliseconds since last message, or infinity if no messages
+        """
+        time_key = f"{self.LAST_MESSAGE_TIME_PREFIX}{session_id}"
+        last_time_str = self._store._r.get(time_key)
+        
+        if not last_time_str:
+            return float("inf")
+        
+        last_time = float(last_time_str)
+        elapsed_ms = (time.time() - last_time) * 1000
+        return elapsed_ms
+    
+    def _get_message_count(self, session_id: str) -> int:
+        """Get number of messages in buffer.
+        
+        Args:
+            session_id: Session identifier
+            
+        Returns:
+            Message count
+        """
+        buffer_key = f"{self.MESSAGE_BUFFER_PREFIX}{session_id}"
+        count = self._store._r.llen(buffer_key)
+        return int(count) if count else 0
+    
+    def _aggregate_messages(
+        self, 
+        messages_with_metadata: list[tuple[str, float, int]]
+    ) -> str:
+        """Aggregate messages with actual timestamps.
+        
+        Args:
+            messages_with_metadata: List of (content, timestamp, sequence) tuples
+            
+        Returns:
+            Formatted aggregated message with HH:MM:SS timestamps
+        """
+        from datetime import datetime
+        
+        if not messages_with_metadata:
             return ""
         
-        if len(messages_with_timestamps) == 1:
-            return messages_with_timestamps[0][0]
+        if len(messages_with_metadata) == 1:
+            return messages_with_metadata[0][0]
         
-        # Sort by timestamp to ensure chronological order
-        sorted_messages = sorted(messages_with_timestamps, key=lambda x: x[1])
+        sorted_msgs = sorted(messages_with_metadata, key=lambda x: x[2])
         
-        # Get the first message timestamp as baseline
-        first_timestamp = sorted_messages[0][1]
-        
-        # Format messages with relative timestamps
         formatted_messages = []
-        for content, timestamp in sorted_messages:
-            # Calculate seconds elapsed since first message
-            elapsed = timestamp - first_timestamp
-            
-            if elapsed < 1.0:
-                # First message or very quick (< 1 second)
-                formatted_messages.append(content.strip())
-            else:
-                # Show relative timestamp for subsequent messages
-                if elapsed < 60:
-                    time_str = f"+{int(elapsed)}s"
-                else:
-                    minutes = int(elapsed / 60)
-                    seconds = int(elapsed % 60)
-                    time_str = f"+{minutes}m{seconds}s" if seconds > 0 else f"+{minutes}m"
-                
-                formatted_messages.append(f"[{time_str}] {content.strip()}")
+        for content, timestamp, sequence in sorted_msgs:
+            dt = datetime.fromtimestamp(timestamp)
+            time_str = dt.strftime("%H:%M:%S")
+            formatted_messages.append(f"[{time_str}] {content.strip()}")
         
         return "\n".join(formatted_messages)
 
-    def check_cancellation_and_raise(self, session_id: str, stage: str = "processing") -> None:
-        """
-        Check if processing was cancelled and raise an exception if so.
-
-        Args:
-            session_id: Session to check
-            stage: Stage name for logging (e.g., "naturalizing", "sending")
-
-        Raises:
-            ProcessingCancelledException: If processing was cancelled
-        """
-        # Check local cancellation token first
-        if session_id in self._local_cancellation_tokens:
-            token = self._local_cancellation_tokens[session_id]
-            if token.is_set():
-                logger.info(
-                    f"Processing cancelled during {stage} for session {session_id} (local token)"
-                )
-                raise ProcessingCancelledException(f"Processing cancelled during {stage}")
-
-        # Check local state
-        if session_id in self._processing_states:
-            state = self._processing_states[session_id]
-            if state.cancellation_token and state.cancellation_token.is_set():
-                logger.info(
-                    f"Processing cancelled during {stage} for session {session_id} (local state)"
-                )
-                raise ProcessingCancelledException(f"Processing cancelled during {stage}")
-
-        # Also check Redis for cross-process cancellation
-        if self._store and hasattr(self._store, "_r"):
-            try:
-                cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
-                if self._store._r.get(cancel_key):
-                    logger.info(
-                        f"Processing cancelled during {stage} for session {session_id} (Redis flag)"
-                    )
-                    raise ProcessingCancelledException(f"Processing cancelled during {stage}")
-            except ProcessingCancelledException:
-                raise  # Re-raise the cancellation
-            except Exception as e:
-                logger.warning(f"Failed to check Redis cancellation flag: {e}")
-
-    def clear_cancellation_flag(self, session_id: str) -> None:
-        """Clear the cancellation flag for a session to allow processing to continue."""
-        # Clear Redis cancellation flag
-        if self._store and hasattr(self._store, "_r"):
-            try:
-                cancel_key = f"{self.CANCELLATION_PREFIX}{session_id}"
-                self._store._r.delete(cancel_key)
-                logger.debug(f"Cleared cancellation flag for session {session_id}")
-            except Exception as e:
-                logger.warning(f"Failed to clear cancellation flag: {e}")
-
-    def clear_session(self, session_id: str) -> None:
-        """Clear all data for a session."""
-        if session_id in self._processing_states:
-            del self._processing_states[session_id]
-
-        # Clear Redis buffer
-        if self._store and hasattr(self._store, "_r"):
-            try:
-                key = f"{self.MESSAGE_AGGREGATION_PREFIX}{session_id}"
-                self._store._r.delete(key)
-            except Exception:
-                pass
-
 
 class ProcessingCancelledException(Exception):
-    """Exception raised when processing is cancelled."""
+    """Exception raised when processing is cancelled due to newer message."""

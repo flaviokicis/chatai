@@ -160,29 +160,33 @@ class FlowTurnRunner:
                         }
                     
                     # Query RAG system
-                    rag_context = await self._rag_service.query(
+                    structured = await self._rag_service.query_structured(
                         tenant_id=ctx.tenant_id,
                         query=user_message,
                         chat_history=chat_history,
                         business_context=business_context,
-                        thread_id=ctx.session_id  # Use session_id as thread_id for tracking
+                        thread_id=ctx.session_id,  # Use session_id as thread_id for tracking
                     )
-                    
-                    # Store RAG results in context
-                    if rag_context and rag_context != "No documents available. The tenant hasn't uploaded any context documents yet.":
+
+                    # Store RAG results in context (only on success with context)
+                    if structured.get("success") and structured.get("context"):
                         ctx.rag_documents = [
                             {
-                                "content": rag_context,
+                                "content": structured["context"],
                                 "source": "RAG System",
-                                "query": user_message
+                                "query": user_message,
                             }
                         ]
                         ctx.rag_query_performed = True
                         logger.info("RAG context retrieved and added to flow context")
                     else:
+                        # Do not include error text in rag_documents
                         ctx.rag_documents = []
                         ctx.rag_query_performed = True
-                        logger.info("No relevant RAG documents found")
+                        if structured.get("no_documents"):
+                            logger.info("No documents available for tenant; skipping RAG context")
+                        else:
+                            logger.info("No relevant RAG documents found or retrieval failed")
                         
                 except Exception as e:
                     logger.warning(f"RAG query failed: {e}")

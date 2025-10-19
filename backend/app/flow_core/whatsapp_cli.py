@@ -126,6 +126,9 @@ class WhatsAppSimulatorCLI:
         self.message_queue = Queue()
         self.processing = False
         self.shutdown_event = threading.Event()
+        self._buffer_lock = threading.Lock()
+        self._pending_messages: list[dict[str, Any]] = []
+        self._last_message_ts: float | None = None
 
         # Phone numbers
         self.user_phone = user_phone or "+19995551234"  # Default user phone
@@ -321,6 +324,7 @@ class WhatsAppSimulatorCLI:
                 owner_email="cli@test.local",
             )
             session.add(tenant)
+            session.flush()
             print(f"✅ Created tenant: {tenant_id}")
         else:
             print(f"📌 Using existing tenant: {tenant_id}")
@@ -339,6 +343,7 @@ class WhatsAppSimulatorCLI:
                 extra={"cli_mode": True, "name": "WhatsApp CLI Channel"},
             )
             session.add(channel)
+            session.flush()
             print(f"✅ Created channel: {channel_id}")
         else:
             channel_id = channel.id
@@ -361,6 +366,7 @@ class WhatsAppSimulatorCLI:
             flow = Flow(
                 id=flow_id,
                 tenant_id=tenant_id,
+                channel_instance_id=channel_id,
                 name=flow_definition.get("metadata", {}).get("name", self.flow_path.stem),
                 definition=flow_definition,
                 is_active=True,
@@ -573,10 +579,26 @@ class WhatsAppSimulatorCLI:
         """Process messages from the queue."""
         while not self.shutdown_event.is_set():
             try:
-                # Check for messages
-                if not self.message_queue.empty() and not self.processing:
-                    message_data = self.message_queue.get_nowait()
-                    await self._process_single_message(message_data)
+                # Drain queue into buffer immediately
+                while not self.message_queue.empty():
+                    item = self.message_queue.get_nowait()
+                    with self._buffer_lock:
+                        self._pending_messages.append(item)
+                        self._last_message_ts = item.get("timestamp")
+
+                # If not currently processing and we have buffered messages, check debounce window
+                if not self.processing and self._pending_messages:
+                    # Wait until 60s of inactivity (configurable via project context)
+                    await self._wait_for_inactivity()
+                    # Aggregate buffered messages and process once
+                    batch = self._flush_buffer()
+                    if batch:
+                        combined_text = self._aggregate_messages(batch)
+                        await self._process_single_message({
+                            "text": combined_text,
+                            "timestamp": time.time(),
+                            "skip_typing_delay": True,
+                        })
 
                 # Small delay
                 await asyncio.sleep(0.1)
@@ -585,13 +607,33 @@ class WhatsAppSimulatorCLI:
                 logger.error(f"Message processing error: {e}", exc_info=True)
                 await asyncio.sleep(1)
 
-    async def _process_single_message(self, message_data: dict):
-        """Process a single message using FlowProcessor."""
+    async def _process_single_message(
+        self,
+        message_data: dict,
+        *,
+        capture: bool = False,
+        suppress_output: bool = False,
+    ) -> dict[str, Any] | None:
+        """Process a single message using FlowProcessor.
+
+        Args:
+            message_data: Raw message payload from queue or caller.
+            capture: When True, return structured response data for programmatic usage.
+            suppress_output: When True, skip console printing (used by automated testers).
+
+        Returns:
+            Optional dictionary with response details when `capture` is True.
+        """
         self.processing = True
         message_text = message_data["text"]
 
-        # Show typing indicator
-        print("💭 Bot is typing...")
+        # Show typing indicator unless silenced
+        if not suppress_output:
+            print("💭 Bot is typing...")
+
+        response: FlowResponse | None = None
+        display_payload: dict[str, Any] | None = None
+        processing_time = 0.0
 
         try:
             # Log incoming message to database
@@ -610,7 +652,8 @@ class WhatsAppSimulatorCLI:
                 session.commit()
 
             # Apply tenant-configured delay before processing (like WhatsApp webhook does)
-            await self._apply_typing_delay()
+            if not message_data.get("skip_typing_delay"):
+                await self._apply_typing_delay()
 
             # Create flow request (like webhook does)
             flow_request = FlowRequest(
@@ -627,9 +670,12 @@ class WhatsAppSimulatorCLI:
             start_time = time.time()
             response = await self.flow_processor.process_flow(flow_request, self.app_context)
             processing_time = (time.time() - start_time) * 1000
-
-            # Display response
-            await self._display_response(response, processing_time)
+            # Display response (or capture data)
+            display_payload = await self._display_response(
+                response,
+                processing_time,
+                suppress_output=suppress_output,
+            )
 
             # Log outbound message to database
             # Convert single message to list format for processing
@@ -658,20 +704,52 @@ class WhatsAppSimulatorCLI:
 
             # Check for terminal states
             if response.result == FlowProcessingResult.TERMINAL:
-                print("\n🎉 Flow completed successfully!")
+                if not suppress_output:
+                    print("\n🎉 Flow completed successfully!")
                 self.shutdown_event.set()
             elif response.result == FlowProcessingResult.ESCALATE:
-                print("\n🚨 Escalated to human agent")
+                if not suppress_output:
+                    print("\n🚨 Escalated to human agent")
                 self.shutdown_event.set()
 
         except Exception as e:
             logger.error(f"Error processing message: {e}", exc_info=True)
-            print(f"❌ Error: {e!s}")
+            if not suppress_output:
+                print(f"❌ Error: {e!s}")
+            if capture:
+                return {
+                    "user_message": message_text,
+                    "error": str(e),
+                    "metadata": {},
+                    "messages": [],
+                    "processing_time_ms": processing_time,
+                }
         finally:
             self.processing = False
+            # If more messages arrived during processing, loop will pick them up on next iteration
 
-    async def _display_response(self, response: FlowResponse, processing_time: float):
-        """Display response like WhatsApp would."""
+        if capture and response is not None:
+            return {
+                "user_message": message_text,
+                "response": response,
+                "messages": (display_payload or {}).get("messages", []),
+                "metadata": response.metadata or {},
+                "processing_time_ms": (display_payload or {}).get(
+                    "processing_time_ms", processing_time
+                ),
+                "result": response.result,
+            }
+
+        return None
+
+    async def _display_response(
+        self,
+        response: FlowResponse,
+        processing_time: float,
+        *,
+        suppress_output: bool = False,
+    ) -> dict[str, Any]:
+        """Display response like WhatsApp would and return structured info."""
         # Check metadata for messages first (from LLM tool calls)
         messages = []
         if response.metadata and "messages" in response.metadata:
@@ -680,30 +758,121 @@ class WhatsAppSimulatorCLI:
         elif response.message:
             messages.append({"text": response.message, "delay_ms": 0})
 
+        normalized_messages: list[dict[str, Any]] = []
+
         # Display messages
         if messages:
             for msg in messages:
                 # Simulate delay if specified
                 delay_ms = msg.get("delay_ms", 0)
-                if delay_ms > 0:
+                if delay_ms > 0 and not suppress_output:
                     print(f"   ⏱️  [delay: {delay_ms}ms]")
                     await asyncio.sleep(delay_ms / 1000.0)
 
                 # Display message
                 text = msg.get("text", "")
-                print(f"📱 {text}")
+                if not suppress_output:
+                    print(f"📱 {text}")
+
+                normalized_messages.append(
+                    {
+                        "text": text,
+                        "delay_ms": delay_ms,
+                    }
+                )
+        else:
+            normalized_messages = []
 
         # Show processing time
-        print(f"   ⚡ Processed in {processing_time:.0f}ms")
+        if not suppress_output:
+            print(f"   ⚡ Processed in {processing_time:.0f}ms")
 
         # Debug info (optional)
-        if hasattr(response, "metadata") and response.metadata:
+        if hasattr(response, "metadata") and response.metadata and not suppress_output:
             if "tool_name" in response.metadata:
                 print(f"   🔧 Tool: {response.metadata['tool_name']}")
             if "confidence" in response.metadata:
                 conf = response.metadata["confidence"]
                 if conf < 1.0:
                     print(f"   📊 Confidence: {conf:.2f}")
+
+        return {
+            "messages": normalized_messages,
+            "processing_time_ms": processing_time,
+            "metadata": response.metadata or {},
+        }
+
+    def _flush_buffer(self) -> list[dict[str, Any]]:
+        """Atomically flush the pending message buffer."""
+        with self._buffer_lock:
+            batch = list(self._pending_messages)
+            self._pending_messages.clear()
+            self._last_message_ts = None
+            return batch
+
+    async def _wait_for_inactivity(self) -> None:
+        """Wait until one minute of inactivity since the last message, resetting on new input."""
+        # Resolve desired inactivity window from project context
+        inactivity_ms = 60000
+        if self.conversation_ctx and self.conversation_ctx.project_context:
+            inactivity_ms = getattr(
+                self.conversation_ctx.project_context,
+                "wait_time_before_replying_ms",
+                60000,
+            )
+
+        # Bound between 100ms and 120s like webhook behavior
+        inactivity_ms = max(100, min(inactivity_ms, 120000))
+
+        # Poll every 250ms for new messages, reset timer when new messages arrive
+        waited = 0
+        last_seen_ts = self._last_message_ts
+        while True:
+            await asyncio.sleep(0.25)
+            waited += 250
+
+            # If a new message has arrived, reset the wait
+            if self._last_message_ts and self._last_message_ts != last_seen_ts:
+                last_seen_ts = self._last_message_ts
+                waited = 0
+                continue
+
+            if waited >= inactivity_ms:
+                return
+
+    def _aggregate_messages(self, messages: list[dict[str, Any]]) -> str:
+        """Aggregate buffered CLI messages using same policy as webhook manager."""
+        if not messages:
+            return ""
+
+        # Sort by timestamp to ensure order
+        ordered = sorted(messages, key=lambda m: m.get("timestamp", 0))
+
+        # Join with newlines to keep separate thoughts clear (matches webhook behavior)
+        parts: list[str] = []
+        for msg in ordered:
+            text = str(msg.get("text", "")).strip()
+            if text:
+                parts.append(text)
+        return "\n".join(parts)
+
+    async def process_message(
+        self,
+        message_text: str,
+        *,
+        capture: bool = False,
+        suppress_output: bool = False,
+    ) -> dict[str, Any] | None:
+        """Public helper to process a single message programmatically."""
+        message_data = {
+            "text": message_text,
+            "timestamp": time.time(),
+        }
+        return await self._process_single_message(
+            message_data,
+            capture=capture,
+            suppress_output=suppress_output,
+        )
 
     async def run(self):
         """Run the WhatsApp simulator."""

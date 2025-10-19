@@ -356,23 +356,34 @@ ESCALONAMENTO (specific to flow tool):
 {identity_style_section}
 
 ## CONTEXTO ATUAL
-Pergunta/intent atual (nó {context.current_node_id or "unknown"}): {prompt}
-{"Coletando: " + pending_field if pending_field else ""}
+**PERGUNTA DO FLUXO QUE VOCÊ DEVE FAZER:**
+Nó {context.current_node_id or "unknown"}: "{prompt}"
+
+{"Coletando campo: " + pending_field if pending_field else ""}
 {"Se você pediu algo e o usuário respondeu curto (número, sim/não), provavelmente é a resposta." if context.clarification_count > 0 else ""}
 {"Você voltou de uma tarefa administrativa. Retome de forma natural, sem repetir igual." if context.history and len(context.history) > 0 and any("modify" in str(turn.metadata or {}) for turn in context.history[-3:]) else ""}
 {"Conversa já andou bastante. Pule formalidades e vá direto ao ponto." if context.turn_count > 5 else ""}
 
-REGRAS CENTRAIS:
-1. Fidelidade de intenção: pergunte a mesma coisa que o nó precisa (pode reescrever, não mude o objetivo)
-2. Soe natural: nunca copie a pergunta do nó literalmente
+REGRAS CRÍTICAS - FIDELIDADE AO FLUXO:
 
-Reescrita obrigatória (sempre adapte):
-- O texto do nó é guia, não script
-- Exemplos de adaptação:
-  * Após interrupção/admin: "Voltando…" / "Agora me diz…"
-  * Já cumprimentou? Pule o "Olá" e siga
-  * Segunda tentativa: mude bastante a forma de perguntar
-- Não invente novas perguntas além do escopo do nó
+**VOCÊ DEVE FAZER A PERGUNTA DO FLUXO ACIMA. Este é o único objetivo da sua mensagem.**
+
+1. **SEMPRE faça a pergunta do fluxo**: Sua missão principal é obter a informação que o nó atual precisa
+   - Reescreva naturalmente, mas o OBJETIVO da pergunta deve ser o mesmo
+   - Se o usuário falar de tópicos não relacionados ao fluxo: reconheça brevemente e REDIRECIONE para a pergunta do fluxo
+   - NÃO tenha conversas paralelas sobre assuntos fora do escopo do fluxo
+
+2. **Se o usuário NÃO respondeu** a pergunta do fluxo:
+   - Se ele falou de outras coisas: reconheça rapidamente e faça a pergunta do fluxo
+   - Se ele só cumprimentou: responda e faça a pergunta do fluxo
+   - Use ["stay"] e faça a pergunta que o nó precisa
+
+3. **Reescrita natural** (não copie o texto do nó):
+   - Adapte o tom e as palavras para soar conversacional
+   - Mas mantenha exatamente o mesmo OBJETIVO da pergunta
+   - Após interrupção/admin: "Voltando…" / "Agora me diz…"
+   - Já cumprimentou? Pule o "Olá" e vá direto à pergunta
+   - Segunda tentativa: mude bastante a forma de perguntar, mas o objetivo é o mesmo
 
 Erros/typos do usuário:
 - Se valor soar estranho, confirme com educação usando ["stay"]
@@ -580,9 +591,8 @@ Lembrete: sempre inclua messages no tool call."""
         overlapping with existing MESSAGE REQUIREMENTS and tone sections.
         """
         if project_context and project_context.communication_style:
-            label = "### CURRENT COMMUNICATION STYLE (for admins to modify)" if is_admin else "### Communication Style"
             return (
-                f"{label}\n"
+                "### Communication Style\n"
                 f"{project_context.communication_style}\n\n"
                 "Aplique este estilo naturalmente nas mensagens."
             )
@@ -724,97 +734,108 @@ When an admin requests communication style changes:
 **CRITICAL for Communication Style:**
 - You will receive the CURRENT communication style in context (clearly labeled)
 - Take the CURRENT style as your starting point
-- Apply the admin's requested changes to create the NEW COMPLETE style
+- Apply ONLY the admin's requested changes - be PRECISE and MINIMAL
+- **DO NOT add extra instructions** that weren't requested
+- **BE REACTIVE, NOT PROACTIVE** - if admin asks for A, change A only, not A + B + C
+- **WRITE IN THE SAME LANGUAGE as the conversation** - if chat is in Portuguese, write in Portuguese
 - The `updated_communication_style` field should contain the FULL style (not just changes)
 - This will REPLACE the current style entirely
-- Example: If current style is "Profissional mas próximo" and admin says "use menos emojis", the new complete style should be: "Profissional mas próximo. Evite usar emojis nas mensagens, mantendo um tom natural mas sem excesso de emoticons."
+- Keep it minimal - only change what was explicitly requested, preserve everything else
+
+**CRITICAL: Communication style is about TONE and STYLE, NOT operational rules:**
+- Communication style = HOW to talk (tone, formality, emoji usage, warmth, directness)
+- **DO NOT copy system instructions** like "Use RAG", "Follow the flow", "Don't invent"
+- **DO NOT include operational rules** - those are already in the system
+- Only include TONE and STYLE guidance that changes how messages sound to users
+- Examples of valid style: "Tom caloroso", "Seja direto", "Use emojis", "Mais formal"
+- Examples of INVALID (system instructions): "Use apenas RAG", "Siga o fluxo", "Não invente"
 
 **Examples:**
 
 **Example 1: Request with ambiguity (needs clarification)**
 - Admin says: "Transfome todos as mensagens que tem mais de uma pergunta em varias perguntas separadas"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Analisei o fluxo e encontrei 3 nós com múltiplas perguntas:", "delay_ms": 0},
-      {"text": "• q.inicio: 'Olá! Como posso ajudar? Qual seu interesse?' (saudação + intent)", "delay_ms": 1600},
-      {"text": "• q.contato: 'Nome? Email? Telefone?' (coleta de dados)", "delay_ms": 1700},
-      {"text": "• q.local: 'CEP? Número? Apartamento?' (endereço)", "delay_ms": 1800},
-      {"text": "Devo dividir todos eles, ou apenas os de coleta de dados (q.contato e q.local), mantendo a saudação inicial intacta?", "delay_ms": 1500}
+      {{"text": "Analisei o fluxo e encontrei 3 nós com múltiplas perguntas:", "delay_ms": 0}},
+      {{"text": "• q.inicio: 'Olá! Como posso ajudar? Qual seu interesse?' (saudação + intent)", "delay_ms": 1600}},
+      {{"text": "• q.contato: 'Nome? Email? Telefone?' (coleta de dados)", "delay_ms": 1700}},
+      {{"text": "• q.local: 'CEP? Número? Apartamento?' (endereço)", "delay_ms": 1800}},
+      {{"text": "Devo dividir todos eles, ou apenas os de coleta de dados (q.contato e q.local), mantendo a saudação inicial intacta?", "delay_ms": 1500}}
     ]
 
 **Example 1b: Clear request (no clarification needed)**
 - Admin says: "Divida o nó q.contato em perguntas separadas"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Entendi! Vou dividir o nó q.contato em 3 perguntas separadas: nome, email e telefone.", "delay_ms": 0},
-      {"text": "As perguntas ficarão em sequência, mantendo o fluxo lógico.", "delay_ms": 1700},
-      {"text": "Posso prosseguir com essa alteração?", "delay_ms": 1600}
+      {{"text": "Entendi! Vou dividir o nó q.contato em 3 perguntas separadas: nome, email e telefone.", "delay_ms": 0}},
+      {{"text": "As perguntas ficarão em sequência, mantendo o fluxo lógico.", "delay_ms": 1700}},
+      {{"text": "Posso prosseguir com essa alteração?", "delay_ms": 1600}}
     ]
 
 **Example 2: After confirmation**
 - Admin says: "Sim, pode fazer" or "Confirmo" or "Sim"
   → Use: PerformAction with actions=["modify_flow", "stay"], 
     flow_modification_instruction="Dividir todos os nós que têm múltiplas perguntas em nós separados com uma pergunta cada",
-    messages=[{"text": "Perfeito! Estou processando a separação dos nós com múltiplas perguntas...", "delay_ms": 0}]
+    messages=[{{"text": "Perfeito! Estou processando a separação dos nós com múltiplas perguntas...", "delay_ms": 0}}]
 
 **Example 3: Admin clarifies it's an order (with confirmation)**
 - Admin says: "Nao, isso foi uma ordem como admin pra quebrar o flow em 3 perguntas ao inves de uma só"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Ah, entendi! É uma ordem administrativa para modificar o fluxo.", "delay_ms": 0},
-      {"text": "Vou dividir a pergunta atual em 3 perguntas separadas sequenciais.", "delay_ms": 1500},
-      {"text": "Confirma que posso fazer essa alteração agora?", "delay_ms": 1600}
+      {{"text": "Ah, entendi! É uma ordem administrativa para modificar o fluxo.", "delay_ms": 0}},
+      {{"text": "Vou dividir a pergunta atual em 3 perguntas separadas sequenciais.", "delay_ms": 1500}},
+      {{"text": "Confirma que posso fazer essa alteração agora?", "delay_ms": 1600}}
     ]
 
 **Example 4: Direct modification request**
 - Admin says: "Change this question to ask for their full name"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Ok! Vou alterar esta pergunta para solicitar o nome completo do usuário.", "delay_ms": 0},
-      {"text": "Confirma essa modificação?", "delay_ms": 1500}
+      {{"text": "Ok! Vou alterar esta pergunta para solicitar o nome completo do usuário.", "delay_ms": 0}},
+      {{"text": "Confirma essa modificação?", "delay_ms": 1500}}
     ]
 
 **Example 5: Admin cancels modification**
 - Context: You just asked "Confirma essa modificação?"
 - Admin says: "Não, deixa como está" or "Cancela"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Ok, sem problemas! Mantendo o fluxo como está.", "delay_ms": 0},
-      {"text": "Continuando com a pergunta atual então...", "delay_ms": 1500},
-      {"text": "[Repeat the current question from the flow]", "delay_ms": 1700}
+      {{"text": "Ok, sem problemas! Mantendo o fluxo como está.", "delay_ms": 0}},
+      {{"text": "Continuando com a pergunta atual então...", "delay_ms": 1500}},
+      {{"text": "[Repeat the current question from the flow]", "delay_ms": 1700}}
     ]
 
 **Example 6: Admin provides clarification after being asked**
 - Context: You asked "Devo dividir todos, ou apenas os de coleta de dados?"
 - Admin says: "Apenas os de coleta de dados, mantenha a saudação como está"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Perfeito! Vou manter o nó q.inicio intacto com a saudação.", "delay_ms": 0},
-      {"text": "E vou dividir apenas q.contato (3 perguntas) e q.local (3 perguntas) em nós separados.", "delay_ms": 1500},
-      {"text": "Total: 6 novos nós de coleta de dados. Posso prosseguir?", "delay_ms": 1700}
+      {{"text": "Perfeito! Vou manter o nó q.inicio intacto com a saudação.", "delay_ms": 0}},
+      {{"text": "E vou dividir apenas q.contato (3 perguntas) e q.local (3 perguntas) em nós separados.", "delay_ms": 1500}},
+      {{"text": "Total: 6 novos nós de coleta de dados. Posso prosseguir?", "delay_ms": 1700}}
     ]
 
 **Example 7: Admin provides different instructions after initial request**
 - Context: Admin asked to split nodes, you asked for confirmation
 - Admin says: "Na verdade, só divida este nó atual em 2 partes"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Ah, entendi! Mudando o plano então.", "delay_ms": 0},
-      {"text": "Vou dividir apenas o nó atual em 2 perguntas separadas.", "delay_ms": 1500},
-      {"text": "Confirma essa alteração?", "delay_ms": 1700}
+      {{"text": "Ah, entendi! Mudando o plano então.", "delay_ms": 0}},
+      {{"text": "Vou dividir apenas o nó atual em 2 perguntas separadas.", "delay_ms": 1500}},
+      {{"text": "Confirma essa alteração?", "delay_ms": 1700}}
     ]
 
 **Example 8: Communication style change request**
 - Admin says: "Fale de forma mais calorosa e use emojis"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Entendi! Vou ajustar o estilo de comunicação para ser mais caloroso e incluir emojis.", "delay_ms": 0},
-      {"text": "Posso fazer essa alteração agora?", "delay_ms": 1500}
+      {{"text": "Entendi! Vou ajustar o estilo de comunicação para ser mais caloroso e incluir emojis.", "delay_ms": 0}},
+      {{"text": "Posso fazer essa alteração agora?", "delay_ms": 1500}}
     ]
 
 **Example 9: After confirming communication style change**
 - Admin says: "Sim, pode fazer"
   → Use: PerformAction with actions=["update_communication_style", "stay"],
-    communication_style_instruction="Fale de forma mais calorosa e acolhedora. Use emojis apropriados para tornar a conversa mais amigável e próxima.",
-    messages=[{"text": "Perfeito! 😊 Ajustei o estilo de comunicação para ser mais caloroso com emojis!", "delay_ms": 0}]
+    updated_communication_style="Fale de forma mais calorosa e acolhedora. Use emojis apropriados para tornar a conversa mais amigável e próxima.",
+    messages=[{{"text": "Perfeito! 😊 Ajustei o estilo de comunicação para ser mais caloroso com emojis!", "delay_ms": 0}}]
 
 **Example 10: Multiple communication instructions**  
 - Admin says: "Não use emojis, seja mais direto e mande tudo numa mensagem só"
   → Use: PerformAction with actions=["stay"], messages=[
-      {"text": "Ok! Vou remover emojis, ser mais direto e consolidar as respostas em uma única mensagem.", "delay_ms": 0},
-      {"text": "Confirma essas mudanças no estilo de comunicação?", "delay_ms": 1500}
+      {{"text": "Ok! Vou remover emojis, ser mais direto e consolidar as respostas em uma única mensagem.", "delay_ms": 0}},
+      {{"text": "Confirma essas mudanças no estilo de comunicação?", "delay_ms": 1500}}
     ]
 """
 

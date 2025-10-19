@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Any, TypedDict
 from uuid import UUID
 
+import copy
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -113,8 +114,8 @@ class FlowModificationService:
                 success=False, modified_flow=None, action_results=[], error="No actions provided"
             )
 
-        # Work on a copy to ensure atomicity
-        working_flow = flow.copy()
+        # Work on a deep copy to ensure atomicity of nested structures (nodes/edges)
+        working_flow = copy.deepcopy(flow)
         action_results = []
 
         logger.info("=" * 80)

@@ -37,6 +37,14 @@ class RAGState(TypedDict):
     thread_id: Optional[UUID]
 
 
+class RAGQueryResult(TypedDict):
+    """Structured result for RAG queries to avoid leaking error text upstream."""
+    success: bool
+    context: Optional[str]
+    error: Optional[str]
+    no_documents: bool
+
+
 class RAGService:
     """Main service orchestrating the RAG system.
     
@@ -214,11 +222,40 @@ class RAGService:
             Context string for the tool caller LLM or error message
         """
         logger.info(f"RAG query for tenant {tenant_id}: {query[:100]}")
-        
+
+        structured = await self.query_structured(
+            tenant_id=tenant_id,
+            query=query,
+            chat_history=chat_history,
+            business_context=business_context,
+            thread_id=thread_id,
+        )
+
+        if structured['no_documents']:
+            return "No documents available. The tenant hasn't uploaded any context documents yet."
+        if structured['success'] and structured['context']:
+            return structured['context']
+        # On failure or insufficient context, do not leak errors; return empty string
+        return ""
+
+    async def query_structured(
+        self,
+        tenant_id: UUID,
+        query: str,
+        chat_history: Optional[List[Dict]] = None,
+        business_context: Optional[Dict] = None,
+        thread_id: Optional[UUID] = None,
+    ) -> RAGQueryResult:
+        """Structured query method to prevent leaking internal errors to callers."""
         # Check if tenant has documents
         if not await self.has_documents(tenant_id):
-            return "No documents available. The tenant hasn't uploaded any context documents yet."
-        
+            return {
+                'success': False,
+                'context': None,
+                'error': None,
+                'no_documents': True,
+            }
+
         # Run the retrieval graph
         initial_state: RAGState = {
             'query': query,
@@ -230,24 +267,22 @@ class RAGService:
             'chat_history': chat_history,
             'business_context': business_context,
             'tenant_id': tenant_id,
-            'thread_id': thread_id
+            'thread_id': thread_id,
         }
-        
+
         try:
             result = await self.retrieval_app.ainvoke(initial_state)
-            
+
             # Save retrieval session for analytics
             if result.get('chunks'):
                 chunks_data = [
-                    {'id': str(c.chunk_id), 'score': c.score} 
+                    {'id': str(c.chunk_id), 'score': c.score}
                     for c in result['chunks'][:20]
                 ]
-                
+
                 # Save retrieval session for analytics (skip on error to prevent hanging)
                 try:
-                    # Generate query embedding for analytics
                     query_embedding = await self.embedding_service.embed_text(query)
-                    
                     await self.vector_store.save_retrieval_session(
                         tenant_id=tenant_id,
                         query=query,
@@ -257,22 +292,34 @@ class RAGService:
                         attempts=result.get('attempts', 0),
                         sufficient=result.get('sufficient', False),
                         judge_reasoning=result.get('judge_reasoning', ''),
-                        thread_id=thread_id
+                        thread_id=thread_id,
                     )
                 except Exception as e:
-                    # Skip saving session to prevent hanging
                     logger.debug(f"Skipped saving retrieval session: {e}")
-            
-            # Return context or empty when insufficient; never emit user-facing text here
+
             if result.get('sufficient') and result.get('context'):
-                return result['context']
-            else:
-                # Insufficient context; upstream caller should decide how to respond
-                return ""
-                
+                return {
+                    'success': True,
+                    'context': result['context'],
+                    'error': None,
+                    'no_documents': False,
+                }
+
+            return {
+                'success': False,
+                'context': None,
+                'error': None,
+                'no_documents': False,
+            }
+
         except Exception as e:
             logger.error(f"Error in RAG query: {e}")
-            return f"Error retrieving context: {str(e)}. Please try rephrasing the question."
+            return {
+                'success': False,
+                'context': None,
+                'error': str(e),
+                'no_documents': False,
+            }
     
     def _build_retrieval_graph(self) -> StateGraph:
         """Build the LangGraph retrieval loop.
@@ -442,7 +489,7 @@ class RAGService:
         
         # If not sufficient and we have attempts left, retry
         attempts = state.get('attempts', 0)
-        if attempts < self.max_attempts - 1:
+        if attempts < self.max_attempts:
             # Don't modify state here - let retrieve_node handle it
             return "retry"
         
@@ -459,12 +506,14 @@ class RAGService:
             Final state
         """
         if state.get('sufficient') and state.get('context'):
-            logger.info(f"RAG retrieval successful after {state['attempts'] + 1} attempts")
+            logger.info(f"RAG retrieval successful after {state['attempts']} attempts")
             return state
         
         # Not sufficient - provide clear message
         state['context'] = None
-        logger.warning(f"RAG retrieval failed after {state['attempts'] + 1} attempts: {state.get('judge_reasoning', 'Unknown reason')}")
+        logger.warning(
+            f"RAG retrieval failed after {state['attempts']} attempts: {state.get('judge_reasoning', 'Unknown reason')}"
+        )
         
         return state
     
