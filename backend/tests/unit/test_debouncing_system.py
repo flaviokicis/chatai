@@ -187,8 +187,8 @@ async def test_webhook_retry_idempotency() -> None:
     
     assert msg_id_1 == msg_id_2, "Same message should return same ID"
     
-    count = manager._get_message_count(session_id)
-    assert count == 1, "Duplicate messages should not be added"
+    messages = manager.get_individual_messages(session_id)
+    assert len(messages) == 1, "Duplicate messages should not be added"
 
 
 @pytest.mark.asyncio
@@ -291,16 +291,16 @@ async def test_cleanup_after_processing() -> None:
     
     msg_id = manager.add_message_to_buffer(session_id, "Test message")
     
-    count_before = manager._get_message_count(session_id)
-    assert count_before == 1
+    messages_before = manager.get_individual_messages(session_id)
+    assert len(messages_before) == 1
     
     manager.get_and_clear_messages(session_id)
     
-    count_after = manager._get_message_count(session_id)
-    assert count_after == 0
+    messages_after = manager.get_individual_messages(session_id)
+    assert len(messages_after) == 0
     
     manager.mark_processing_complete(session_id)
     
-    count_final = manager._get_message_count(session_id)
-    assert count_final == 0
+    messages_final = manager.get_individual_messages(session_id)
+    assert len(messages_final) == 0
 

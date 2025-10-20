@@ -15,21 +15,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class ProjectContext:
-    """
-    Project context data for enhancing LLM prompts.
-
-    This contains the business context that helps LLMs understand
-    how to communicate and make decisions appropriately.
-    """
-
     tenant_id: UUID
+    project_id: UUID | None = None
+    business_name: str | None = None
+    business_description: str | None = None
+    business_category: str | None = None
     project_description: str | None = None
     target_audience: str | None = None
     communication_style: str | None = None
-
-    # Timing and response behavior configuration
     wait_time_before_replying_ms: int = 60000
     typing_indicator_enabled: bool = True
     min_typing_duration_ms: int = 1000
@@ -138,6 +133,10 @@ class TenantConfigService:
                 return None
 
             # Get the tenant with project config
+            if not channel_instance.tenant_id:
+                logger.warning(f"Channel instance has no tenant_id for channel {channel_identifier}")
+                return None
+                
             tenant = repository.get_tenant_by_id(self.session, channel_instance.tenant_id)
             if not tenant:
                 logger.warning(
@@ -152,29 +151,29 @@ class TenantConfigService:
             return None
 
     def _build_project_context(self, tenant: Tenant) -> ProjectContext:
-        """Build ProjectContext from tenant and project config."""
         project_config = tenant.project_config
+        
+        if not tenant.id:
+            raise ValueError("Tenant has no ID")
 
         return ProjectContext(
             tenant_id=tenant.id,
+            project_id=project_config.id if project_config else None,
+            business_name=None,
+            business_description=None,
+            business_category=None,
             project_description=project_config.project_description if project_config else None,
             target_audience=project_config.target_audience if project_config else None,
             communication_style=project_config.communication_style if project_config else None,
             wait_time_before_replying_ms=project_config.wait_time_before_replying_ms
             if project_config
-            else 2000,
+            else 60000,
             typing_indicator_enabled=project_config.typing_indicator_enabled
             if project_config
             else True,
-            min_typing_duration_ms=project_config.min_typing_duration_ms
-            if project_config
-            else 1000,
-            max_typing_duration_ms=project_config.max_typing_duration_ms
-            if project_config
-            else 5000,
+            min_typing_duration_ms=project_config.min_typing_duration_ms if project_config else 1000,
+            max_typing_duration_ms=project_config.max_typing_duration_ms if project_config else 5000,
             message_reset_enabled=project_config.message_reset_enabled if project_config else True,
-            natural_delays_enabled=project_config.natural_delays_enabled
-            if project_config
-            else True,
+            natural_delays_enabled=project_config.natural_delays_enabled if project_config else True,
             delay_variance_percent=project_config.delay_variance_percent if project_config else 20,
         )

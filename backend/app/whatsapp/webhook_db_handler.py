@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
+
+from fastapi import HTTPException
 
 from app.db.models import Flow as FlowModel
 from app.db.repository import (
@@ -15,35 +16,13 @@ from app.db.repository import (
     get_or_create_thread,
 )
 from app.services.tenant_config_service import TenantConfigService
+from app.whatsapp.types import ConversationSetup
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
-
-    from app.db.models import ChannelInstance, Contact, Thread
-    from app.services.tenant_config_service import ProjectContext
+    from app.db.models import ChannelInstance
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ConversationSetup:
-    """Complete conversation setup data from database operations."""
-
-    tenant_id: UUID
-    project_context: ProjectContext
-    channel_instance: ChannelInstance
-    contact: Contact
-    thread: Thread
-    selected_flow: FlowModel
-
-    # Extracted IDs and data for use after session closes
-    thread_id: UUID
-    contact_id: UUID
-    channel_instance_id: UUID
-    selected_flow_id: UUID
-    flow_definition: dict[str, Any]
-    flow_name: str
-    flow_id: str
 
 
 class WebhookDatabaseHandler:
@@ -58,51 +37,28 @@ class WebhookDatabaseHandler:
         self.session = session
         self.tenant_service = TenantConfigService(session)
 
-    def setup_conversation(
-        self, sender_number: str, receiver_number: str
-    ) -> ConversationSetup | None:
-        """
-        Set up complete conversation context from database.
-
-        Handles:
-        1. Tenant configuration resolution
-        2. Channel instance lookup
-        3. Contact/thread creation or retrieval
-        4. Active flow selection
-
-        Args:
-            sender_number: WhatsApp sender number (with whatsapp: prefix)
-            receiver_number: WhatsApp receiver number (with whatsapp: prefix)
-
-        Returns:
-            ConversationSetup with all required data, or None if setup failed
-        """
+    def setup_conversation(self, sender_number: str, receiver_number: str) -> ConversationSetup:
         try:
-            # Step 1: Get tenant configuration
             project_context = self.tenant_service.get_project_context_by_channel_identifier(
                 receiver_number
             )
 
             if not project_context:
-                logger.warning(
-                    "No tenant configuration found for WhatsApp number: %s", receiver_number
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"No tenant configuration found for WhatsApp number: {receiver_number}",
                 )
-                return None
 
             tenant_id = project_context.tenant_id
             logger.info("Found tenant %s for channel %s", tenant_id, receiver_number)
 
-            # Step 2: Get channel instance
             channel_instance = find_channel_instance_by_identifier(self.session, receiver_number)
             if not channel_instance:
-                logger.error(
-                    "No channel instance found for number %s (tenant %s)",
-                    receiver_number,
-                    tenant_id,
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"No channel instance found for number {receiver_number}",
                 )
-                return None
 
-            # Step 3: Ensure contact/thread exist
             contact = get_or_create_contact(
                 self.session,
                 tenant_id,
@@ -110,6 +66,8 @@ class WebhookDatabaseHandler:
                 phone_number=sender_number.replace("whatsapp:", ""),
                 display_name=None,
             )
+            if not contact or not contact.id:
+                raise HTTPException(status_code=500, detail="Failed to create/retrieve contact")
 
             thread = get_or_create_thread(
                 self.session,
@@ -118,13 +76,15 @@ class WebhookDatabaseHandler:
                 contact_id=contact.id,
                 flow_id=None,
             )
+            if not thread or not thread.id:
+                raise HTTPException(status_code=500, detail="Failed to create/retrieve thread")
 
-            # Step 4: Get and select active flow
             selected_flow = self._select_active_flow(channel_instance, tenant_id)
-            if not selected_flow:
-                return None
+            if not selected_flow or not selected_flow.flow_id or not selected_flow.name:
+                raise HTTPException(
+                    status_code=422, detail=f"No active flows found for channel {receiver_number}"
+                )
 
-            # Commit all database changes
             self.session.commit()
 
             logger.info(
@@ -134,44 +94,38 @@ class WebhookDatabaseHandler:
                 tenant_id,
             )
 
-            # Extract flow definition while session is active
             flow_definition = selected_flow.definition
+            if not flow_definition:
+                raise HTTPException(status_code=500, detail="Flow definition is empty")
 
             return ConversationSetup(
                 tenant_id=tenant_id,
-                project_context=project_context,
-                channel_instance=channel_instance,
-                contact=contact,
-                thread=thread,
-                selected_flow=selected_flow,
-                # Extract IDs and data for use after session closes
+                channel_instance_id=channel_instance.id,
                 thread_id=thread.id,
                 contact_id=contact.id,
-                channel_instance_id=channel_instance.id,
-                selected_flow_id=selected_flow.id,
-                flow_definition=flow_definition,
-                flow_name=selected_flow.name,
                 flow_id=selected_flow.flow_id,
+                flow_name=selected_flow.name,
+                selected_flow_id=selected_flow.flow_id,
+                flow_definition=flow_definition,
+                project_context=project_context,
             )
 
-        except Exception as e:
-            logger.error("Failed to setup conversation for tenant lookup: %s", e)
+        except HTTPException:
             self.session.rollback()
-            return None
+            raise
+        except Exception as e:
+            logger.error("Failed to setup conversation: %s", e)
+            self.session.rollback()
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
     def _select_active_flow(
         self, channel_instance: ChannelInstance, tenant_id: UUID
     ) -> FlowModel | None:
-        """
-        Select the first active flow for the given channel instance.
-
-        Args:
-            channel_instance: Channel instance to find flows for
-            tenant_id: Tenant ID for logging
-
-        Returns:
-            Selected active flow or None if no active flows found
-        """
+        """Select the first active flow for the given channel instance."""
+        if not channel_instance.id:
+            logger.error("Channel instance has no ID")
+            return None
+            
         flows = get_flows_by_channel_instance(self.session, channel_instance.id)
         if not flows:
             logger.error(

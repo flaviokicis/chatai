@@ -28,6 +28,8 @@ from app.core.types import EventDict
 
 
 class ConversationStore(Protocol):
+    _r: Any
+    
     def load(self, user_id: str, agent_type: str) -> AgentState | None: ...
 
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None: ...
@@ -237,6 +239,69 @@ class RedisStore:
             "Please check your langchain-community version."
         )
         raise RuntimeError(msg)
+
+    def set_escalation_timestamp(self, user_id: str, agent_type: str) -> None:
+        """Mark when escalation occurred for delayed context clearing.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type that escalated
+        """
+        import time
+
+        key = f"{self._ns}:escalation:{user_id}:{agent_type}"
+        self._r.setex(key, 86400, str(time.time()))
+
+    def get_escalation_timestamp(self, user_id: str, agent_type: str) -> float | None:
+        """Get escalation timestamp if exists.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type
+
+        Returns:
+            Timestamp of escalation or None if not escalated
+        """
+        key = f"{self._ns}:escalation:{user_id}:{agent_type}"
+        value = self._r.get(key)
+        if value:
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def clear_escalation_timestamp(self, user_id: str, agent_type: str) -> None:
+        """Clear escalation timestamp.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type
+        """
+        key = f"{self._ns}:escalation:{user_id}:{agent_type}"
+        self._r.delete(key)
+
+    def should_clear_context_after_escalation(
+        self, user_id: str, agent_type: str, grace_period_seconds: int
+    ) -> bool:
+        """Check if enough time has passed since escalation to clear context.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type
+            grace_period_seconds: How long to wait before clearing
+
+        Returns:
+            True if grace period has passed and context should be cleared
+        """
+        import time
+
+        escalation_time = self.get_escalation_timestamp(user_id, agent_type)
+        if escalation_time is None:
+            return False
+
+        elapsed = time.time() - escalation_time
+        return elapsed >= grace_period_seconds
 
     def clear_chat_history(self, user_id: str, agent_type: str | None = None) -> int:
         """Clear chat history for a user and optionally specific agent type.

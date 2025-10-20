@@ -9,7 +9,9 @@ from __future__ import annotations
 import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
+from app.core.app_context import AppContext
 from app.core.llm import LLMClient
 from app.core.session import SessionManager
 from app.flow_core.compiler import FlowCompiler
@@ -20,7 +22,7 @@ from .flow_request import FlowRequest
 from .flow_response import FlowProcessingResult, FlowResponse
 
 if TYPE_CHECKING:
-    from uuid import UUID
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +77,7 @@ class FlowProcessor:
 
         logger.info("FlowProcessor initialized")
 
-    async def process_flow(self, request: FlowRequest, app_context: Any) -> FlowResponse:
+    async def process_flow(self, request: FlowRequest, app_context: AppContext) -> FlowResponse:
         """Process a flow request with external action handling.
 
         Args:
@@ -143,11 +145,9 @@ class FlowProcessor:
             ctx.tenant_id = request.tenant_id
             ctx.channel_id = request.channel_id
 
-            # Validate flow metadata and get flow_id with runtime safety
-            from app.core.types import validate_flow_metadata
-
+            # Get flow_id from metadata
             try:
-                validated_metadata = validate_flow_metadata(request.flow_metadata)
+                validated_metadata = request.flow_metadata
                 ctx.flow_id = validated_metadata["selected_flow_id"]
             except ValueError as e:
                 logger.warning(f"Flow metadata validation failed: {e}, using fallback")

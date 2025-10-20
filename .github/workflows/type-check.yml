@@ -1,0 +1,81 @@
+name: Type Safety Check
+
+on:
+  push:
+    branches: [main, feat/*, fix/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  mypy-strict:
+    name: MyPy Strict Type Checking
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      
+      - name: Install dependencies
+        run: |
+          cd backend
+          uv sync
+      
+      - name: Run mypy --strict on core modules
+        run: |
+          cd backend
+          source .venv/bin/activate
+          mypy --strict \
+            app/services/processing_cancellation_manager.py \
+            app/whatsapp/types/ \
+            app/db/types.py \
+            app/whatsapp/message_processor.py \
+            app/core/flow_processor.py \
+            app/flow_core/runner.py
+      
+      - name: Run mypy on entire app (non-strict for now)
+        run: |
+          cd backend
+          source .venv/bin/activate
+          mypy app/
+  
+  pyright:
+    name: Pyright Type Checking
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      
+      - name: Install dependencies
+        run: |
+          cd backend
+          uv sync
+      
+      - name: Install pyright
+        run: npm install -g pyright
+      
+      - name: Run pyright on core modules
+        run: |
+          cd backend
+          pyright \
+            app/services/processing_cancellation_manager.py \
+            app/whatsapp/types/ \
+            app/db/types.py \
+            app/whatsapp/message_processor.py \
+            app/core/flow_processor.py \
+            app/flow_core/runner.py
+

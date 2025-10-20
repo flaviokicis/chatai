@@ -14,7 +14,10 @@ from __future__ import annotations
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Literal
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Literal
+
+from app.whatsapp.types import BufferedMessage
 
 if TYPE_CHECKING:
     from app.core.state import ConversationStore
@@ -54,37 +57,20 @@ class ProcessingCancellationManager:
         self._store = store
 
     def add_message_to_buffer(self, session_id: str, message: str) -> str:
-        """Add message to buffer and return its unique ID.
-        
-        This is idempotent - calling with same message multiple times
-        (e.g., webhook retries) will not duplicate it.
-        
-        Args:
-            session_id: Unique session identifier
-            message: Message content
-            
-        Returns:
-            Message ID (format: "{sequence}:{timestamp}")
-        """
         timestamp = time.time()
         
         buffer_key = f"{self.MESSAGE_BUFFER_PREFIX}{session_id}"
         seq_key = f"{self.SEQUENCE_PREFIX}{session_id}"
         time_key = f"{self.LAST_MESSAGE_TIME_PREFIX}{session_id}"
         
-        pipeline = self._store._r.pipeline()
-        pipeline.incr(seq_key)
-        pipeline.lrange(buffer_key, 0, -1)
-        
-        results = pipeline.execute()
-        sequence = int(results[0])
-        existing_messages = results[1]
+        sequence = self._store._r.incr(seq_key)
+        existing_messages = self._store._r.lrange(buffer_key, 0, -1)
         
         for existing_msg_json in existing_messages:
             try:
-                existing_data: dict[str, Any] = json.loads(existing_msg_json)
+                existing_data: dict[str, object] = json.loads(existing_msg_json)
                 if existing_data.get("content") == message:
-                    msg_id: str = existing_data.get("id", f"{sequence}:{timestamp:.6f}")
+                    msg_id = str(existing_data.get("id", f"{sequence}:{timestamp:.6f}"))
                     logger.debug(
                         f"[{session_id}] Message already in buffer (webhook retry?): {message[:50]}..."
                     )
@@ -93,7 +79,7 @@ class ProcessingCancellationManager:
                 continue
         
         message_id = f"{sequence}:{timestamp:.6f}"
-        msg_data: dict[str, Any] = {
+        msg_data: dict[str, object] = {
             "id": message_id,
             "sequence": sequence,
             "content": message,
@@ -168,7 +154,7 @@ class ProcessingCancellationManager:
             time_since_last_ms = self._get_time_since_last_message_ms(session_id)
             
             if time_since_last_ms >= inactivity_ms:
-                count = self._get_message_count(session_id)
+                count = self.get_message_count(session_id)
                 logger.info(
                     f"[{session_id}] Message #{my_sequence}: Inactivity period reached "
                     f"({time_since_last_ms:.0f}ms >= {inactivity_ms}ms), "
@@ -182,41 +168,32 @@ class ProcessingCancellationManager:
                     f"({time_since_last_ms:.0f}ms / {inactivity_ms}ms)"
                 )
     
-    def get_individual_messages(
-        self, session_id: str
-    ) -> list[dict[str, Any]]:
-        """Get individual messages without aggregating or clearing.
-        
-        Use this to save individual messages to database before aggregation.
-        
-        Args:
-            session_id: Session identifier
-            
-        Returns:
-            List of individual message dicts with content, timestamp, sequence, id
-        """
+    def get_individual_messages(self, session_id: str) -> list[BufferedMessage]:
         buffer_key = f"{self.MESSAGE_BUFFER_PREFIX}{session_id}"
         msg_data_list = self._store._r.lrange(buffer_key, 0, -1)
         
         if not msg_data_list:
             return []
         
-        messages: list[dict[str, Any]] = []
+        messages: list[BufferedMessage] = []
         for msg_json in msg_data_list:
             try:
-                data: dict[str, Any] = json.loads(msg_json)
-                content: str = str(data.get("content", ""))
-                timestamp: float = float(data.get("timestamp", 0.0))
-                sequence: int = int(data.get("sequence", 0))
-                message_id: str = str(data.get("id", ""))
+                data: dict[str, object] = json.loads(str(msg_json))
+                content = str(data.get("content", ""))
                 
                 if content.strip():
-                    messages.append({
-                        "content": content,
-                        "timestamp": timestamp,
-                        "sequence": sequence,
-                        "id": message_id,
-                    })
+                    timestamp_raw = data.get("timestamp", 0.0)
+                    sequence_raw = data.get("sequence", 0)
+                    timestamp = float(timestamp_raw) if isinstance(timestamp_raw, (int, float, str)) else 0.0
+                    sequence = int(sequence_raw) if isinstance(sequence_raw, (int, float, str)) else 0
+                    messages.append(
+                        BufferedMessage(
+                            content=content,
+                            timestamp=timestamp,
+                            sequence=sequence,
+                            id=str(data.get("id", "")),
+                        )
+                    )
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
                 logger.warning(f"[{session_id}] Failed to parse message: {e}")
                 continue
@@ -244,7 +221,7 @@ class ProcessingCancellationManager:
         pipeline.delete(buffer_key, seq_key, time_key)
         results = pipeline.execute()
         
-        msg_data_list: list[Any] = results[0]
+        msg_data_list: list[object] = results[0]
         
         if not msg_data_list:
             logger.debug(f"[{session_id}] No messages to aggregate")
@@ -253,10 +230,12 @@ class ProcessingCancellationManager:
         messages_with_timestamps: list[tuple[str, float, int]] = []
         for msg_json in msg_data_list:
             try:
-                data: dict[str, Any] = json.loads(msg_json)
-                content: str = str(data.get("content", ""))
-                timestamp: float = float(data.get("timestamp", 0.0))
-                sequence: int = int(data.get("sequence", 0))
+                data: dict[str, object] = json.loads(str(msg_json))
+                content = str(data.get("content", ""))
+                timestamp_raw = data.get("timestamp", 0.0)
+                sequence_raw = data.get("sequence", 0)
+                timestamp = float(timestamp_raw) if isinstance(timestamp_raw, (int, float, str)) else 0.0
+                sequence = int(sequence_raw) if isinstance(sequence_raw, (int, float, str)) else 0
                 
                 if content.strip():
                     messages_with_timestamps.append((content, timestamp, sequence))
@@ -340,7 +319,7 @@ class ProcessingCancellationManager:
         elapsed_ms = (time.time() - last_time) * 1000
         return elapsed_ms
     
-    def _get_message_count(self, session_id: str) -> int:
+    def get_message_count(self, session_id: str) -> int:
         """Get number of messages in buffer.
         
         Args:
@@ -377,11 +356,17 @@ class ProcessingCancellationManager:
         
         formatted_messages = []
         for content, timestamp, sequence in sorted_msgs:
-            dt = datetime.fromtimestamp(timestamp)
+            dt = datetime.fromtimestamp(timestamp, UTC)
             time_str = dt.strftime("%H:%M:%S")
             formatted_messages.append(f"[{time_str}] {content.strip()}")
         
         return "\n".join(formatted_messages)
+    
+    def check_cancellation_and_raise(self, session_id: str, stage: str = "processing") -> None:
+        if self.get_message_count(session_id) > 0:
+            raise ProcessingCancelledException(
+                f"Processing cancelled at {stage}: newer message arrived for session {session_id}"
+            )
 
 
 class ProcessingCancelledException(Exception):

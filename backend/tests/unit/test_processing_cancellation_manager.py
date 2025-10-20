@@ -11,6 +11,7 @@ class FakeRedis:
     def __init__(self):
         self._lists = {}
         self._strings = {}
+        self._counters = {}
 
     def lrange(self, key, start, end):
         items = self._lists.get(key, [])
@@ -29,14 +30,23 @@ class FakeRedis:
 
     def get(self, key):
         return self._strings.get(key)
+    
+    def set(self, key, value):
+        self._strings[key] = value
 
     def setex(self, key, ttl, value):
         self._strings[key] = value
+    
+    def incr(self, key):
+        current = self._counters.get(key, 0)
+        self._counters[key] = current + 1
+        return self._counters[key]
 
     def delete(self, *keys):
         for key in keys:
             self._lists.pop(key, None)
             self._strings.pop(key, None)
+            self._counters.pop(key, None)
 
     def pipeline(self):
         return FakeRedisPipeline(self)
@@ -52,9 +62,25 @@ class FakeRedisPipeline:
     def lrange(self, key, start, end):
         self._commands.append(("lrange", key, start, end))
         return self
+    
+    def rpush(self, key, value):
+        self._commands.append(("rpush", key, value))
+        return self
+    
+    def set(self, key, value):
+        self._commands.append(("set", key, value))
+        return self
+    
+    def setex(self, key, ttl, value):
+        self._commands.append(("setex", key, ttl, value))
+        return self
+    
+    def expire(self, key, ttl):
+        self._commands.append(("expire", key, ttl))
+        return self
 
-    def delete(self, key):
-        self._commands.append(("delete", key))
+    def delete(self, *keys):
+        self._commands.append(("delete", keys))
         return self
 
     def execute(self):
@@ -62,9 +88,21 @@ class FakeRedisPipeline:
         for cmd in self._commands:
             if cmd[0] == "lrange":
                 results.append(self._redis.lrange(cmd[1], cmd[2], cmd[3]))
-            elif cmd[0] == "delete":
-                self._redis.delete(cmd[1])
+            elif cmd[0] == "rpush":
+                self._redis.rpush(cmd[1], cmd[2])
+                results.append(len(self._redis._lists.get(cmd[1], [])))
+            elif cmd[0] == "set":
+                self._redis.set(cmd[1], cmd[2])
+                results.append("OK")
+            elif cmd[0] == "setex":
+                self._redis.setex(cmd[1], cmd[2], cmd[3])
+                results.append("OK")
+            elif cmd[0] == "expire":
+                self._redis.expire(cmd[1], cmd[2])
                 results.append(1)
+            elif cmd[0] == "delete":
+                self._redis.delete(*cmd[1])
+                results.append(len(cmd[1]))
         return results
 
 

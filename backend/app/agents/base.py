@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from app.core.agent_base import Agent
 from app.core.messages import AgentResult, InboundMessage, OutboundMessage
+from app.flow_core.constants import ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS
 from app.flow_core.runner import FlowTurnRunner
 from app.flow_core.state import FlowContext
 
-# Tool imports removed - no longer needed
-
-if TYPE_CHECKING:  # pragma: no cover - import-time only for typing
+if TYPE_CHECKING:
     from app.core.llm import LLMClient
     from app.core.state import ConversationStore
     from app.core.tools import HumanHandoffTool
@@ -33,22 +33,58 @@ class BaseAgent(Agent):
         super().__init__(user_id)
         self.deps = deps
 
-    # Helper used by concrete agents
-    def _escalate(self, reason: str, summary: dict[str, Any]) -> AgentResult:
-        self.deps.handoff.escalate(self.user_id, reason, summary)
+    async def _clear_context_after_delay(
+        self, user_id: str, agent_type: str, delay_seconds: int
+    ) -> None:
+        """Background task to clear context after grace period.
 
-        # Clear chat history to prevent context bleeding when user re-engages
+        Args:
+            user_id: User identifier
+            agent_type: Agent type
+            delay_seconds: How long to wait before clearing
+        """
+        await asyncio.sleep(delay_seconds)
+
         if hasattr(self.deps.store, "clear_chat_history"):
             try:
-                deleted_keys = self.deps.store.clear_chat_history(self.user_id, self.agent_type)
+                deleted_keys = self.deps.store.clear_chat_history(user_id, agent_type)
                 logger.info(
-                    "Cleared %d chat history keys for user %s after handoff",
+                    "Cleared %d chat history keys for user %s after %ds grace period",
                     deleted_keys,
-                    self.user_id,
+                    user_id,
+                    delay_seconds,
                 )
             except Exception as e:
                 logger.warning(
-                    "Failed to clear chat history after handoff for user %s: %s", self.user_id, e
+                    "Failed to clear chat history after grace period for user %s: %s",
+                    user_id,
+                    e,
+                )
+
+        if hasattr(self.deps.store, "clear_escalation_timestamp"):
+            self.deps.store.clear_escalation_timestamp(user_id, agent_type)
+
+    def _escalate(self, reason: str, summary: dict[str, Any]) -> AgentResult:
+        self.deps.handoff.escalate(self.user_id, reason, summary)
+
+        if hasattr(self.deps.store, "set_escalation_timestamp"):
+            self.deps.store.set_escalation_timestamp(self.user_id, self.agent_type)
+            logger.info(
+                "Escalation marked for user %s. Context will be cleared after %ds grace period.",
+                self.user_id,
+                ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS,
+            )
+
+            try:
+                asyncio.create_task(
+                    self._clear_context_after_delay(
+                        self.user_id, self.agent_type, ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS
+                    )
+                )
+            except RuntimeError:
+                logger.warning(
+                    "Could not schedule delayed context clear (no event loop). "
+                    "Context will be cleared on next user message after grace period."
                 )
 
         return AgentResult(
@@ -154,7 +190,29 @@ class FlowAgent(BaseAgent):
         return stored
 
     def handle(self, message: InboundMessage) -> AgentResult:  # type: ignore[no-untyped-def]
-        # Load state
+        if hasattr(self.deps.store, "should_clear_context_after_escalation"):
+            if self.deps.store.should_clear_context_after_escalation(
+                self.user_id, self.agent_type, ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS
+            ):
+                if hasattr(self.deps.store, "clear_chat_history"):
+                    try:
+                        deleted_keys = self.deps.store.clear_chat_history(
+                            self.user_id, self.agent_type
+                        )
+                        logger.info(
+                            "Cleared %d chat history keys for user %s (grace period expired)",
+                            deleted_keys,
+                            self.user_id,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to clear expired chat history for user %s: %s",
+                            self.user_id,
+                            e,
+                        )
+                if hasattr(self.deps.store, "clear_escalation_timestamp"):
+                    self.deps.store.clear_escalation_timestamp(self.user_id, self.agent_type)
+
         stored = self.deps.store.load(self.user_id, self.agent_type) or {}
         agent_state = self.load_agent_state(stored)
 

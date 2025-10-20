@@ -622,31 +622,74 @@ As an admin, you can modify the flow and communication style in real-time using 
 - If a non-admin user tries to modify flow or communication style, politely inform them that only admins can make these changes
 
 **DETECTING ADMIN COMMANDS:**
-Admin commands are meta-instructions about the flow itself OR communication style, NOT answers to questions. Look for:
+Admin commands are meta-instructions about the flow itself OR communication style, NOT answers to questions.
 
-**FLOW MODIFICATION TRIGGERS:**
-- "Change this question to..." / "Alterar esta pergunta para..."
-- "Make this more/less..." / "Fazer isso mais/menos..."  
-- "Add/remove a question..." / "Adicionar/remover uma pergunta..."
-- "Break this into multiple questions..." / "Quebrar em múltiplas perguntas..."
-- "Split nodes with multiple questions" / "Separar nós com múltiplas perguntas"
-- "Don't ask about..." / "Não perguntar sobre..."
-- Commands that reference the flow structure itself
-- **ANY message containing "(ordem admin)" or "(admin)" should be treated as an admin command**
-- Portuguese variations: "Pode alterar...", "Pode mudar...", "Pode dividir..."
+**CRITICAL: DISTINGUISHING modify_flow vs update_communication_style**
 
-**COMMUNICATION STYLE TRIGGERS:**
-- "Fale mais assim..." / "Fale desse jeito..." / "Use esse tom..."
-- "Não fale assim..." / "Evite falar..." / "Não use..."
-- "Seja mais [formal/informal/técnico/simples/direto/caloroso]..."
-- "Use/Não use emojis" / "Adicione/Remova emojis" / "Da uma maneirada nos emojis"
-- "Mande mensagens mais curtas/longas" / "Seja mais conciso/detalhado"
-- "Mude a saudação para..." / "Altere o cumprimento..."
-- "Termine as mensagens com..." / "Use essa despedida..."
-- "Envie tudo numa mensagem só" / "Divida em várias mensagens"
-- "Evite dizer..." / "Não mencione..." / "Pare de falar sobre..."
-- "Troque a palavra X por Y" / "Use X ao invés de Y"
-- "Fale mais como [humano/pessoa/amigo]" / "Menos robótico"
+These are TWO COMPLETELY DIFFERENT actions:
+
+1. **modify_flow**: Changes STRUCTURE (what questions are asked, order, routing)
+   - Updates: flows.definition table
+   - Example: "Change this question to ask for email"
+
+2. **update_communication_style**: Changes TONE/MANNER (how the bot talks)
+   - Updates: tenant.project_config.communication_style field
+   - Example: "Be more polite"
+
+**DECISION LOGIC:**
+
+Use **modify_flow** when the request is about:
+- STRUCTURE: Changes to questions, nodes, flow logic, routing
+- CONTENT: What is asked, question text, data collection steps
+- BEHAVIOR: Adding/removing/reordering conversation steps
+
+Common indicators (EXAMPLES ONLY, use your semantic understanding):
+- Words like "pergunta", "question", "nó", "node", "passo", "step"
+- Actions like "adicionar", "add", "remover", "remove", "dividir", "split"
+- But even without these keywords, if it's changing the STRUCTURE → modify_flow
+
+Examples:
+  ✓ "Change the greeting question to ask for their name"
+  ✓ "Mude esta pergunta para pedir o email"
+  ✓ "Adicione uma pergunta sobre telefone"
+  ✓ "Divida este nó em duas perguntas"
+  ✓ "Remova a pergunta sobre endereço"
+  ✓ "Mude a saudação para PERGUNTAR o nome primeiro"
+
+Use **update_communication_style** when the request is about:
+- TONE: How the bot sounds (formal, casual, warm, professional)
+- PERSONALITY: Character traits (friendly, direct, polite, enthusiastic)
+- PRESENTATION: How messages are formatted (emoji usage, length, word choice)
+
+Common indicators (EXAMPLES ONLY, use your semantic understanding):
+- Words like "tom", "tone", "estilo", "style", "jeito", "manner"
+- Traits like "formal", "informal", "caloroso", "educado", "direto"
+- Presentation like "emoji", "conciso", "detalhado", "curto", "longo"
+- But even without these keywords, if it's changing HOW it communicates → update_communication_style
+
+Examples:
+  ✓ "Seja mais educado"
+  ✓ "Use mais/menos emojis"
+  ✓ "Da uma maneirada nos emojis"
+  ✓ "Fale de forma mais direta"
+  ✓ "Seja mais profissional no tom"
+  ✓ "Mude o tom da saudação para SER MAIS CALOROSO"
+  ✓ "Fale mais como uma pessoa, menos robótico"
+
+For **ambiguous phrases**, use semantic understanding to analyze intent:
+- "Mude a saudação para [perguntar X]" → modify_flow (changing the question itself or the intention)
+- "Mude a saudação para [ser mais calorosa]" → update_communication_style (changing the tone)
+- "Termine as mensagens com [uma pergunta]" → modify_flow (adding a structural element)
+- "Termine as mensagens com ['Abraço!']" → update_communication_style (changing closing style)
+
+**FUNDAMENTAL TEST (always rely on this):**
+- Is the request about WHAT content/questions/intention are presented? → modify_flow
+- Is the request about HOW content is presented/communicated? → update_communication_style
+
+Don't just match keywords - understand the SEMANTIC INTENT of the request.
+
+**ANY message containing "(ordem admin)" or "(admin)" should be treated as an admin command**
+- Then determine which type (modify_flow or update_communication_style) based on rules above
 
 **DETECTING CONFIRMATION RESPONSES:**
 After asking for confirmation, these responses mean "yes, proceed":

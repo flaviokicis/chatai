@@ -12,11 +12,12 @@ class WhatsAppAdapter(Protocol):
     webhook response, and sending any follow-up messages with delays.
     """
 
-    def validate_and_parse(self, request: Request, x_signature: str | None) -> dict[str, Any]:
+    async def validate_and_parse(self, request: Request, x_signature: str | None) -> dict[str, Any]:
         """Validate the inbound request and return parsed params.
 
         Must raise HTTPException on invalid signature.
         """
+        ...
 
     def build_sync_response(self, text: str) -> Response:
         """Build the synchronous response body to return to the provider webhook."""

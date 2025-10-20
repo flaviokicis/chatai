@@ -80,7 +80,7 @@ class FlowTurnRunner:
         return FlowContext(
             user_id="",
             session_id="",
-            tenant_id="",
+            tenant_id=None,
             channel_id="",
             flow_id="",
             current_node_id="",
@@ -165,7 +165,7 @@ class FlowTurnRunner:
                         query=user_message,
                         chat_history=chat_history,
                         business_context=business_context,
-                        thread_id=ctx.session_id,  # Use session_id as thread_id for tracking
+                        thread_id=None,  # Thread ID not available in flow context
                     )
 
                     # Store RAG results in context (only on success with context)
@@ -210,7 +210,7 @@ class FlowTurnRunner:
             if responder_output.messages:
                 responder_output.tool_result.metadata["messages"] = responder_output.messages
 
-            llm_response = {
+            llm_response: dict[str, object] = {
                 "tool_calls": [
                     {
                         "name": responder_output.tool_name,
@@ -236,12 +236,15 @@ class FlowTurnRunner:
                 )
 
             # Step 4: Return the primary, typed result, enriched with messages
-            if final_response.get("tool_calls"):
-                args = final_response["tool_calls"][0].get("arguments", {})
-                msgs = args.get("messages")
-                if msgs:
-                    # IMPORTANT: Replace messages with feedback messages, don't just setdefault
-                    tool_result.metadata["messages"] = msgs
+            tool_calls_obj = final_response.get("tool_calls")
+            if isinstance(tool_calls_obj, list) and len(tool_calls_obj) > 0:
+                first_tool_call = tool_calls_obj[0]
+                if isinstance(first_tool_call, dict):
+                    args = first_tool_call.get("arguments", {})
+                    if isinstance(args, dict):
+                        msgs = args.get("messages")
+                        if msgs:
+                            tool_result.metadata["messages"] = msgs
 
             return tool_result
 
