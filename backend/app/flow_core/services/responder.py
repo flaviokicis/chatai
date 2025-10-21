@@ -616,6 +616,10 @@ When modifying the communication style, use that as your base and make the reque
         
         return f"""
 ### ADMIN FLOW MODIFICATION AND COMMUNICATION STYLE
+
+**🔐 YOU ARE CURRENTLY TALKING TO AN ADMIN USER 🔐**
+This user has admin privileges and can modify flows/communication style.
+
 As an admin, you can modify the flow and communication style in real-time using the PerformAction tool with TWO SPECIAL ACTIONS:
 
 1. **"modify_flow"** - For changing the flow structure itself
@@ -626,19 +630,32 @@ As an admin, you can modify the flow and communication style in real-time using 
 - Even if these actions appear in the tool, DO NOT use them for non-admin users
 - If a non-admin user tries to modify flow or communication style, politely inform them that only admins can make these changes
 
-**DETECTING ADMIN COMMANDS:**
-Admin commands are meta-instructions about the flow itself OR communication style, NOT answers to questions.
+**DETECTING ADMIN COMMANDS - MANDATORY CHECK FOR ADMINS:**
 
-**AUTO-DETECTION PATTERNS** (for admins - check these FIRST):
-- Instruções diretas negativas: "Nao fale X", "Nao diga X", "Para de X", "Deixa de X"
-- Instruções diretas positivas: "Fale X", "Diga X", "Use X", "Mude para X", "Seja X"
-- Críticas ao estilo: "Fica estranho", "Muito robotico", "Parece bot", "Soa artificial"
-- Pedidos de mudança de tom: "Mais natural", "Menos formal", "Mais direto", "Sem formalidade"
+**STEP 1: IF USER IS ADMIN, CHECK THIS FIRST (before anything else):**
 
-Se o usuário É ADMIN e a mensagem se encaixa nos padrões acima → É comando admin (modify_flow ou update_communication_style)
+Does the message contain ANY of these patterns?
+- "Nao fale X" / "Não fale X" / "Para de falar X"
+- "Fale X" / "Diga X" (when NOT answering flow question)
+- "Fica estranho" / "Muito robótico" / "Soa artificial" / "Parece script"
+- "Mais natural" / "Menos formal" / "Mais direto" / "Mais humano"
+- "Use X" / "Seja X" (when referring to communication style)
+- ANY explicit criticism or instruction about HOW the bot communicates
 
-Marcadores explícitos (sempre admin command):
-- Mensagens contendo "(ordem admin)" ou "(admin)"
+**IF YES → THIS IS AN ADMIN COMMAND, NOT A FLOW ANSWER**
+
+**STEP 2: Determine type:**
+- About TONE/STYLE/WORDS? → update_communication_style
+- About WHAT questions to ask? → modify_flow
+
+**STEP 3: Follow confirmation pattern:**
+1. Explain what you'll change
+2. Ask: "Confirma essa modificação?"
+3. Wait for confirmation
+4. Execute with proper action
+
+**CRITICAL: DO NOT just reformulate once - that's not what the admin wants!**
+When an admin gives instructions about communication (tone, style, what to say/not say), they want a PERMANENT change saved to the system, not a temporary one-time adjustment.
 
 **CRITICAL: DISTINGUISHING modify_flow vs update_communication_style**
 
