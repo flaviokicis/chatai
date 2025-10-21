@@ -361,12 +361,14 @@ class WhatsAppMessageProcessor:
         if len(message_text) > self.MAX_INPUT_CHARS:
             message_text = message_text[: self.MAX_INPUT_CHARS]
 
-        logger.info(
-            "Incoming WhatsApp message from %s to %s: %s",
-            sender_number,
-            receiver_number,
-            message_text,
-        )
+        # Only log real messages (not delivery receipts/status updates)
+        if sender_number and receiver_number:
+            logger.info(
+                "Incoming WhatsApp message from %s to %s: %s",
+                sender_number,
+                receiver_number,
+                message_text,
+            )
 
         from app.whatsapp.types import validate_extracted_message_data
         
@@ -684,7 +686,7 @@ class WhatsAppMessageProcessor:
 
         # Send WhatsApp follow-ups
         if len(messages) > 1:
-            await self._send_whatsapp_followups(message_data, messages, app_context)
+            await self._send_whatsapp_followups(message_data, messages, conversation_setup, app_context)
 
         # Mark processing complete AFTER message is sent
         # This ensures the cancellation window stays open until the message is actually delivered
@@ -775,6 +777,7 @@ class WhatsAppMessageProcessor:
         self,
         message_data: ExtractedMessageData,
         messages: list[dict[str, object]],
+        conversation_setup: ConversationSetup,
         app_context: AppContext,
     ) -> None:
         """Send WhatsApp follow-up messages."""
@@ -793,15 +796,13 @@ class WhatsAppMessageProcessor:
             state_data = cast("AgentState", {"reply_id": reply_id, "timestamp": int(datetime.now().timestamp())})
             app_context.store.save("system", key_suffix, state_data)
 
-            # Note: conversation_setup is not in scope here - this is a bug, commenting out for now
-            # self.adapter.send_followups(
-            #     message_data["sender_number"],
-            #     message_data["receiver_number"],
-            #     messages,
-            #     reply_id,
-            #     app_context.store,
-            #     conversation_setup,
-            # )
-            logger.warning("Follow-up messages disabled - conversation_setup not available in this scope")
+            self.adapter.send_followups(
+                message_data["sender_number"],
+                message_data["receiver_number"],
+                messages,
+                reply_id,
+                app_context.store,
+                conversation_setup,
+            )
         except Exception as e:
             logger.warning("Failed to send WhatsApp follow-ups: %s", e)
