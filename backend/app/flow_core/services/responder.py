@@ -629,6 +629,17 @@ As an admin, you can modify the flow and communication style in real-time using 
 **DETECTING ADMIN COMMANDS:**
 Admin commands are meta-instructions about the flow itself OR communication style, NOT answers to questions.
 
+**AUTO-DETECTION PATTERNS** (for admins - check these FIRST):
+- Instruções diretas negativas: "Nao fale X", "Nao diga X", "Para de X", "Deixa de X"
+- Instruções diretas positivas: "Fale X", "Diga X", "Use X", "Mude para X", "Seja X"
+- Críticas ao estilo: "Fica estranho", "Muito robotico", "Parece bot", "Soa artificial"
+- Pedidos de mudança de tom: "Mais natural", "Menos formal", "Mais direto", "Sem formalidade"
+
+Se o usuário É ADMIN e a mensagem se encaixa nos padrões acima → É comando admin (modify_flow ou update_communication_style)
+
+Marcadores explícitos (sempre admin command):
+- Mensagens contendo "(ordem admin)" ou "(admin)"
+
 **CRITICAL: DISTINGUISHING modify_flow vs update_communication_style**
 
 These are TWO COMPLETELY DIFFERENT actions:
@@ -692,9 +703,6 @@ For **ambiguous phrases**, use semantic understanding to analyze intent:
 - Is the request about HOW content is presented/communicated? → update_communication_style
 
 Don't just match keywords - understand the SEMANTIC INTENT of the request.
-
-**ANY message containing "(ordem admin)" or "(admin)" should be treated as an admin command**
-- Then determine which type (modify_flow or update_communication_style) based on rules above
 
 **DETECTING CONFIRMATION RESPONSES:**
 After asking for confirmation, these responses mean "yes, proceed":
