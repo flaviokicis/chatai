@@ -39,20 +39,20 @@ export function DocumentDetailDialog({
 }: DocumentDetailDialogProps): React.JSX.Element {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl font-semibold">
-            {document ? document.fileName : "Document details"}
+            {document ? document.fileName : "Detalhes do Documento"}
           </DialogTitle>
           <DialogDescription className="text-sm text-muted-foreground">
-            Inspect document metadata, generated chunks, and semantic hints.
+            Inspecione o conteúdo e metadados do documento.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {isLoading && (
             <div className="flex h-32 items-center justify-center text-muted-foreground">
-              Loading document details…
+              Carregando detalhes…
             </div>
           )}
 
@@ -61,46 +61,48 @@ export function DocumentDetailDialog({
               <section className="grid gap-4 rounded-lg border bg-muted/40 p-4 text-sm leading-relaxed">
                 <div className="grid gap-2">
                   <p>
-                    <span className="font-medium text-foreground">Document ID:</span>{" "}
+                    <span className="font-medium text-foreground">ID do Documento:</span>{" "}
                     <span className="text-muted-foreground">{document.id}</span>
                   </p>
                   <p>
-                    <span className="font-medium text-foreground">File type:</span>{" "}
+                    <span className="font-medium text-foreground">Tipo:</span>{" "}
                     <span className="uppercase tracking-wide text-muted-foreground">
                       {document.fileType}
                     </span>
                   </p>
                   <p>
-                    <span className="font-medium text-foreground">Uploaded:</span>{" "}
+                    <span className="font-medium text-foreground">Enviado:</span>{" "}
                     <span className="text-muted-foreground">
                       {new Date(document.createdAt).toLocaleString()}
                     </span>
                   </p>
                   {document.updatedAt && (
                     <p>
-                      <span className="font-medium text-foreground">Updated:</span>{" "}
+                      <span className="font-medium text-foreground">Atualizado:</span>{" "}
                       <span className="text-muted-foreground">
                         {new Date(document.updatedAt).toLocaleString()}
                       </span>
                     </p>
                   )}
-                  <p>
-                    <span className="font-medium text-foreground">Total chunks:</span>{" "}
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-foreground">Total de chunks:</span>
                     <Badge variant="secondary">{document.chunkCount}</Badge>
-                  </p>
+                  </div>
                 </div>
               </section>
 
-              <section className="space-y-2">
-                <h3 className="text-sm font-semibold uppercase text-muted-foreground">
-                  Document metadata
-                </h3>
-                {renderMetadata(document.metadata)}
-              </section>
+              {showTechnicalDetails && (
+                <section className="space-y-2">
+                  <h3 className="text-sm font-semibold uppercase text-muted-foreground">
+                    Metadados do Documento
+                  </h3>
+                  {renderMetadata(document.metadata)}
+                </section>
+              )}
 
               <section className="space-y-3">
                 <h3 className="text-sm font-semibold uppercase text-muted-foreground">
-                  Chunk breakdown
+                  {showTechnicalDetails ? "Detalhamento de Chunks" : "Conteúdo do Documento"}
                 </h3>
 
                 <div className="max-h-[480px] space-y-3 overflow-y-auto pr-2">
@@ -109,37 +111,42 @@ export function DocumentDetailDialog({
                       key={chunk.id}
                       className="rounded-lg border bg-background p-3 shadow-sm transition hover:border-primary/40"
                     >
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <Badge variant="outline">#{chunk.chunkIndex}</Badge>
-                        {chunk.category && (
-                          <Badge variant="secondary">{chunk.category}</Badge>
+                      <div className="flex items-center justify-between mb-3 pb-3 border-b border-border">
+                        <h4 className="text-sm font-semibold text-primary">
+                          Chunk {chunk.chunkIndex + 1}
+                        </h4>
+                        {showTechnicalDetails && (
+                          <div className="flex gap-2">
+                            {chunk.category && (
+                              <Badge variant="secondary" className="text-xs">
+                                {chunk.category}
+                              </Badge>
+                            )}
+                            <Badge variant="outline" className="text-xs">
+                              ID: {chunk.id.toString().slice(0, 8)}
+                            </Badge>
+                          </div>
                         )}
-                        <span>
-                          Created{" "}
-                          {chunk.createdAt
-                            ? new Date(chunk.createdAt).toLocaleString()
-                            : "—"}
-                        </span>
                       </div>
 
-                      <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
                         {chunk.content}
                       </p>
 
-                      {(chunk.keywords || chunk.possibleQuestions) && (
-                        <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+                      {showTechnicalDetails && (chunk.keywords || chunk.possibleQuestions) && (
+                        <div className="mt-4 pt-3 border-t border-border grid gap-3 text-xs">
                           {chunk.keywords && (
-                            <p>
-                              <span className="font-medium text-foreground">
-                                Keywords:
+                            <div className="rounded-md bg-muted/50 p-2">
+                              <span className="font-semibold text-foreground">
+                                Palavras-chave:
                               </span>{" "}
-                              {chunk.keywords}
-                            </p>
+                              <span className="text-muted-foreground">{chunk.keywords}</span>
+                            </div>
                           )}
                           {chunk.possibleQuestions && chunk.possibleQuestions.length > 0 && (
-                            <div>
-                              <p className="font-medium text-foreground">
-                                Possible questions:
+                            <div className="rounded-md bg-muted/50 p-2">
+                              <p className="font-semibold text-foreground mb-2">
+                                Perguntas possíveis:
                               </p>
                               <ul className="mt-1 list-disc space-y-1 pl-5">
                                 {chunk.possibleQuestions.map((question) => (
@@ -159,7 +166,7 @@ export function DocumentDetailDialog({
 
           {!isLoading && !document && (
             <div className="flex h-32 items-center justify-center text-muted-foreground">
-              Select a document to inspect its chunks.
+              Selecione um documento para inspecionar seu conteúdo.
             </div>
           )}
         </div>

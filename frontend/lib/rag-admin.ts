@@ -55,6 +55,14 @@ export interface DocumentDeleteResult {
   message: string;
 }
 
+export interface QueryHistoryItem {
+  id: string;
+  query: string;
+  timestamp: string;
+  resultCount: number;
+  sufficient: boolean;
+}
+
 export interface QueryChunk {
   id: string;
   content: string;

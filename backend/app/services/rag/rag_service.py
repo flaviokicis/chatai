@@ -566,6 +566,12 @@ class RAGService:
         """Get document details (including chunks) for a tenant."""
         return await self.vector_store.get_document_details(tenant_id, document_id)
     
+    async def update_document_metadata(
+        self, tenant_id: UUID, document_id: UUID, metadata: dict[str, Any]
+    ) -> bool:
+        """Update metadata for a document."""
+        return await self.vector_store.update_document_metadata(tenant_id, document_id, metadata)
+    
     async def get_tenant_stats(self, tenant_id: UUID) -> dict:
         """Get statistics for a tenant's documents.
         
