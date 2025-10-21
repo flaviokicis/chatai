@@ -438,15 +438,17 @@ PERGUNTA: {query_text}
 CONTEXTO:
 {result.get("context")}
 
-INSTRUÇÕES:
+INSTRUÇÕES CRÍTICAS:
+- Responda EXCLUSIVAMENTE em português brasileiro
+- NUNCA use palavras ou expressões em inglês
 - Seja direto e objetivo
 - Use números exatos do contexto
 - Se houver múltiplos valores relevantes (ex: LED vs luminária), mencione ambos
 - Inclua unidades de medida
-- Use formato brasileiro (19.872 lm com ponto, não vírgula)
+- Use formato brasileiro (19.872 lm com ponto como separador de milhares)
 - Adicione observações úteis se aplicável
 
-Responda em português brasileiro de forma profissional."""
+IMPORTANTE: Sua resposta deve ser 100% em português, sem nenhuma palavra em inglês."""
                 
                 response = await mini_llm.ainvoke(answer_prompt)
                 generated_answer = response.content if hasattr(response, 'content') else str(response)

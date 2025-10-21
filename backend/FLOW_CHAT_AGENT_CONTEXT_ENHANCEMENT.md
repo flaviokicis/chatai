@@ -288,3 +288,4 @@ Add the new section in `flow_chat_agent.py` line ~296, before "Action Types Avai
 
 This adds ~80-100 lines to the prompt but provides essential runtime context that will significantly improve edit quality.
 
+

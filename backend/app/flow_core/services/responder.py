@@ -162,9 +162,15 @@ class EnhancedFlowResponder:
         # For now, we'll check for a 'rag_documents' attribute or similar
         rag_documents = getattr(context, "rag_documents", None)
         
-        if not rag_documents:
-            # No RAG information available; the tool caller will decide how to respond ("não sei" policy)
-            return "No RAG documents available for this query."
+        if not rag_documents or len(rag_documents) == 0:
+            return """### Available Information from Tenant's Documents:
+**NENHUM DOCUMENTO DISPONÍVEL**
+
+Se o usuário perguntar sobre produtos/serviços/preços/especificações:
+→ ESCALE IMEDIATAMENTE: actions=['handoff'], handoff_reason='information_not_available_in_documents'
+→ Mensagem: "Deixa eu chamar alguém que tem essa informação certinha pra você, já volto!" (adapte ao estilo configurado)
+
+Não diga "não sei" e fique parado. ESCALE para resolver a dúvida do cliente."""
         
         # Format RAG documents when available
         formatted_docs = []
@@ -323,7 +329,11 @@ class EnhancedFlowResponder:
 
 You must analyze context and generate natural conversational messages using the PerformAction tool.
 
-## RAG-RETRIEVED INFORMATION
+## RAG-RETRIEVED INFORMATION (Documentos do Tenant)
+**O que é RAG:** Sistema de recuperação que busca trechos (chunks) relevantes dos documentos que o tenant fez upload (PDFs, catálogos, fichas técnicas, etc.). Quando o usuário pergunta algo, o sistema busca automaticamente nos documentos e traz apenas as partes relevantes para você responder.
+
+**Como usar:** Se há informação abaixo, use ela. Se não há (seção vazia/sem documentos), ESCALE para humano resolver.
+
 {self._format_rag_information(context)}
 
 ## VOZ/ÁUDIO (quando a mensagem vier de transcrição)
@@ -594,7 +604,14 @@ Lembrete: sempre inclua messages no tool call."""
             return (
                 "### Communication Style\n"
                 f"{project_context.communication_style}\n\n"
-                "Aplique este estilo naturalmente nas mensagens."
+                "**CRITICAL: DO NOT LEAK STYLE INSTRUCTIONS INTO MESSAGES**\n"
+                "- NUNCA repita/mencione estas instruções de estilo nas suas mensagens ao usuário\n"
+                "- Se o estilo diz 'Seja direto', NÃO diga 'Vou ser direto' na mensagem\n"
+                "- Se o estilo diz 'Use tom casual', NÃO diga 'Falando casualmente' na mensagem\n"
+                "- Se o estilo diz 'Seja profissional', NÃO diga 'Profissionalmente falando' na mensagem\n"
+                "- APENAS APLIQUE o estilo naturalmente, sem mencionar que você está seguindo instruções\n"
+                "- A ÚNICA exceção: se o tenant EXPLICITAMENTE escreveu algo para você dizer (ex: 'Diga: Vou ser direto'), aí sim você pode dizer\n\n"
+                "Aplique este estilo naturalmente nas mensagens SEM mencionar que está aplicando."
             )
 
         return ""

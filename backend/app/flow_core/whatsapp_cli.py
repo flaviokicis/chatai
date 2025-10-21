@@ -580,15 +580,12 @@ class WhatsAppSimulatorCLI:
         while not self.shutdown_event.is_set():
             try:
                 # Drain queue into buffer immediately
-                while not self.message_queue.empty():
-                    item = self.message_queue.get_nowait()
-                    with self._buffer_lock:
-                        self._pending_messages.append(item)
-                        self._last_message_ts = item.get("timestamp")
+                self._drain_queue_to_buffer()
 
                 # If not currently processing and we have buffered messages, check debounce window
                 if not self.processing and self._pending_messages:
                     # Wait until 60s of inactivity (configurable via project context)
+                    # This will continuously drain new messages and reset timer
                     await self._wait_for_inactivity()
                     # Aggregate buffered messages and process once
                     batch = self._flush_buffer()
@@ -802,8 +799,40 @@ class WhatsAppSimulatorCLI:
             "metadata": response.metadata or {},
         }
 
+    def _drain_queue_to_buffer(self) -> None:
+        """Drain all messages from queue into the pending buffer.
+        
+        Matches ProcessingCancellationManager.add_message_to_buffer behavior.
+        """
+        messages_added = 0
+        while not self.message_queue.empty():
+            item = self.message_queue.get_nowait()
+            with self._buffer_lock:
+                self._pending_messages.append(item)
+                self._last_message_ts = item.get("timestamp")
+                messages_added += 1
+        
+        if messages_added > 0:
+            total = len(self._pending_messages)
+            logger.info(f"Buffered {messages_added} new message(s), total: {total}")
+            print(f"⏳ Buffering message #{total}, timer reset...")
+
+    def _get_time_since_last_message_ms(self) -> float:
+        """Get milliseconds elapsed since last message.
+        
+        Matches ProcessingCancellationManager._get_time_since_last_message_ms behavior.
+        """
+        with self._buffer_lock:
+            if not self._last_message_ts:
+                return float("inf")
+            elapsed_ms = (time.time() - self._last_message_ts) * 1000
+            return elapsed_ms
+
     def _flush_buffer(self) -> list[dict[str, Any]]:
-        """Atomically flush the pending message buffer."""
+        """Atomically flush the pending message buffer.
+        
+        Matches ProcessingCancellationManager.get_and_clear_messages behavior.
+        """
         with self._buffer_lock:
             batch = list(self._pending_messages)
             self._pending_messages.clear()
@@ -811,8 +840,14 @@ class WhatsAppSimulatorCLI:
             return batch
 
     async def _wait_for_inactivity(self) -> None:
-        """Wait until one minute of inactivity since the last message, resetting on new input."""
-        # Resolve desired inactivity window from project context
+        """Wait until configured time of inactivity since the last message.
+        
+        Matches ProcessingCancellationManager behavior:
+        - Continuously drains queue to buffer
+        - Calculates time since LAST message timestamp
+        - Resets when new message arrives
+        - Processes when inactivity period elapsed
+        """
         inactivity_ms = 60000
         if self.conversation_ctx and self.conversation_ctx.project_context:
             inactivity_ms = getattr(
@@ -821,40 +856,72 @@ class WhatsAppSimulatorCLI:
                 60000,
             )
 
-        # Bound between 100ms and 120s like webhook behavior
         inactivity_ms = max(100, min(inactivity_ms, 120000))
 
-        # Poll every 250ms for new messages, reset timer when new messages arrive
-        waited = 0
-        last_seen_ts = self._last_message_ts
+        check_interval_ms = 250
+        check_count = 0
+        
+        logger.info(
+            f"Waiting {inactivity_ms}ms for inactivity before processing {len(self._pending_messages)} message(s)..."
+        )
+        
         while True:
-            await asyncio.sleep(0.25)
-            waited += 250
-
-            # If a new message has arrived, reset the wait
-            if self._last_message_ts and self._last_message_ts != last_seen_ts:
-                last_seen_ts = self._last_message_ts
-                waited = 0
-                continue
-
-            if waited >= inactivity_ms:
+            await asyncio.sleep(check_interval_ms / 1000.0)
+            check_count += 1
+            
+            self._drain_queue_to_buffer()
+            
+            time_since_last_ms = self._get_time_since_last_message_ms()
+            
+            if time_since_last_ms >= inactivity_ms:
+                count = len(self._pending_messages)
+                logger.info(
+                    f"Inactivity period reached ({time_since_last_ms:.0f}ms >= {inactivity_ms}ms), "
+                    f"processing {count} message(s)"
+                )
+                print(f"✅ Processing {count} buffered message(s)...")
                 return
+            
+            if check_count % 20 == 0:
+                count = len(self._pending_messages)
+                remaining_ms = inactivity_ms - time_since_last_ms
+                logger.debug(
+                    f"Still waiting... ({time_since_last_ms:.0f}ms / {inactivity_ms}ms, {count} buffered)"
+                )
+                if remaining_ms > 0:
+                    print(f"⏳ Waiting for more input... ({remaining_ms/1000:.0f}s remaining, {count} buffered)")
 
     def _aggregate_messages(self, messages: list[dict[str, Any]]) -> str:
-        """Aggregate buffered CLI messages using same policy as webhook manager."""
+        """Aggregate buffered CLI messages using same policy as webhook manager.
+        
+        Matches ProcessingCancellationManager._aggregate_messages exactly:
+        - Single message: return as-is
+        - Multiple messages: format with [HH:MM:SS] timestamps
+        """
+        from datetime import datetime
+        
         if not messages:
             return ""
 
-        # Sort by timestamp to ensure order
+        if len(messages) == 1:
+            return messages[0].get("text", "")
+
         ordered = sorted(messages, key=lambda m: m.get("timestamp", 0))
 
-        # Join with newlines to keep separate thoughts clear (matches webhook behavior)
-        parts: list[str] = []
+        formatted_messages = []
         for msg in ordered:
             text = str(msg.get("text", "")).strip()
             if text:
-                parts.append(text)
-        return "\n".join(parts)
+                timestamp = msg.get("timestamp", time.time())
+                dt = datetime.fromtimestamp(timestamp, UTC)
+                time_str = dt.strftime("%H:%M:%S")
+                formatted_messages.append(f"[{time_str}] {text}")
+        
+        aggregated = "\n".join(formatted_messages)
+        logger.info(
+            f"Aggregated {len(formatted_messages)} message(s): {aggregated[:100]}..."
+        )
+        return aggregated
 
     async def process_message(
         self,
