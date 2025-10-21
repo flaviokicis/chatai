@@ -118,9 +118,7 @@ class ToolExecutionService:
                 self._handle_complete_action(result)
             elif action == "restart":
                 self._handle_restart_action(result)
-            elif action == "modify_flow":
-                await self._handle_external_action(action, tool_data, context, result)
-            elif action == "update_communication_style":
+            elif action == "modify_flow" or action == "update_communication_style":
                 await self._handle_external_action(action, tool_data, context, result)
             else:
                 logger.warning(f"Unknown action: {action}")

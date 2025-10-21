@@ -85,7 +85,7 @@ class PerformAction(FlowTool):
         description="COMPLETE new communication style when action is 'update_communication_style' (admin only). This REPLACES the current style entirely.",
     )
 
-    @field_validator("messages")  # type: ignore[misc]
+    @field_validator("messages")
     @classmethod
     def validate_messages(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Validate message structure."""

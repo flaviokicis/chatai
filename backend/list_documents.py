@@ -6,14 +6,14 @@ Quick script to list all documents in the RAG database.
 import asyncio
 import os
 import sys
-from datetime import datetime
 
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app.settings import get_settings
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+from app.settings import get_settings
 
 
 async def list_documents():

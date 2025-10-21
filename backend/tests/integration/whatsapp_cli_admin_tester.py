@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 from dotenv import load_dotenv
 from langchain.schema import HumanMessage, SystemMessage
@@ -25,7 +26,6 @@ from app.db.repository import get_tenant_by_id
 from app.db.session import db_session
 from app.flow_core.whatsapp_cli import WhatsAppSimulatorCLI
 from app.services.admin_phone_service import AdminPhoneService
-
 
 # ---------------------------------------------------------------------------
 # Tester configuration (edit these constants to define the tester behaviour)
@@ -221,13 +221,13 @@ class WhatsAppCLIGoalTester:
         """Prepare database records and shared services for the simulator."""
         config = None
         if not self._simulator.phone_number:
-            config = self._simulator._load_or_create_config()  # noqa: SLF001 (intentional reuse)
+            config = self._simulator._load_or_create_config()
 
-        self._simulator.conversation_ctx = await self._simulator._setup_database(config)  # noqa: SLF001
+        self._simulator.conversation_ctx = await self._simulator._setup_database(config)
         if not self._simulator.conversation_ctx:
             raise RuntimeError("Failed to set up conversation context for WhatsApp simulator.")
 
-        services_ready = await self._simulator._initialize_services()  # noqa: SLF001
+        services_ready = await self._simulator._initialize_services()
         if not services_ready:
             raise RuntimeError("Failed to initialize WhatsApp simulator services.")
 

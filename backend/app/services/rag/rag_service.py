@@ -6,16 +6,13 @@ coordinating document parsing, chunking, embedding, and retrieval.
 
 import asyncio
 import logging
-from pathlib import Path
-from typing import Dict, List, Literal, Optional, TypedDict
+from typing import Literal, TypedDict
 from uuid import UUID
 
 from langgraph.graph import END, START, StateGraph
-from langchain_core.documents import Document
 
-from app.db.models import TenantProjectConfig
-from app.services.rag.chunking import ChunkingService, DocumentChunkData
-from app.services.rag.document_parser import DocumentParserService, DocumentType
+from app.services.rag.chunking import ChunkingService
+from app.services.rag.document_parser import DocumentParserService
 from app.services.rag.embedding import EmbeddingService
 from app.services.rag.judge import ChunkContext, JudgeService
 from app.services.rag.vector_store import ChunkResult, VectorStoreRepository
@@ -27,21 +24,21 @@ class RAGState(TypedDict):
     """State for the RAG retrieval graph."""
     query: str
     attempts: int
-    chunks: List[ChunkResult]
+    chunks: list[ChunkResult]
     sufficient: bool
-    context: Optional[str]
-    judge_reasoning: Optional[str]
-    chat_history: Optional[List[Dict]]
-    business_context: Optional[Dict]
+    context: str | None
+    judge_reasoning: str | None
+    chat_history: list[dict] | None
+    business_context: dict | None
     tenant_id: UUID
-    thread_id: Optional[UUID]
+    thread_id: UUID | None
 
 
 class RAGQueryResult(TypedDict):
     """Structured result for RAG queries to avoid leaking error text upstream."""
     success: bool
-    context: Optional[str]
-    error: Optional[str]
+    context: str | None
+    error: str | None
     no_documents: bool
 
 
@@ -105,8 +102,8 @@ class RAGService:
         self,
         tenant_id: UUID,
         file_path: str,
-        metadata: Optional[Dict] = None
-    ) -> Dict[str, any]:
+        metadata: dict | None = None
+    ) -> dict[str, any]:
         """Save a document with intelligent chunking and embedding.
         
         Args:
@@ -150,14 +147,14 @@ class RAGService:
             
             # 5. Prepare chunks for storage
             chunks_data = []
-            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=False)):
                 chunks_data.append({
-                    'content': chunk.content,
-                    'embedding': embedding,
-                    'metadata': chunk.metadata.dict() if hasattr(chunk.metadata, 'dict') else chunk.metadata,
-                    'category': chunk.metadata.category,
-                    'keywords': chunk.metadata.keywords,
-                    'possible_questions': chunk.metadata.possible_questions
+                    "content": chunk.content,
+                    "embedding": embedding,
+                    "metadata": chunk.metadata.dict() if hasattr(chunk.metadata, "dict") else chunk.metadata,
+                    "category": chunk.metadata.category,
+                    "keywords": chunk.metadata.keywords,
+                    "possible_questions": chunk.metadata.possible_questions
                 })
             
             # 6. Store chunks with embeddings
@@ -171,14 +168,14 @@ class RAGService:
             relationships = []
             chunk_id_map = {chunk.chunk_id: chunk_ids[i] for i, chunk in enumerate(chunks)}
             
-            for chunk, chunk_id in zip(chunks, chunk_ids):
+            for chunk, chunk_id in zip(chunks, chunk_ids, strict=False):
                 for related in chunk.related_chunks:
-                    if related['id'] in chunk_id_map:
+                    if related["id"] in chunk_id_map:
                         relationships.append((
                             chunk_id,
-                            chunk_id_map[related['id']],
-                            'related',
-                            related['reason']
+                            chunk_id_map[related["id"]],
+                            "related",
+                            related["reason"]
                         ))
             
             if relationships:
@@ -186,28 +183,28 @@ class RAGService:
                 logger.info(f"Stored {len(relationships)} chunk relationships")
             
             return {
-                'success': True,
-                'document_id': str(document_id),
-                'file_name': parsed_doc.file_name,
-                'chunks_created': len(chunks),
-                'relationships_created': len(relationships),
-                'total_words': parsed_doc.word_count
+                "success": True,
+                "document_id": str(document_id),
+                "file_name": parsed_doc.file_name,
+                "chunks_created": len(chunks),
+                "relationships_created": len(relationships),
+                "total_words": parsed_doc.word_count
             }
             
         except Exception as e:
             logger.error(f"Error saving document: {e}")
             return {
-                'success': False,
-                'error': str(e)
+                "success": False,
+                "error": str(e)
             }
     
     async def query(
         self,
         tenant_id: UUID,
         query: str,
-        chat_history: Optional[List[Dict]] = None,
-        business_context: Optional[Dict] = None,
-        thread_id: Optional[UUID] = None
+        chat_history: list[dict] | None = None,
+        business_context: dict | None = None,
+        thread_id: UUID | None = None
     ) -> str:
         """Query the RAG system for relevant context.
         
@@ -231,10 +228,10 @@ class RAGService:
             thread_id=thread_id,
         )
 
-        if structured['no_documents']:
+        if structured["no_documents"]:
             return "No documents available. The tenant hasn't uploaded any context documents yet."
-        if structured['success'] and structured['context']:
-            return structured['context']
+        if structured["success"] and structured["context"]:
+            return structured["context"]
         # On failure or insufficient context, do not leak errors; return empty string
         return ""
 
@@ -242,42 +239,42 @@ class RAGService:
         self,
         tenant_id: UUID,
         query: str,
-        chat_history: Optional[List[Dict]] = None,
-        business_context: Optional[Dict] = None,
-        thread_id: Optional[UUID] = None,
+        chat_history: list[dict] | None = None,
+        business_context: dict | None = None,
+        thread_id: UUID | None = None,
     ) -> RAGQueryResult:
         """Structured query method to prevent leaking internal errors to callers."""
         # Check if tenant has documents
         if not await self.has_documents(tenant_id):
             return {
-                'success': False,
-                'context': None,
-                'error': None,
-                'no_documents': True,
+                "success": False,
+                "context": None,
+                "error": None,
+                "no_documents": True,
             }
 
         # Run the retrieval graph
         initial_state: RAGState = {
-            'query': query,
-            'attempts': 0,
-            'chunks': [],
-            'sufficient': False,
-            'context': None,
-            'judge_reasoning': None,
-            'chat_history': chat_history,
-            'business_context': business_context,
-            'tenant_id': tenant_id,
-            'thread_id': thread_id,
+            "query": query,
+            "attempts": 0,
+            "chunks": [],
+            "sufficient": False,
+            "context": None,
+            "judge_reasoning": None,
+            "chat_history": chat_history,
+            "business_context": business_context,
+            "tenant_id": tenant_id,
+            "thread_id": thread_id,
         }
 
         try:
             result = await self.retrieval_app.ainvoke(initial_state)
 
             # Save retrieval session for analytics
-            if result.get('chunks'):
+            if result.get("chunks"):
                 chunks_data = [
-                    {'id': str(c.chunk_id), 'score': c.score}
-                    for c in result['chunks'][:20]
+                    {"id": str(c.chunk_id), "score": c.score}
+                    for c in result["chunks"][:20]
                 ]
 
                 # Save retrieval session for analytics (skip on error to prevent hanging)
@@ -288,37 +285,37 @@ class RAGService:
                         query=query,
                         query_embedding=query_embedding,
                         retrieved_chunks=chunks_data,
-                        final_context=result.get('context', ''),
-                        attempts=result.get('attempts', 0),
-                        sufficient=result.get('sufficient', False),
-                        judge_reasoning=result.get('judge_reasoning', ''),
+                        final_context=result.get("context", ""),
+                        attempts=result.get("attempts", 0),
+                        sufficient=result.get("sufficient", False),
+                        judge_reasoning=result.get("judge_reasoning", ""),
                         thread_id=thread_id,
                     )
                 except Exception as e:
                     logger.debug(f"Skipped saving retrieval session: {e}")
 
-            if result.get('sufficient') and result.get('context'):
+            if result.get("sufficient") and result.get("context"):
                 return {
-                    'success': True,
-                    'context': result['context'],
-                    'error': None,
-                    'no_documents': False,
+                    "success": True,
+                    "context": result["context"],
+                    "error": None,
+                    "no_documents": False,
                 }
 
             return {
-                'success': False,
-                'context': None,
-                'error': None,
-                'no_documents': False,
+                "success": False,
+                "context": None,
+                "error": None,
+                "no_documents": False,
             }
 
         except Exception as e:
             logger.error(f"Error in RAG query: {e}")
             return {
-                'success': False,
-                'context': None,
-                'error': str(e),
-                'no_documents': False,
+                "success": False,
+                "context": None,
+                "error": str(e),
+                "no_documents": False,
             }
     
     def _build_retrieval_graph(self) -> StateGraph:
@@ -364,7 +361,7 @@ class RAGService:
         Returns:
             Updated state with retrieved chunks
         """
-        attempts = state.get('attempts', 0)
+        attempts = state.get("attempts", 0)
         
         # Widen search on retries
         base_k = 6
@@ -377,11 +374,11 @@ class RAGService:
         logger.info(f"Retrieval attempt {attempts + 1}: k={k}, threshold={threshold}")
         
         # Generate query embedding
-        query_embedding = await self.embedding_service.embed_text(state['query'])
+        query_embedding = await self.embedding_service.embed_text(state["query"])
         
         # Search for similar chunks
         chunks = await self.vector_store.search_similar_chunks(
-            tenant_id=state['tenant_id'],
+            tenant_id=state["tenant_id"],
             query_embedding=query_embedding,
             limit=k,
             similarity_threshold=threshold
@@ -392,7 +389,7 @@ class RAGService:
             chunk_ids = [chunk.chunk_id for chunk in chunks[:5]]
             related_chunks = await self.vector_store.get_related_chunks(
                 chunk_ids=chunk_ids,
-                relationship_types=['related', 'extends']
+                relationship_types=["related", "extends"]
             )
             
             # Add related chunks if not already present
@@ -401,9 +398,9 @@ class RAGService:
                 if related.chunk_id not in existing_ids:
                     chunks.append(related)
         
-        state['chunks'] = chunks
+        state["chunks"] = chunks
         # Increment attempts after retrieval (not before)
-        state['attempts'] = attempts + 1
+        state["attempts"] = attempts + 1
         
         return state
     
@@ -416,11 +413,11 @@ class RAGService:
         Returns:
             Updated state with judgment
         """
-        chunks = state.get('chunks', [])
+        chunks = state.get("chunks", [])
         
         if not chunks:
-            state['sufficient'] = False
-            state['judge_reasoning'] = "No chunks retrieved"
+            state["sufficient"] = False
+            state["judge_reasoning"] = "No chunks retrieved"
             return state
         
         # Convert to ChunkContext for judge
@@ -437,14 +434,14 @@ class RAGService:
         
         # Judge chunks
         judgment = await self.judge_service.judge_chunks(
-            query=state['query'],
+            query=state["query"],
             chunks=chunk_contexts,
-            chat_history=state.get('chat_history'),
-            business_context=state.get('business_context')
+            chat_history=state.get("chat_history"),
+            business_context=state.get("business_context")
         )
         
-        state['sufficient'] = judgment.sufficient
-        state['judge_reasoning'] = judgment.reasoning
+        state["sufficient"] = judgment.sufficient
+        state["judge_reasoning"] = judgment.reasoning
         
         # If sufficient, prepare context
         if judgment.sufficient:
@@ -470,7 +467,7 @@ class RAGService:
                 for info in judgment.missing_info:
                     context_parts.append(f"- {info}")
             
-            state['context'] = "\n".join(context_parts)
+            state["context"] = "\n".join(context_parts)
         
         return state
     
@@ -484,11 +481,11 @@ class RAGService:
             Next node to execute
         """
         # If sufficient, we're done
-        if state.get('sufficient'):
+        if state.get("sufficient"):
             return "done"
         
         # If not sufficient and we have attempts left, retry
-        attempts = state.get('attempts', 0)
+        attempts = state.get("attempts", 0)
         if attempts < self.max_attempts:
             # Don't modify state here - let retrieve_node handle it
             return "retry"
@@ -505,12 +502,12 @@ class RAGService:
         Returns:
             Final state
         """
-        if state.get('sufficient') and state.get('context'):
+        if state.get("sufficient") and state.get("context"):
             logger.info(f"RAG retrieval successful after {state['attempts']} attempts")
             return state
         
         # Not sufficient - provide clear message
-        state['context'] = None
+        state["context"] = None
         logger.warning(
             f"RAG retrieval failed after {state['attempts']} attempts: {state.get('judge_reasoning', 'Unknown reason')}"
         )
@@ -525,7 +522,7 @@ class RAGService:
         """
         await self.vector_store.delete_document(document_id)
     
-    async def get_tenant_stats(self, tenant_id: UUID) -> Dict:
+    async def get_tenant_stats(self, tenant_id: UUID) -> dict:
         """Get statistics for a tenant's documents.
         
         Args:
@@ -538,9 +535,9 @@ class RAGService:
         chunk_count = await self.vector_store.get_tenant_chunks_count(tenant_id) if has_docs else 0
         
         return {
-            'has_documents': has_docs,
-            'total_chunks': chunk_count,
-            'rag_enabled': has_docs and chunk_count > 0
+            "has_documents": has_docs,
+            "total_chunks": chunk_count,
+            "rag_enabled": has_docs and chunk_count > 0
         }
     
     async def close(self):

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import Any
 from uuid import UUID
 
 from app.core.app_context import AppContext
@@ -20,9 +20,6 @@ from app.services.processing_cancellation_manager import ProcessingCancellationM
 
 from .flow_request import FlowRequest
 from .flow_response import FlowProcessingResult, FlowResponse
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +130,7 @@ class FlowProcessor:
             is_admin = self._check_admin_status(request)
             
             # Get RAG service from app context if available
-            rag_service = app_context.rag_service if app_context and hasattr(app_context, 'rag_service') else None
+            rag_service = app_context.rag_service if app_context and hasattr(app_context, "rag_service") else None
 
             # Create runner with shared action registry and RAG service
             runner = FlowTurnRunner(self._llm, compiled_flow, self._action_registry, rag_service)

@@ -9,7 +9,6 @@ the tool caller's responsibility.
 import json
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
@@ -23,9 +22,9 @@ class ChunkContext:
     chunk_id: str
     content: str
     score: float
-    category: Optional[str] = None
-    keywords: Optional[str] = None
-    possible_questions: Optional[List[str]] = None
+    category: str | None = None
+    keywords: str | None = None
+    possible_questions: list[str] | None = None
 
 
 class JudgmentResult(BaseModel):
@@ -33,9 +32,9 @@ class JudgmentResult(BaseModel):
     sufficient: bool = Field(description="Whether retrieval is exhausted (true) or should continue (false)")
     confidence: float = Field(description="Confidence score 0-1")
     reasoning: str = Field(description="Explanation of retrieval decision")
-    missing_info: List[str] = Field(default_factory=list, description="Info that might exist but wasn't retrieved")
-    relevant_chunks: List[str] = Field(default_factory=list, description="IDs of relevant chunks found")
-    suggestions: List[str] = Field(default_factory=list, description="Suggestions for better retrieval if continuing")
+    missing_info: list[str] = Field(default_factory=list, description="Info that might exist but wasn't retrieved")
+    relevant_chunks: list[str] = Field(default_factory=list, description="IDs of relevant chunks found")
+    suggestions: list[str] = Field(default_factory=list, description="Suggestions for better retrieval if continuing")
 
 
 class JudgeService:
@@ -102,9 +101,9 @@ REMEMBER:
     async def judge_chunks(
         self,
         query: str,
-        chunks: List[ChunkContext],
-        chat_history: Optional[List[Dict]] = None,
-        business_context: Optional[Dict] = None
+        chunks: list[ChunkContext],
+        chat_history: list[dict] | None = None,
+        business_context: dict | None = None
     ) -> JudgmentResult:
         """Judge if retrieval should continue or is exhausted.
         
@@ -148,8 +147,8 @@ REMEMBER:
                 # GPT-5 returns list format
                 content_text = ""
                 for item in response.content:
-                    if isinstance(item, dict) and 'text' in item:
-                        content_text += item['text']
+                    if isinstance(item, dict) and "text" in item:
+                        content_text += item["text"]
                     else:
                         content_text += str(item)
             else:
@@ -169,13 +168,13 @@ REMEMBER:
             return JudgmentResult(
                 sufficient=False,
                 confidence=0.0,
-                reasoning=f"Error during judgment: {str(e)}",
+                reasoning=f"Error during judgment: {e!s}",
                 missing_info=["Unable to assess due to error"],
                 relevant_chunks=[],
                 suggestions=["Retry with different parameters"]
             )
     
-    def _format_chunks(self, chunks: List[ChunkContext]) -> str:
+    def _format_chunks(self, chunks: list[ChunkContext]) -> str:
         """Format chunks for the prompt.
         
         Args:
@@ -201,7 +200,7 @@ REMEMBER:
         
         return "\n\n".join(formatted)
     
-    def _format_chat_history(self, chat_history: List[Dict]) -> str:
+    def _format_chat_history(self, chat_history: list[dict]) -> str:
         """Format chat history for context.
         
         Args:
@@ -215,8 +214,8 @@ REMEMBER:
         
         formatted = []
         for msg in chat_history[-5:]:  # Last 5 messages for context
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
             formatted.append(f"{role}: {content}")
         
         return "\n".join(formatted)
@@ -237,39 +236,38 @@ REMEMBER:
             response_clean = response.strip()
             
             # Try to find JSON block
-            json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', response_clean, re.DOTALL)
+            json_match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", response_clean, re.DOTALL)
             
             if json_match:
                 json_str = json_match.group()
                 # Clean up common issues
-                json_str = json_str.replace('\n', ' ').replace('\r', '')
+                json_str = json_str.replace("\n", " ").replace("\r", "")
                 data = json.loads(json_str)
                 
                 return JudgmentResult(
-                    sufficient=bool(data.get('sufficient', False)),
-                    confidence=float(data.get('confidence', 0.5)),
-                    reasoning=str(data.get('reasoning', 'No reasoning provided')),
-                    missing_info=data.get('missing_info', []) if isinstance(data.get('missing_info'), list) else [],
-                    relevant_chunks=data.get('relevant_chunks', []) if isinstance(data.get('relevant_chunks'), list) else [],
-                    suggestions=data.get('suggestions', []) if isinstance(data.get('suggestions'), list) else []
+                    sufficient=bool(data.get("sufficient", False)),
+                    confidence=float(data.get("confidence", 0.5)),
+                    reasoning=str(data.get("reasoning", "No reasoning provided")),
+                    missing_info=data.get("missing_info", []) if isinstance(data.get("missing_info"), list) else [],
+                    relevant_chunks=data.get("relevant_chunks", []) if isinstance(data.get("relevant_chunks"), list) else [],
+                    suggestions=data.get("suggestions", []) if isinstance(data.get("suggestions"), list) else []
                 )
-            else:
-                # Fallback parsing from text
-                sufficient = 'sufficient' in response.lower() and 'insufficient' not in response.lower()
-                return JudgmentResult(
-                    sufficient=sufficient,
-                    confidence=0.5,
-                    reasoning=response[:500],  # First 500 chars as reasoning
-                    missing_info=[],
-                    relevant_chunks=[],
-                    suggestions=[]
-                )
+            # Fallback parsing from text
+            sufficient = "sufficient" in response.lower() and "insufficient" not in response.lower()
+            return JudgmentResult(
+                sufficient=sufficient,
+                confidence=0.5,
+                reasoning=response[:500],  # First 500 chars as reasoning
+                missing_info=[],
+                relevant_chunks=[],
+                suggestions=[]
+            )
                 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to parse judge response as JSON: {e}")
             
             # Fallback: Simple text analysis
-            sufficient = 'sufficient' in response.lower() and 'insufficient' not in response.lower()
+            sufficient = "sufficient" in response.lower() and "insufficient" not in response.lower()
             
             return JudgmentResult(
                 sufficient=sufficient,

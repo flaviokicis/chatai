@@ -10,8 +10,8 @@ import logging
 from typing import Any
 from uuid import UUID
 
+from app.db.repository import get_tenant_by_id, update_tenant_project_config
 from app.db.session import create_session
-from app.db.repository import update_tenant_project_config, get_tenant_by_id
 from app.services.admin_phone_service import AdminPhoneService
 
 from .base import ActionExecutor, ActionResult
@@ -50,9 +50,9 @@ class CommunicationStyleExecutor(ActionExecutor):
                     error="Missing updated_communication_style",
                 )
 
-            if hasattr(context, 'user_id'):
+            if hasattr(context, "user_id"):
                 user_id = context.user_id
-                tenant_id = context.tenant_id
+                tenant_id = context.tenant_id  # type: ignore[attr-defined]
             else:
                 user_id = context.get("user_id")
                 tenant_id = context.get("tenant_id")
@@ -121,12 +121,11 @@ class CommunicationStyleExecutor(ActionExecutor):
                             "tenant_id": str(tenant_id),
                         },
                     )
-                else:
-                    return ActionResult(
-                        success=False,
-                        message="Erro ao atualizar o estilo de comunicação.",
-                        error="Failed to update tenant config",
-                    )
+                return ActionResult(
+                    success=False,
+                    message="Erro ao atualizar o estilo de comunicação.",
+                    error="Failed to update tenant config",
+                )
 
         except Exception as e:
             logger.error(f"Unexpected error in communication style update: {e}", exc_info=True)

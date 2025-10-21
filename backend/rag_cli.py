@@ -7,18 +7,16 @@ Usage: python rag_cli.py
 import asyncio
 import sys
 from uuid import UUID
-from typing import Optional
-from rich.console import Console
-from rich.table import Table
-from rich.prompt import Prompt
-from rich.panel import Panel
-from rich.syntax import Syntax
-import json
 
-from app.settings import get_settings
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt
+from rich.table import Table
+
+from app.services.rag.embedding import EmbeddingService
 from app.services.rag.rag_service import RAGService
 from app.services.rag.vector_store import VectorStoreRepository
-from app.services.rag.embedding import EmbeddingService
+from app.settings import get_settings
 
 console = Console()
 
@@ -49,19 +47,19 @@ class RAGCLITester:
             table.add_column("Property", style="cyan", width=20)
             table.add_column("Value", style="white")
             
-            table.add_row("Document ID", str(doc['id']))
-            table.add_row("File Type", doc['file_type'])
-            table.add_row("File Size", f"{doc.get('file_size', 'N/A')} bytes" if doc.get('file_size') else "N/A")
-            table.add_row("Created At", str(doc['created_at']))
-            table.add_row("Total Chunks", str(doc['chunk_count']))
+            table.add_row("Document ID", str(doc["id"]))
+            table.add_row("File Type", doc["file_type"])
+            table.add_row("File Size", f"{doc.get('file_size', 'N/A')} bytes" if doc.get("file_size") else "N/A")
+            table.add_row("Created At", str(doc["created_at"]))
+            table.add_row("Total Chunks", str(doc["chunk_count"]))
             
             console.print(table)
             
             # Show chunk preview
-            if doc.get('chunks'):
+            if doc.get("chunks"):
                 console.print("\n[bold]First 3 chunks:[/bold]")
-                for i, chunk in enumerate(doc['chunks'][:3], 1):
-                    preview = chunk['content'][:150] + "..." if len(chunk['content']) > 150 else chunk['content']
+                for i, chunk in enumerate(doc["chunks"][:3], 1):
+                    preview = chunk["content"][:150] + "..." if len(chunk["content"]) > 150 else chunk["content"]
                     console.print(f"  [dim]Chunk {i}:[/dim] {preview}")
             console.print("")
     
@@ -79,10 +77,10 @@ class RAGCLITester:
         
         for idx in indexes:
             table.add_row(
-                idx.get('indexname', 'N/A'),
-                idx.get('tablename', 'N/A'),
-                idx.get('index_type', 'N/A'),
-                idx.get('column', 'N/A')
+                idx.get("indexname", "N/A"),
+                idx.get("tablename", "N/A"),
+                idx.get("index_type", "N/A"),
+                idx.get("column", "N/A")
             )
         
         console.print(table)
@@ -115,7 +113,7 @@ class RAGCLITester:
         
         for i, chunk in enumerate(chunks, 1):
             preview = chunk.content[:100] + "..." if len(chunk.content) > 100 else chunk.content
-            preview = preview.replace('\n', ' ')
+            preview = preview.replace("\n", " ")
             table.add_row(
                 str(i),
                 f"{chunk.score:.3f}",
@@ -173,7 +171,7 @@ class RAGCLITester:
                     console.print("[yellow]Goodbye! 👋[/yellow]")
                     break
                     
-                elif command == "help":
+                if command == "help":
                     console.print(Panel(
                         "Commands:\n"
                         "  [green]query[/green] <text>  - Test a query (similarity only)\n"

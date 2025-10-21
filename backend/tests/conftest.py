@@ -17,10 +17,36 @@ def pytest_configure(config: pytest.Config) -> None:
     # Stub heavy/optional external modules so unit tests run in isolation
     if "sqlalchemy" not in sys.modules:
         sa = types.ModuleType("sqlalchemy")
+
+        def _identity(value, *args, **kwargs):  # type: ignore[no-untyped-def]
+            return value
+
+        def _return_tuple(*args, **kwargs):  # type: ignore[no-untyped-def]
+            return args or kwargs
+
+        sa.desc = _identity  # type: ignore[attr-defined]
+        sa.select = _return_tuple  # type: ignore[attr-defined]
+        sa.text = _identity  # type: ignore[attr-defined]
+
         orm = types.ModuleType("sqlalchemy.orm")
         orm.Session = object
+        orm.selectinload = _identity  # type: ignore[attr-defined]
+        sa.orm = orm  # type: ignore[attr-defined]
         sys.modules["sqlalchemy"] = sa
         sys.modules["sqlalchemy.orm"] = orm
+
+    # Stub heavy repository module to avoid database imports during unit tests
+    if "app.db.repository" not in sys.modules:
+        repo = types.ModuleType("app.db.repository")
+
+        def _return_none(*_a, **_k):  # type: ignore[no-untyped-def]
+            return None
+
+        repo.get_tenant_by_id = _return_none  # type: ignore[attr-defined]
+        repo.find_channel_instance_by_identifier = _return_none  # type: ignore[attr-defined]
+        repo.update_tenant_project_config = _return_none  # type: ignore[attr-defined]
+        repo.get_tenant_by_channel_identifier = _return_none  # type: ignore[attr-defined]
+        sys.modules["app.db.repository"] = repo
 
     if "langfuse" not in sys.modules:
         lf = types.ModuleType("langfuse")

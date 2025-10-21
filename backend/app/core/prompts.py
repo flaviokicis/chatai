@@ -150,8 +150,7 @@ def format_rag_section(rag_context: str) -> str:
 {rag_context}
 {get_rag_usage_policy()}
 """
-    else:
-        return """## RAG-RETRIEVED INFORMATION
+    return """## RAG-RETRIEVED INFORMATION
 No RAG documents available for this query.
 """
 

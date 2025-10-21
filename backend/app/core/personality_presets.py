@@ -6,7 +6,6 @@ to write custom instructions from scratch.
 """
 
 from dataclasses import dataclass
-from typing import List
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,9 +24,9 @@ class PersonalityPreset:
     name: str
     description: str
     communication_style: str  # The actual instruction text for the AI
-    examples: List[PersonalityExample]
+    examples: list[PersonalityExample]
     avatar_url: str  # Path to avatar image
-    recommended_for: List[str]  # Business types this is good for
+    recommended_for: list[str]  # Business types this is good for
 
 
 # Define the personality presets
@@ -174,6 +173,6 @@ def get_personality_by_id(personality_id: str) -> PersonalityPreset | None:
     return next((p for p in PERSONALITY_PRESETS if p.id == personality_id), None)
 
 
-def get_all_personalities() -> List[PersonalityPreset]:
+def get_all_personalities() -> list[PersonalityPreset]:
     """Get all available personality presets."""
     return PERSONALITY_PRESETS

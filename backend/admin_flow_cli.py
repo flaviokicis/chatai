@@ -13,28 +13,28 @@ Usage: python admin_flow_cli.py [--flow-file PATH] [--tenant-id UUID]
 
 import asyncio
 import json
-from uuid import UUID
 from pathlib import Path
-from rich.console import Console
-from rich.panel import Panel
-from rich.prompt import Prompt, Confirm
-from rich.table import Table
-from rich.markup import escape
+from uuid import UUID
 
-from app.settings import get_settings
-from app.db.session import create_session
+from rich.console import Console
+from rich.markup import escape
+from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
+
+from app.core.llm import create_llm_client
+from app.db.models import ChannelType
 from app.db.repository import (
-    get_tenant_by_id,
-    create_tenant_with_config,
     create_channel_instance,
     create_flow,
+    create_tenant_with_config,
+    get_tenant_by_id,
 )
-from app.db.models import ChannelType
-from app.services.admin_phone_service import AdminPhoneService
-from app.core.llm import create_llm_client
+from app.db.session import create_session
 from app.flow_core.services.responder import EnhancedFlowResponder
 from app.flow_core.state import FlowContext
+from app.services.admin_phone_service import AdminPhoneService
 from app.services.tenant_config_service import ProjectContext
+from app.settings import get_settings
 
 console = Console()
 
@@ -222,9 +222,9 @@ class AdminFlowTester:
             admin_service = AdminPhoneService(session)
             is_admin = admin_service.is_admin_phone(self.admin_phone, self.tenant_id)
             if is_admin:
-                console.print(f"[green]✅ Admin status: CONFIRMED[/green]")
+                console.print("[green]✅ Admin status: CONFIRMED[/green]")
             else:
-                console.print(f"[red]⚠️  Admin status: NOT ADMIN[/red]")
+                console.print("[red]⚠️  Admin status: NOT ADMIN[/red]")
                 console.print("[yellow]Add this phone as admin first![/yellow]")
 
         # Show current communication style
@@ -243,15 +243,15 @@ class AdminFlowTester:
             console.print("\n" + "="*60)
             command = Prompt.ask("[bold cyan]Your message (as admin)[/bold cyan]")
 
-            if command.lower() in ['exit', 'quit', 'sair']:
+            if command.lower() in ["exit", "quit", "sair"]:
                 console.print("[yellow]Goodbye! 👋[/yellow]")
                 break
 
-            if command.lower() == 'style':
+            if command.lower() == "style":
                 self.show_communication_style()
                 continue
 
-            if command.lower() == 'reset':
+            if command.lower() == "reset":
                 self.flow_context = None
                 console.print("[yellow]Flow context reset! Starting from beginning.[/yellow]")
                 continue

@@ -6,18 +6,20 @@ Shows both RAG context AND final GPT-5 response using the same prompt as respond
 
 import asyncio
 from uuid import UUID
+
+from langchain_openai import ChatOpenAI
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
-from app.settings import get_settings
-from app.services.rag.rag_service import RAGService
+
 from app.core.prompts import (
-    get_responsible_attendant_core,
+    format_rag_section,
     get_golden_rule,
     get_identity_and_style,
-    format_rag_section
+    get_responsible_attendant_core,
 )
-from langchain_openai import ChatOpenAI
+from app.services.rag.rag_service import RAGService
+from app.settings import get_settings
 
 console = Console()
 
@@ -117,7 +119,7 @@ async def interactive_rag_with_gpt5():
         console.print("\n" + "="*80)
         query = Prompt.ask("[bold cyan]Your question[/bold cyan]")
         
-        if query.lower() in ['exit', 'quit', 'sair']:
+        if query.lower() in ["exit", "quit", "sair"]:
             console.print("[yellow]Goodbye! 👋[/yellow]")
             break
         
@@ -166,8 +168,8 @@ async def interactive_rag_with_gpt5():
             if isinstance(response.content, list):
                 response_text = ""
                 for item in response.content:
-                    if isinstance(item, dict) and 'text' in item:
-                        response_text += item['text']
+                    if isinstance(item, dict) and "text" in item:
+                        response_text += item["text"]
                     else:
                         response_text += str(item)
             else:
@@ -188,7 +190,7 @@ async def interactive_rag_with_gpt5():
                 
                 # Check if GPT-5 admitted not knowing
                 admits_ignorance = any(word in response_text.lower() for word in 
-                    ['não tenho', 'não sei', 'não consta', 'não encontrei', 'vou verificar', 'preciso confirmar'])
+                    ["não tenho", "não sei", "não consta", "não encontrei", "vou verificar", "preciso confirmar"])
                 
                 if admits_ignorance:
                     console.print("[dim]  • ✅ GPT-5 responsibly admitted uncertainty[/dim]")

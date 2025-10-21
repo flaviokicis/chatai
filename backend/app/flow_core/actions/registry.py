@@ -11,12 +11,6 @@ import logging
 from app.core.llm import LLMClient
 
 from .base import ActionExecutor
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    # Import only for type checking to avoid heavy imports during unit tests
-    from .flow_modification import FlowModificationExecutor  # pragma: no cover
-    from .communication_style import CommunicationStyleExecutor  # pragma: no cover
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +39,8 @@ class ActionRegistry:
         """
         try:
             # Lazy import to avoid unnecessary heavy dependencies during simple unit tests
-            from .flow_modification import FlowModificationExecutor  # type: ignore
-            from .communication_style import CommunicationStyleExecutor  # type: ignore
+            from .communication_style import CommunicationStyleExecutor
+            from .flow_modification import FlowModificationExecutor
 
             flow_mod_executor = FlowModificationExecutor(llm_client)
             self.register(flow_mod_executor)

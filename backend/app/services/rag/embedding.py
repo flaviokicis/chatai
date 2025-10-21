@@ -7,7 +7,7 @@ superior quality compared to smaller models.
 """
 
 import logging
-from typing import List, Optional
+
 import numpy as np
 from langchain_openai import OpenAIEmbeddings
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -46,7 +46,7 @@ class EmbeddingService:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10)
     )
-    async def embed_text(self, text: str) -> List[float]:
+    async def embed_text(self, text: str) -> list[float]:
         """Generate embedding for a single text.
         
         Args:
@@ -67,7 +67,7 @@ class EmbeddingService:
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10)
     )
-    async def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts.
         
         Args:
@@ -86,9 +86,9 @@ class EmbeddingService:
     
     def compute_similarity(
         self,
-        query_embedding: List[float],
-        document_embeddings: List[List[float]]
-    ) -> List[float]:
+        query_embedding: list[float],
+        document_embeddings: list[list[float]]
+    ) -> list[float]:
         """Compute cosine similarity between query and documents.
         
         Args:
@@ -122,7 +122,7 @@ class EmbeddingService:
     async def embed_with_metadata(
         self,
         text: str,
-        metadata: Optional[dict] = None
+        metadata: dict | None = None
     ) -> dict:
         """Generate embedding with associated metadata.
         
@@ -141,7 +141,7 @@ class EmbeddingService:
             "dimension": self.dimension
         }
     
-    def validate_embedding(self, embedding: List[float]) -> bool:
+    def validate_embedding(self, embedding: list[float]) -> bool:
         """Validate that an embedding has the correct dimension.
         
         Args:

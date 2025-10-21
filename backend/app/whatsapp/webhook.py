@@ -19,7 +19,7 @@ from app.whatsapp.whatsapp_api_adapter import WhatsAppApiAdapter
 logger = logging.getLogger(__name__)
 
 
-def _get_adapter(settings: Any) -> WhatsAppAdapter:  # type: ignore[type-arg]
+def _get_adapter(settings: Any) -> WhatsAppAdapter:
     """Get the WhatsApp adapter based on provider settings."""
     return WhatsAppApiAdapter(settings)
 

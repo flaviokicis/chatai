@@ -4,23 +4,13 @@ This module provides database operations for storing and retrieving
 document embeddings using pgvector.
 """
 
-import json
 import logging
-from typing import Dict, List, Optional, Tuple
 from uuid import UUID
-import asyncpg
-import numpy as np
-from sqlalchemy import text, select, and_, or_, func
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import selectinload
 
-from app.db.models import (
-    DocumentChunk,
-    ChunkRelationship,
-    TenantDocument,
-    RetrievalSession,
-    Tenant
-)
+from sqlalchemy import func, or_, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from app.db.models import ChunkRelationship, DocumentChunk, RetrievalSession, TenantDocument
 
 logger = logging.getLogger(__name__)
 
@@ -33,11 +23,11 @@ class ChunkResult:
         chunk_id: UUID,
         content: str,
         score: float,
-        metadata: Optional[dict] = None,
-        category: Optional[str] = None,
-        keywords: Optional[str] = None,
-        possible_questions: Optional[List[str]] = None,
-        document_name: Optional[str] = None
+        metadata: dict | None = None,
+        category: str | None = None,
+        keywords: str | None = None,
+        possible_questions: list[str] | None = None,
+        document_name: str | None = None
     ):
         self.chunk_id = chunk_id
         self.content = content
@@ -88,7 +78,7 @@ class VectorStoreRepository:
         file_type: str,
         raw_content: str,
         parsed_content: str,
-        metadata: Optional[dict] = None
+        metadata: dict | None = None
     ) -> UUID:
         """Store a document in the database.
         
@@ -111,7 +101,7 @@ class VectorStoreRepository:
                 raw_content=raw_content,
                 parsed_content=parsed_content,
                 document_metadata=metadata or {},
-                file_size=len(raw_content.encode('utf-8'))
+                file_size=len(raw_content.encode("utf-8"))
             )
             session.add(document)
             await session.commit()
@@ -122,8 +112,8 @@ class VectorStoreRepository:
         self,
         document_id: UUID,
         tenant_id: UUID,
-        chunks: List[Dict]
-    ) -> List[UUID]:
+        chunks: list[dict]
+    ) -> list[UUID]:
         """Store document chunks with embeddings.
         
         Args:
@@ -143,19 +133,19 @@ class VectorStoreRepository:
                     document_id=document_id,
                     tenant_id=tenant_id,
                     chunk_index=idx,
-                    content=chunk_data['content'],
-                    chunk_metadata=chunk_data.get('metadata', {}),
-                    category=chunk_data.get('category'),
-                    keywords=chunk_data.get('keywords'),
-                    possible_questions=chunk_data.get('possible_questions', [])
+                    content=chunk_data["content"],
+                    chunk_metadata=chunk_data.get("metadata", {}),
+                    category=chunk_data.get("category"),
+                    keywords=chunk_data.get("keywords"),
+                    possible_questions=chunk_data.get("possible_questions", [])
                 )
                 session.add(chunk)
                 await session.flush()  # Get the ID
                 chunk_ids.append(chunk.id)
                 
                 # Store embedding using raw SQL for pgvector
-                if 'embedding' in chunk_data and chunk_data['embedding']:
-                    embedding = chunk_data['embedding']
+                if chunk_data.get("embedding"):
+                    embedding = chunk_data["embedding"]
                     # Format embedding as PostgreSQL array literal
                     embedding_str = f'[{",".join(map(str, embedding))}]'
                     await session.execute(
@@ -173,7 +163,7 @@ class VectorStoreRepository:
     
     async def store_chunk_relationships(
         self,
-        relationships: List[Tuple[UUID, UUID, str, str]]
+        relationships: list[tuple[UUID, UUID, str, str]]
     ):
         """Store relationships between chunks.
         
@@ -194,10 +184,10 @@ class VectorStoreRepository:
     async def search_similar_chunks(
         self,
         tenant_id: UUID,
-        query_embedding: List[float],
+        query_embedding: list[float],
         limit: int = 10,
         similarity_threshold: float = 0.7
-    ) -> List[ChunkResult]:
+    ) -> list[ChunkResult]:
         """Search for similar chunks using vector similarity.
         
         Args:
@@ -258,9 +248,9 @@ class VectorStoreRepository:
     
     async def get_related_chunks(
         self,
-        chunk_ids: List[UUID],
-        relationship_types: Optional[List[str]] = None
-    ) -> List[ChunkResult]:
+        chunk_ids: list[UUID],
+        relationship_types: list[str] | None = None
+    ) -> list[ChunkResult]:
         """Get chunks related to the given chunk IDs.
         
         Args:
@@ -327,13 +317,13 @@ class VectorStoreRepository:
         self,
         tenant_id: UUID,
         query: str,
-        query_embedding: Optional[List[float]],
-        retrieved_chunks: List[dict],
+        query_embedding: list[float] | None,
+        retrieved_chunks: list[dict],
         final_context: str,
         attempts: int,
         sufficient: bool,
         judge_reasoning: str,
-        thread_id: Optional[UUID] = None
+        thread_id: UUID | None = None
     ) -> UUID:
         """Save a retrieval session for analytics.
         
@@ -409,7 +399,7 @@ class VectorStoreRepository:
                 await session.delete(document)
                 await session.commit()
     
-    async def get_tenant_documents(self, tenant_id: UUID) -> List[Dict]:
+    async def get_tenant_documents(self, tenant_id: UUID) -> list[dict]:
         """Get all documents with chunk info for a tenant.
         
         Args:
@@ -445,18 +435,18 @@ class VectorStoreRepository:
             documents = []
             for row in rows:
                 documents.append({
-                    'id': row.id,
-                    'file_name': row.file_name,
-                    'file_type': row.file_type,
-                    'file_size': row.file_size,
-                    'created_at': row.created_at,
-                    'chunk_count': row.chunk_count,
-                    'chunks': row.chunks or []
+                    "id": row.id,
+                    "file_name": row.file_name,
+                    "file_type": row.file_type,
+                    "file_size": row.file_size,
+                    "created_at": row.created_at,
+                    "chunk_count": row.chunk_count,
+                    "chunks": row.chunks or []
                 })
             
             return documents
     
-    async def get_indexes(self) -> List[Dict]:
+    async def get_indexes(self) -> list[dict]:
         """Get all indexes in the vector database.
         
         Returns:
@@ -491,10 +481,10 @@ class VectorStoreRepository:
             indexes = []
             for row in rows:
                 indexes.append({
-                    'indexname': row.indexname,
-                    'tablename': row.tablename,
-                    'index_type': row.index_type,
-                    'column': row.column
+                    "indexname": row.indexname,
+                    "tablename": row.tablename,
+                    "index_type": row.index_type,
+                    "column": row.column
                 })
             
             return indexes

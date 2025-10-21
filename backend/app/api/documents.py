@@ -16,8 +16,9 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path as PathParam, Request, UploadFile, status
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import Path as PathParam
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.app_context import get_app_context
@@ -112,7 +113,7 @@ async def upload_document(
             detail="No filename provided"
         )
     
-    allowed_extensions = {'.pdf', '.txt', '.md', '.json'}
+    allowed_extensions = {".pdf", ".txt", ".md", ".json"}
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in allowed_extensions:
         raise HTTPException(
@@ -126,7 +127,7 @@ async def upload_document(
     if len(contents) > max_size:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File too large. Maximum size is 10MB."
+            detail="File too large. Maximum size is 10MB."
         )
     
     # Save file temporarily
@@ -154,30 +155,29 @@ async def upload_document(
         # Clean up temp file
         os.unlink(tmp_path)
         
-        if result.get('success'):
+        if result.get("success"):
             return DocumentUploadResponse(
                 success=True,
                 message=f"Document '{file.filename}' uploaded successfully",
-                document_id=result.get('document_id'),
-                chunks_created=result.get('chunks_created', 0),
-                total_words=result.get('total_words', 0)
+                document_id=result.get("document_id"),
+                chunks_created=result.get("chunks_created", 0),
+                total_words=result.get("total_words", 0)
             )
-        else:
-            return DocumentUploadResponse(
-                success=False,
-                message="Failed to process document",
-                error=result.get('error', 'Unknown error occurred')
-            )
+        return DocumentUploadResponse(
+            success=False,
+            message="Failed to process document",
+            error=result.get("error", "Unknown error occurred")
+        )
             
     except Exception as e:
         logger.error(f"Error uploading document for tenant {tenant_id}: {e}")
         # Clean up temp file if it exists
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+        if "tmp_path" in locals() and os.path.exists(tmp_path):
             os.unlink(tmp_path)
         
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to process document: {str(e)}"
+            detail=f"Failed to process document: {e!s}"
         )
 
 
@@ -207,7 +207,7 @@ async def check_document_status(
         logger.error(f"Error checking document status for tenant {tenant_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to check document status: {str(e)}"
+            detail=f"Failed to check document status: {e!s}"
         )
 
 
@@ -239,5 +239,5 @@ async def clear_documents(
         logger.error(f"Error clearing documents for tenant {tenant_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to clear documents: {str(e)}"
+            detail=f"Failed to clear documents: {e!s}"
         )

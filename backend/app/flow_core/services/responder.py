@@ -20,9 +20,9 @@ if TYPE_CHECKING:
 from langfuse import get_client
 
 from app.core.prompts import (
-    get_responsible_attendant_core,
     get_golden_rule,
     get_identity_and_style,
+    get_responsible_attendant_core,
 )
 
 from ..constants import (
@@ -1029,7 +1029,7 @@ When an admin requests communication style changes:
             raise TypeError("Tool must be a Pydantic BaseModel")
 
         # Get the schema directly from the model
-        return tool.model_json_schema()  # type: ignore[no-any-return,attr-defined]
+        return tool.model_json_schema()
 
     def _convert_langchain_to_gpt5_response(self, langchain_result: dict[str, Any]) -> GPT5Response:
         """Convert LangChain tool result to GPT5Response format."""
@@ -1106,36 +1106,13 @@ When an admin requests communication style changes:
         last_assistant_message = None
 
         for turn in context.history[-MAX_HISTORY_TURNS:]:
-            # Handle both dict and object formats for conversation turns
-            if hasattr(turn, "user_message") and hasattr(turn, "assistant_message"):
-                # ConversationTurn object format
-                formatted_history.append(f"User: {turn.user_message}")
-                formatted_history.append(f"Assistant: {turn.assistant_message}")
-                last_assistant_message = turn.assistant_message
-            elif isinstance(turn, dict):
-                # Dictionary format (fallback)
-                formatted_history.append(f"User: {turn.get('user', '')}")
-                assistant_msg = turn.get("assistant", "")
-                formatted_history.append(f"Assistant: {assistant_msg}")
-                if assistant_msg:
-                    last_assistant_message = assistant_msg
-            else:
-                # Unknown format, try to extract content
-                user_content = (
-                    getattr(turn, "content", str(turn))
-                    if hasattr(turn, "role") and turn.role == "user"
-                    else ""
-                )
-                assistant_content = (
-                    getattr(turn, "content", str(turn))
-                    if hasattr(turn, "role") and turn.role == "assistant"
-                    else ""
-                )
-                if user_content:
-                    formatted_history.append(f"User: {user_content}")
-                if assistant_content:
-                    formatted_history.append(f"Assistant: {assistant_content}")
-                    last_assistant_message = assistant_content
+            if turn.role == "user":
+                formatted_history.append(f"User: {turn.content}")
+            elif turn.role == "assistant":
+                formatted_history.append(f"Assistant: {turn.content}")
+                last_assistant_message = turn.content
+            elif turn.role == "system":
+                formatted_history.append(f"System: {turn.content}")
 
         # Add context about what the assistant is waiting for
         if last_assistant_message and "?" in last_assistant_message:

@@ -7,8 +7,10 @@ Usage: python rag_query.py "your query here"
 import asyncio
 import sys
 from uuid import UUID
-from app.settings import get_settings
+
 from app.services.rag.rag_service import RAGService
+from app.settings import get_settings
+
 
 async def test_rag_query(query: str):
     """Test a RAG query and show results."""
@@ -17,7 +19,7 @@ async def test_rag_query(query: str):
     tenant_id = UUID("44b613e6-c5a2-4f41-bae0-05b168245ac7")
     
     print(f"\n{'='*80}")
-    print(f"🔍 TESTING RAG QUERY")
+    print("🔍 TESTING RAG QUERY")
     print(f"{'='*80}")
     print(f"Query: {query}\n")
     
@@ -69,7 +71,7 @@ async def test_rag_query(query: str):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Usage: python rag_query.py \"your query here\"")
+        print('Usage: python rag_query.py "your query here"')
         print("\nExample queries:")
         print('  python rag_query.py "Qual a potência do CP-200?"')
         print('  python rag_query.py "luminária para posto de gasolina"')

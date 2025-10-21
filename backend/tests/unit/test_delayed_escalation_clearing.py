@@ -1,4 +1,3 @@
-import asyncio
 import time
 from typing import Any
 from unittest.mock import MagicMock, Mock
@@ -138,7 +137,7 @@ async def test_delayed_clearing_background_task():
 
 @pytest.mark.unit
 def test_escalation_constant_is_set():
-    assert ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS == 300
+    assert ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS == 3600
     assert isinstance(ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS, int)
 
 

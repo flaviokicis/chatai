@@ -37,7 +37,7 @@ class MessageList(BaseModel):
 
     messages: list[WhatsAppMessage] = Field(description="List of messages to send")
 
-    @field_validator("messages")  # type: ignore[misc]
+    @field_validator("messages")
     @classmethod
     def validate_messages(cls, messages: list[WhatsAppMessage]) -> list[WhatsAppMessage]:
         """Validate message structure and delays."""

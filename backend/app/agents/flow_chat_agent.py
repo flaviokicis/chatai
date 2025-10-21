@@ -337,7 +337,7 @@ class FlowChatAgent:
                 "d.product_choice (Decision node)",
                 '  -> edge (priority 0, guard: product="A") -> q.details_A',
                 '  -> edge (priority 1, guard: product="B") -> q.details_B',
-                '  -> edge (priority 2, always) -> q.default',
+                "  -> edge (priority 2, always) -> q.default",
                 "```",
                 "",
                 "**Why Splitting Helps:**",

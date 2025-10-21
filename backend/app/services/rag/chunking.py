@@ -5,11 +5,8 @@ into semantic chunks with rich metadata.
 """
 
 import io
-import json
 import logging
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
@@ -22,7 +19,7 @@ class ChunkMetadata(BaseModel):
     about: str = Field(description="Brief description of what this chunk contains")
     category: str = Field(description="Category: product_specs, pricing, installation, warranty, etc")
     keywords: str = Field(description="Comma-separated keywords for hybrid search")
-    possible_questions: List[str] = Field(description="Questions this chunk can answer")
+    possible_questions: list[str] = Field(description="Questions this chunk can answer")
 
 
 class DocumentChunkData(BaseModel):
@@ -30,7 +27,7 @@ class DocumentChunkData(BaseModel):
     chunk_id: str
     content: str
     metadata: ChunkMetadata
-    related_chunks: List[Dict[str, str]] = Field(default_factory=list)  # {id, reason}
+    related_chunks: list[dict[str, str]] = Field(default_factory=list)  # {id, reason}
 
 
 class ChunkingService:
@@ -114,8 +111,8 @@ IMPORTANTE:
     async def chunk_document(
         self,
         document_content: str,
-        document_metadata: Optional[Dict] = None
-    ) -> List[DocumentChunkData]:
+        document_metadata: dict | None = None
+    ) -> list[DocumentChunkData]:
         """Chunk a document using GPT-5 with high reasoning.
         
         Args:
@@ -143,8 +140,8 @@ IMPORTANTE:
                 # GPT-5 returns list of dicts with 'text' field
                 content_text = ""
                 for item in response.content:
-                    if isinstance(item, dict) and 'text' in item:
-                        content_text += item['text']
+                    if isinstance(item, dict) and "text" in item:
+                        content_text += item["text"]
                     else:
                         content_text += str(item)
             else:
@@ -162,7 +159,7 @@ IMPORTANTE:
             # Fallback to simple chunking
             return self._fallback_chunking(document_content)
     
-    def _parse_xml_chunks(self, xml_content: str) -> List[DocumentChunkData]:
+    def _parse_xml_chunks(self, xml_content: str) -> list[DocumentChunkData]:
         """Parse XML response from GPT-5 into chunk objects.
         
         Args:
@@ -178,68 +175,68 @@ IMPORTANTE:
             xml_to_parse = xml_content.strip()
             
             # Handle common response formats from LLMs
-            if not xml_to_parse.startswith('<'):
+            if not xml_to_parse.startswith("<"):
                 # Extract XML from markdown code blocks more robustly
                 # Look for ```xml or ``` blocks
-                lines = xml_to_parse.split('\n')
+                lines = xml_to_parse.split("\n")
                 xml_lines = []
                 in_code_block = False
                 
                 for line in lines:
-                    if line.strip().startswith('```'):
+                    if line.strip().startswith("```"):
                         in_code_block = not in_code_block
                         continue
-                    if in_code_block or line.strip().startswith('<'):
+                    if in_code_block or line.strip().startswith("<"):
                         xml_lines.append(line)
                 
-                xml_to_parse = '\n'.join(xml_lines).strip()
+                xml_to_parse = "\n".join(xml_lines).strip()
             
             # Validate we have something that looks like XML
-            if not xml_to_parse.startswith('<chunks>'):
+            if not xml_to_parse.startswith("<chunks>"):
                 # Try to find the chunks element anywhere in the content
                 try:
                     # Use ET to parse partial document
-                    for event, elem in ET.iterparse(io.StringIO(xml_content), events=['start', 'end']):
-                        if elem.tag == 'chunks' and event == 'start':
+                    for event, elem in ET.iterparse(io.StringIO(xml_content), events=["start", "end"]):
+                        if elem.tag == "chunks" and event == "start":
                             # Found chunks element, reconstruct from here
-                            xml_to_parse = ET.tostring(elem, encoding='unicode')
+                            xml_to_parse = ET.tostring(elem, encoding="unicode")
                             break
-                except (ET.ParseError, IOError) as parse_error:
+                except (OSError, ET.ParseError) as parse_error:
                     logger.debug(f"ET.iterparse failed: {parse_error}")
                     # Last resort: find chunks tags manually
-                    start_idx = xml_to_parse.find('<chunks>')
-                    end_idx = xml_to_parse.find('</chunks>')
+                    start_idx = xml_to_parse.find("<chunks>")
+                    end_idx = xml_to_parse.find("</chunks>")
                     if start_idx >= 0 and end_idx > start_idx:
-                        xml_to_parse = xml_to_parse[start_idx:end_idx + len('</chunks>')]
+                        xml_to_parse = xml_to_parse[start_idx:end_idx + len("</chunks>")]
                     else:
                         raise ValueError("No valid <chunks> element found in response")
             
             # Parse XML using ElementTree
             root = ET.fromstring(xml_to_parse)
             
-            for chunk_elem in root.findall('chunk'):
-                chunk_id = chunk_elem.get('id', f'chunk_{len(chunks):03d}')
+            for chunk_elem in root.findall("chunk"):
+                chunk_id = chunk_elem.get("id", f"chunk_{len(chunks):03d}")
                 
                 # Extract metadata
-                metadata_elem = chunk_elem.find('chunk_metadata')
+                metadata_elem = chunk_elem.find("chunk_metadata")
                 metadata = ChunkMetadata(
-                    about=self._get_text(metadata_elem, 'about', 'Chunk content'),
-                    category=self._get_text(metadata_elem, 'category', 'general'),
-                    keywords=self._get_text(metadata_elem, 'keywords', ''),
+                    about=self._get_text(metadata_elem, "about", "Chunk content"),
+                    category=self._get_text(metadata_elem, "category", "general"),
+                    keywords=self._get_text(metadata_elem, "keywords", ""),
                     possible_questions=self._get_questions(metadata_elem)
                 )
                 
                 # Extract content
-                content = self._get_text(chunk_elem, 'chunk_content', '')
+                content = self._get_text(chunk_elem, "chunk_content", "")
                 
                 # Extract relationships
                 related_chunks = []
-                related_elem = chunk_elem.find('related_chunks')
+                related_elem = chunk_elem.find("related_chunks")
                 if related_elem:
-                    for rel in related_elem.findall('related_chunk'):
+                    for rel in related_elem.findall("related_chunk"):
                         related_chunks.append({
-                            'id': rel.get('id', ''),
-                            'reason': self._get_text(rel, 'relationship_reason', '')
+                            "id": rel.get("id", ""),
+                            "reason": self._get_text(rel, "relationship_reason", "")
                         })
                 
                 chunks.append(DocumentChunkData(
@@ -266,28 +263,28 @@ IMPORTANTE:
         
         return chunks
     
-    def _get_text(self, parent: Optional[ET.Element], tag: str, default: str = '') -> str:
+    def _get_text(self, parent: ET.Element | None, tag: str, default: str = "") -> str:
         """Safely extract text from XML element."""
         if parent is None:
             return default
         elem = parent.find(tag)
         return elem.text.strip() if elem is not None and elem.text else default
     
-    def _get_questions(self, metadata_elem: Optional[ET.Element]) -> List[str]:
+    def _get_questions(self, metadata_elem: ET.Element | None) -> list[str]:
         """Extract possible questions from metadata element."""
         questions = []
         if metadata_elem is None:
             return questions
         
-        questions_elem = metadata_elem.find('possible_questions')
+        questions_elem = metadata_elem.find("possible_questions")
         if questions_elem:
-            for q in questions_elem.findall('question'):
+            for q in questions_elem.findall("question"):
                 if q.text:
                     questions.append(q.text.strip())
         
         return questions if questions else ["Informação geral sobre o conteúdo"]
     
-    def _fallback_chunking(self, content: str, chunk_size: int = 500) -> List[DocumentChunkData]:
+    def _fallback_chunking(self, content: str, chunk_size: int = 500) -> list[DocumentChunkData]:
         """Simple fallback chunking by size.
         
         Args:
@@ -304,10 +301,10 @@ IMPORTANTE:
         
         for i in range(0, len(words), chunk_size):
             chunk_words = words[i:i + chunk_size]
-            chunk_text = ' '.join(chunk_words)
+            chunk_text = " ".join(chunk_words)
             
             chunks.append(DocumentChunkData(
-                chunk_id=f'chunk_{len(chunks):03d}',
+                chunk_id=f"chunk_{len(chunks):03d}",
                 content=chunk_text,
                 metadata=ChunkMetadata(
                     about=f"Seção {len(chunks) + 1} do documento",
@@ -320,7 +317,7 @@ IMPORTANTE:
         
         return chunks
     
-    def optimize_chunks(self, chunks: List[DocumentChunkData]) -> List[DocumentChunkData]:
+    def optimize_chunks(self, chunks: list[DocumentChunkData]) -> list[DocumentChunkData]:
         """Post-process chunks to optimize for retrieval.
         
         Args:
@@ -356,6 +353,6 @@ IMPORTANTE:
         
         # Re-index chunks
         for i, chunk in enumerate(optimized):
-            chunk.chunk_id = f'chunk_{i:03d}'
+            chunk.chunk_id = f"chunk_{i:03d}"
         
         return optimized

@@ -352,7 +352,7 @@ def create_tenant_with_config(
     
     # Set default communication style to 'concise_direct' if not provided
     if communication_style is None:
-        default_personality = get_personality_by_id('concise_direct')
+        default_personality = get_personality_by_id("concise_direct")
         if default_personality:
             communication_style = default_personality.communication_style
     

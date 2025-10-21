@@ -20,6 +20,7 @@ from app.whatsapp.types import ConversationSetup
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
     from app.db.models import ChannelInstance
 
 logger = logging.getLogger(__name__)
@@ -116,7 +117,7 @@ class WebhookDatabaseHandler:
         except Exception as e:
             logger.error("Failed to setup conversation: %s", e)
             self.session.rollback()
-            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Database error: {e!s}")
 
     def _select_active_flow(
         self, channel_instance: ChannelInstance, tenant_id: UUID

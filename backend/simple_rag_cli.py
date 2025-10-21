@@ -6,11 +6,13 @@ Usage: python simple_rag_cli.py
 
 import asyncio
 from uuid import UUID
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt
-from app.settings import get_settings
+
 from app.services.rag.rag_service import RAGService
+from app.settings import get_settings
 
 console = Console()
 
@@ -72,7 +74,7 @@ async def interactive_rag():
         console.print("\n" + "="*60)
         query = Prompt.ask("[bold cyan]Your question[/bold cyan]")
         
-        if query.lower() in ['exit', 'quit', 'sair']:
+        if query.lower() in ["exit", "quit", "sair"]:
             console.print("[yellow]Goodbye! 👋[/yellow]")
             break
         
@@ -94,13 +96,13 @@ async def interactive_rag():
                 console.print("\n[bold green]📚 RAG Context Found:[/bold green]\n")
                 
                 # Parse and display nicely
-                lines = result.split('\n')
+                lines = result.split("\n")
                 for line in lines:
-                    if line.startswith('##'):
+                    if line.startswith("##"):
                         console.print(f"[bold cyan]{line}[/bold cyan]")
-                    elif line.startswith('**'):
+                    elif line.startswith("**"):
                         console.print(f"[yellow]{line}[/yellow]")
-                    elif '**Relevância:**' in line:
+                    elif "**Relevância:**" in line:
                         console.print(f"[green]{line}[/green]")
                     else:
                         console.print(line)

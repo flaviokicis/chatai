@@ -1,5 +1,4 @@
 import asyncio
-import json
 import time
 
 import pytest
@@ -38,9 +37,11 @@ class FakeRedis:
         self._strings[key] = value
     
     def incr(self, key):
-        current = self._counters.get(key, 0)
-        self._counters[key] = current + 1
-        return self._counters[key]
+        current_counter = self._counters.get(key, 0)
+        next_value = current_counter + 1
+        self._counters[key] = next_value
+        self._strings[key] = str(next_value)
+        return next_value
 
     def delete(self, *keys):
         for key in keys:
@@ -200,5 +201,4 @@ async def test_get_and_clear_messages_aggregates_with_timestamps():
 
     count = pcm.get_message_count(session_id)
     assert count == 0
-
 

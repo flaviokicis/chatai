@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import requests
-from fastapi import HTTPException, Request, Response
+from fastapi import Request, Response
 from fastapi.responses import PlainTextResponse
 
 from app.core.app_context import AppContext, get_app_context
@@ -77,7 +77,7 @@ class WhatsAppMessageProcessor:
         from typing import cast
         
         params_raw = await self.adapter.validate_and_parse(request, x_twilio_signature)
-        params = cast(TwilioWebhookParams, params_raw)
+        params = cast("TwilioWebhookParams", params_raw)
 
         # Step 1.5: Log raw webhook data for debugging (only in debug/dev mode)
         if self.settings.debug or getattr(self.settings, "environment", "") == "development":
@@ -155,7 +155,7 @@ class WhatsAppMessageProcessor:
                 # A newer message arrived, let it handle processing
                 logger.info(f"Newer message detected for session {session_id}, exiting this webhook")
                 return PlainTextResponse("ok")
-            elif result == "process_aggregated":
+            if result == "process_aggregated":
                 # Save individual messages to database BEFORE aggregation
                 individual_messages = cancellation_manager.get_individual_messages(session_id)
                 
@@ -861,12 +861,13 @@ class WhatsAppMessageProcessor:
             reply_id = str(uuid4())
 
             from typing import cast
+
             from app.core.agent_base import AgentState
             from app.core.redis_keys import redis_keys
 
             current_reply_key = redis_keys.current_reply_key(message_data["sender_number"])
             key_suffix = current_reply_key.replace("chatai:state:system:", "")
-            state_data = cast(AgentState, {"reply_id": reply_id, "timestamp": int(datetime.now().timestamp())})
+            state_data = cast("AgentState", {"reply_id": reply_id, "timestamp": int(datetime.now().timestamp())})
             app_context.store.save("system", key_suffix, state_data)
 
             # Note: conversation_setup is not in scope here - this is a bug, commenting out for now

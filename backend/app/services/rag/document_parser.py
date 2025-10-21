@@ -5,11 +5,11 @@ and prepares them for intelligent chunking.
 """
 
 import logging
+import re
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Optional
+
 from markitdown import MarkItDown
-import re
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class ParsedDocument:
         content: str,
         file_name: str,
         file_type: DocumentType,
-        metadata: Optional[Dict] = None
+        metadata: dict | None = None
     ):
         self.content = content
         self.file_name = file_name
@@ -93,7 +93,7 @@ class DocumentParserService:
             metadata = {
                 "file_size": path.stat().st_size,
                 "file_path": str(path),
-                "title": result.title if hasattr(result, 'title') else path.stem,
+                "title": result.title if hasattr(result, "title") else path.stem,
             }
             
             return ParsedDocument(
@@ -107,7 +107,7 @@ class DocumentParserService:
             logger.error(f"Error parsing document {path.name}: {e}")
             # Fallback to basic text reading for simple formats
             if file_type in [DocumentType.TEXT, DocumentType.MARKDOWN]:
-                content = path.read_text(encoding='utf-8')
+                content = path.read_text(encoding="utf-8")
                 return ParsedDocument(
                     content=content,
                     file_name=path.name,
@@ -145,13 +145,13 @@ class DocumentParserService:
         """
         suffix = path.suffix.lower()
         type_mapping = {
-            '.pdf': DocumentType.PDF,
-            '.md': DocumentType.MARKDOWN,
-            '.txt': DocumentType.TEXT,
-            '.xml': DocumentType.XML,
-            '.html': DocumentType.HTML,
-            '.htm': DocumentType.HTML,
-            '.json': DocumentType.JSON,
+            ".pdf": DocumentType.PDF,
+            ".md": DocumentType.MARKDOWN,
+            ".txt": DocumentType.TEXT,
+            ".xml": DocumentType.XML,
+            ".html": DocumentType.HTML,
+            ".htm": DocumentType.HTML,
+            ".json": DocumentType.JSON,
         }
         return type_mapping.get(suffix, DocumentType.UNKNOWN)
     
@@ -169,13 +169,13 @@ class DocumentParserService:
             content = content.replace(artifact, replacement)
         
         # Normalize whitespace
-        content = re.sub(r'\n{3,}', '\n\n', content)  # Max 2 newlines
-        content = re.sub(r' {2,}', ' ', content)  # Single spaces
+        content = re.sub(r"\n{3,}", "\n\n", content)  # Max 2 newlines
+        content = re.sub(r" {2,}", " ", content)  # Single spaces
         content = content.strip()
         
         return content
     
-    def extract_structured_data(self, document: ParsedDocument) -> Dict:
+    def extract_structured_data(self, document: ParsedDocument) -> dict:
         """Extract structured data from document if possible.
         
         Args:
@@ -195,9 +195,9 @@ class DocumentParserService:
         
         # Extract headers (lines that look like headers)
         header_patterns = [
-            r'^#{1,6}\s+(.+)$',  # Markdown headers
-            r'^([A-Z][A-Z\s]+):?\s*$',  # ALL CAPS headers
-            r'^(\d+\.?\s+[A-Z].+)$',  # Numbered headers
+            r"^#{1,6}\s+(.+)$",  # Markdown headers
+            r"^([A-Z][A-Z\s]+):?\s*$",  # ALL CAPS headers
+            r"^(\d+\.?\s+[A-Z].+)$",  # Numbered headers
         ]
         
         for line in lines:
@@ -209,8 +209,8 @@ class DocumentParserService:
         
         # Extract lists (basic detection)
         list_patterns = [
-            r'^\s*[-*•]\s+(.+)$',  # Bullet points
-            r'^\s*\d+\.\s+(.+)$',  # Numbered lists
+            r"^\s*[-*•]\s+(.+)$",  # Bullet points
+            r"^\s*\d+\.\s+(.+)$",  # Numbered lists
         ]
         
         for line in lines:

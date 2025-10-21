@@ -9,7 +9,6 @@ import asyncio
 import logging
 import os
 import sys
-from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import text
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 async def drop_vector_tables():
     """Drop existing vector database tables."""
     
-    pg_vector_url = os.getenv('PG_VECTOR_DATABASE_URL')
+    pg_vector_url = os.getenv("PG_VECTOR_DATABASE_URL")
     if not pg_vector_url:
         logger.error("PG_VECTOR_DATABASE_URL not set")
         return
@@ -53,7 +52,7 @@ async def init_vector_database():
     """Initialize the pgvector database with necessary tables."""
     
     # Get the pgvector database URL
-    pg_vector_url = os.getenv('PG_VECTOR_DATABASE_URL')
+    pg_vector_url = os.getenv("PG_VECTOR_DATABASE_URL")
     if not pg_vector_url:
         logger.error("PG_VECTOR_DATABASE_URL not set in environment")
         sys.exit(1)
@@ -185,7 +184,7 @@ async def init_vector_database():
 async def check_vector_database():
     """Check if vector database is properly initialized."""
     
-    pg_vector_url = os.getenv('PG_VECTOR_DATABASE_URL')
+    pg_vector_url = os.getenv("PG_VECTOR_DATABASE_URL")
     if not pg_vector_url:
         logger.error("PG_VECTOR_DATABASE_URL not set")
         return False
@@ -213,7 +212,7 @@ async def check_vector_database():
                 return False
             
             # Check if tables exist
-            tables = ['tenant_documents', 'document_chunks', 'chunk_relationships', 'retrieval_sessions']
+            tables = ["tenant_documents", "document_chunks", "chunk_relationships", "retrieval_sessions"]
             for table in tables:
                 result = await conn.execute(text(f"""
                     SELECT EXISTS (
@@ -239,9 +238,9 @@ async def main():
     """Main entry point."""
     import argparse
     
-    parser = argparse.ArgumentParser(description='Initialize pgvector database')
-    parser.add_argument('--check', action='store_true', help='Check if database is initialized')
-    parser.add_argument('--reset', action='store_true', help='Drop and recreate all tables')
+    parser = argparse.ArgumentParser(description="Initialize pgvector database")
+    parser.add_argument("--check", action="store_true", help="Check if database is initialized")
+    parser.add_argument("--reset", action="store_true", help="Drop and recreate all tables")
     args = parser.parse_args()
     
     if args.check:
