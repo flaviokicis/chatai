@@ -1,0 +1,22 @@
+repos:
+  - repo: local
+    hooks:
+      - id: type-check-core
+        name: Type check core modules
+        entry: backend/scripts/type_check.sh
+        language: script
+        files: ^backend/(app/flow_core|app/core)/.*\.py$
+        pass_filenames: false
+        
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        name: MyPy type checking
+        entry: mypy
+        language: python
+        files: ^backend/app/(flow_core|core)/.*\.py$
+        exclude: ^backend/app/flow_core/cli.*\.py$
+        args: [--config-file=backend/mypy.ini, --show-error-codes]
+        additional_dependencies: [types-setuptools]
+        pass_filenames: true

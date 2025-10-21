@@ -46,7 +46,7 @@ class LangChainToolsLLM(LLMClient):
                 "operation": "tool_calling",
                 "tools_available": [getattr(t, "__name__", str(t)) for t in tools],
                 "tools_count": len(tools),
-            }
+            },
         )
 
         try:
@@ -57,7 +57,9 @@ class LangChainToolsLLM(LLMClient):
             raw_calls: list[dict[str, Any]] = getattr(result, "tool_calls", [])
 
             # Extract token usage if available
-            usage = getattr(result, "usage_metadata", None) or getattr(result, "response_metadata", {}).get("usage", {})
+            usage = getattr(result, "usage_metadata", None) or getattr(
+                result, "response_metadata", {}
+            ).get("usage", {})
 
             calls: list[dict[str, Any]] = []
             for tc in raw_calls:
@@ -82,10 +84,7 @@ class LangChainToolsLLM(LLMClient):
             if calls:
                 chosen = None
                 # Prefer our simplified essential tools in this order
-                preferred = (
-                    "PerformAction",
-                    "RequestHumanHandoff",
-                )
+                preferred = ("PerformAction",)
                 for name in preferred:
                     chosen = next((c for c in calls if c.get("name") == name), None)
                     if chosen:
@@ -102,14 +101,17 @@ class LangChainToolsLLM(LLMClient):
                 output=content or json.dumps(out),
                 usage={
                     "input_tokens": usage.get("input_tokens") or usage.get("prompt_tokens", 0),
-                    "output_tokens": usage.get("output_tokens") or usage.get("completion_tokens", 0),
+                    "output_tokens": usage.get("output_tokens")
+                    or usage.get("completion_tokens", 0),
                     "total_tokens": usage.get("total_tokens", 0),
-                } if usage else None,
+                }
+                if usage
+                else None,
                 metadata={
                     "selected_tool": flat_args.get("__tool_name__") if calls else None,
                     "tools_called": len(calls),
                     "has_content": bool(content),
-                }
+                },
             )
             generation.end()
 
@@ -117,10 +119,7 @@ class LangChainToolsLLM(LLMClient):
 
         except Exception as e:
             generation.update(
-                output=f"ERROR: {e}",
-                metadata={"error": str(e), "error_type": type(e).__name__}
+                output=f"ERROR: {e}", metadata={"error": str(e), "error_type": type(e).__name__}
             )
             generation.end()
             raise
-
-

@@ -139,6 +139,13 @@ Tenant (1) ──→ (1) TenantProjectConfig
 
 ### Security Architecture
 
+#### **Admin Authentication**
+
+- Session-based admin authentication is provided for controller endpoints under `/api/controller/*`.
+- Login via `POST /api/controller/auth` issues a session cookie with a 24h expiry; requires `ADMIN_PASSWORD` (and optional `ADMIN_USERNAME`).
+- Rate limiting and cooldowns for admin login attempts use Redis when available; falls back to allowing attempts if Redis is unavailable.
+- Admin-protected routes validate the session on each request.
+
 #### **Encryption at Rest**
 
 - **Implementation**: Custom `EncryptedString` SQLAlchemy type
@@ -162,16 +169,16 @@ Tenant (1) ──→ (1) TenantProjectConfig
 
 ## 🔌 Integration Points
 
-### WhatsApp Integration (Twilio)
+### WhatsApp Integration (Twilio / Cloud API)
 
-- **Webhook**: `POST /webhooks/twilio/whatsapp`
+- **Unified Webhook**: `POST /api/webhooks/whatsapp` (also mounts legacy `POST /api/webhooks/twilio/whatsapp` and non-`/api` legacy path for backward compatibility)
 - **Flow**: Incoming message → Find channel → Create/update thread → Run AI → Reply
 - **Persistence**: All messages automatically saved to database
 - **Security**: Twilio signature validation
 
 ### AI/LLM Integration
 
-- **Framework**: LangChain with Google Gemini
+- **Framework**: LangChain with provider-agnostic initialization (Google Gemini or OpenAI depending on settings)
 - **Context**: Uses tenant project config for personalization
 - **Flow Engine**: Custom decision tree engine in `flow_core/`
 - **Conversation Memory**: Redis-backed session storage
@@ -220,10 +227,15 @@ DATABASE_URL=postgresql+psycopg://user:pass@host:5432/db
 PII_ENCRYPTION_KEY=base64-encoded-32-byte-key
 
 # LLM
+# When llm_provider=openai
+OPENAI_API_KEY=your-openai-key
+# When llm_provider=google
 GOOGLE_API_KEY=your-gemini-key
 
 # Redis (optional, falls back to memory)
+# Either redis_conn_url or redis_url is accepted
 REDIS_URL=redis://localhost:6379/0
+REDIS_CONN_URL=redis://localhost:6379/0
 
 # Twilio
 TWILIO_AUTH_TOKEN=your-token
@@ -261,8 +273,8 @@ PUBLIC_BASE_URL=https://your-domain.com
 ### Health Checks
 
 - **Database**: Connection pool status
-- **Redis**: Cache hit rates
-- **External APIs**: Twilio/Google API availability
+- **Redis**: Store connectivity (falls back to in-memory)
+- **External APIs**: Twilio/WhatsApp Cloud, LLM provider availability
 
 ## 🔮 Future Enhancements
 

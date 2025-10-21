@@ -5,7 +5,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models import (
@@ -44,84 +44,90 @@ def get_or_create_contact(
     phone_number: str | None,
     display_name: str | None,
 ) -> Contact:
-    import hashlib
-
     from sqlalchemy.exc import IntegrityError
 
-    # PROPER SOLUTION: Use phone number hash for reliable deduplication
-    # This bypasses encryption issues entirely
+    # ROBUST APPROACH: Use advisory locks to prevent race conditions
+    # Create a deterministic lock key based on tenant_id and external_id
+    lock_key = abs(hash(f"{tenant_id}:{external_id}")) % (2**31)  # PostgreSQL advisory lock key
 
-    if not phone_number:
-        # Extract phone from external_id if not provided
-        if external_id.startswith("whatsapp:"):
-            phone_number = external_id.replace("whatsapp:", "").replace("+", "")
+    # Acquire an advisory lock to prevent concurrent creation of the same contact
+    session.execute(text("SELECT pg_advisory_lock(:lock_key)"), {"lock_key": lock_key})
 
-    if phone_number:
-        # Create a consistent hash of the phone number for deduplication
-        phone_hash = hashlib.sha256(f"{tenant_id}:{phone_number}".encode()).hexdigest()
-
-        # First, try to find existing contact by phone number (decrypted comparison)
-        all_contacts = session.execute(
-            select(Contact).where(
-                Contact.tenant_id == tenant_id,
-                Contact.deleted_at.is_(None)
-            )
-        ).scalars().all()
-
-        # Check each contact's decrypted phone_number
-        for contact in all_contacts:
-            if contact.phone_number and contact.phone_number.replace("+", "") == phone_number.replace("+", ""):
-                logger.debug("Found existing contact by phone number: %s", phone_number)
-                # Update external_id if it's different (shouldn't happen but just in case)
-                if contact.external_id != external_id:
-                    logger.warning("Contact phone matches but external_id differs - updating external_id")
-                    contact.external_id = external_id
-                # Update other info if missing
-                if not contact.display_name and display_name:
-                    contact.display_name = display_name
-                return contact
-
-    # No existing contact found, create new one
     try:
-        contact = Contact(
-            tenant_id=tenant_id,
-            external_id=external_id,
-            phone_number=phone_number,
-            display_name=display_name,
+        # Search all contacts for this tenant and decrypt external_id to find matches
+        all_contacts = (
+            session.execute(
+                select(Contact).where(Contact.tenant_id == tenant_id, Contact.deleted_at.is_(None))
+            )
+            .scalars()
+            .all()
         )
-        session.add(contact)
-        session.flush()
 
-        logger.debug("Created new contact for phone: %s", phone_number)
-        return contact
+        # Search for existing contact by decrypting and comparing external_id
+        for contact in all_contacts:
+            try:
+                if contact.external_id == external_id:
+                    logger.debug("Found existing contact by external_id: %s", external_id)
+                    # Update other info if missing
+                    if not contact.display_name and display_name:
+                        contact.display_name = display_name
+                    if not contact.phone_number and phone_number:
+                        contact.phone_number = phone_number
+                    return contact
+            except Exception:
+                # Skip contacts that can't be decrypted (shouldn't happen in normal operation)
+                continue
 
-    except IntegrityError as e:
-        # Constraint violation - try to find the contact again
-        session.rollback()
-        logger.warning("Contact creation failed due to constraint violation: %s", e)
+        # No existing contact found, create new one
+        try:
+            contact = Contact(
+                tenant_id=tenant_id,
+                external_id=external_id,
+                phone_number=phone_number,
+                display_name=display_name,
+            )
+            session.add(contact)
+            session.flush()
 
-        # Search again by phone number
-        if phone_number:
-            all_contacts = session.execute(
-                select(Contact).where(
-                    Contact.tenant_id == tenant_id,
-                    Contact.deleted_at.is_(None)
+            logger.debug("Created new contact for external_id: %s", external_id)
+            return contact
+
+        except IntegrityError as e:
+            # This should be very rare now due to advisory locking
+            session.rollback()
+            logger.warning("Contact creation failed despite advisory lock: %s", e)
+
+            # Final attempt - search once more
+            all_contacts = (
+                session.execute(
+                    select(Contact).where(
+                        Contact.tenant_id == tenant_id, Contact.deleted_at.is_(None)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
             for contact in all_contacts:
-                if contact.phone_number and contact.phone_number.replace("+", "") == phone_number.replace("+", ""):
-                    logger.debug("Found existing contact after constraint violation by phone: %s", phone_number)
-                    return contact
+                try:
+                    if contact.external_id == external_id:
+                        logger.debug("Found contact in final search: %s", external_id)
+                        return contact
+                except Exception:
+                    continue
 
-        # Still not found
-        logger.error("Constraint violation but no matching contact found for phone: %s", phone_number)
-        raise RuntimeError(f"Failed to create or find contact for phone: {phone_number}")
+            # Still not found - this should not happen
+            logger.error(
+                "Failed to create or find contact even with advisory lock: %s", external_id
+            )
+            raise RuntimeError(f"Failed to create or find contact for external_id: {external_id}")
 
-    except Exception as e:
-        logger.error("Unexpected error in get_or_create_contact: %s", e)
-        session.rollback()
-        raise e
+    finally:
+        # Always release the advisory lock
+        session.execute(text("SELECT pg_advisory_unlock(:lock_key)"), {"lock_key": lock_key})
+
+    # This should never be reached, but just in case
+    raise RuntimeError(f"Unexpected code path in get_or_create_contact for: {external_id}")
 
 
 def get_or_create_thread(
@@ -162,7 +168,7 @@ def get_or_create_thread(
                 ChatThread.tenant_id == tenant_id,
                 ChatThread.channel_instance_id == channel_instance_id,
                 ChatThread.contact_id == contact_id,
-                ChatThread.deleted_at.is_(None)
+                ChatThread.deleted_at.is_(None),
             )
         ).scalar_one_or_none()
 
@@ -194,7 +200,7 @@ def get_or_create_thread(
                     ChatThread.tenant_id == tenant_id,
                     ChatThread.channel_instance_id == channel_instance_id,
                     ChatThread.contact_id == contact_id,
-                    ChatThread.deleted_at.is_(None)
+                    ChatThread.deleted_at.is_(None),
                 )
             ).scalar_one_or_none()
             if thread:
@@ -240,6 +246,11 @@ def create_message(
     )
     session.add(message)
     session.flush()
+    
+    thread = session.get(ChatThread, thread_id)
+    if thread:
+        thread.last_message_at = message.created_at
+    
     return message
 
 
@@ -262,9 +273,11 @@ def list_flow_chat_messages(session: Session, flow_id: UUID) -> Sequence[FlowCha
     """Return all chat messages for a flow ordered by creation time, excluding cleared messages."""
 
     # Get the latest cleared_at timestamp for this flow
-    chat_session = session.execute(
-        select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
-    ).scalars().first()
+    chat_session = (
+        session.execute(select(FlowChatSession).where(FlowChatSession.flow_id == flow_id))
+        .scalars()
+        .first()
+    )
 
     cleared_at = chat_session.cleared_at if chat_session else None
 
@@ -277,20 +290,16 @@ def list_flow_chat_messages(session: Session, flow_id: UUID) -> Sequence[FlowCha
     if cleared_at:
         query = query.where(FlowChatMessage.created_at > cleared_at)
 
-    return (
-        session.execute(query.order_by(FlowChatMessage.created_at))
-        .scalars()
-        .all()
-    )
+    return session.execute(query.order_by(FlowChatMessage.created_at)).scalars().all()
 
 
-def get_latest_assistant_message(
-    session: Session, flow_id: UUID
-) -> FlowChatMessage | None:
+def get_latest_assistant_message(session: Session, flow_id: UUID) -> FlowChatMessage | None:
     # Get the latest cleared_at timestamp for this flow
-    chat_session = session.execute(
-        select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
-    ).scalars().first()
+    chat_session = (
+        session.execute(select(FlowChatSession).where(FlowChatSession.flow_id == flow_id))
+        .scalars()
+        .first()
+    )
 
     cleared_at = chat_session.cleared_at if chat_session else None
 
@@ -304,11 +313,7 @@ def get_latest_assistant_message(
     if cleared_at:
         query = query.where(FlowChatMessage.created_at > cleared_at)
 
-    return (
-        session.execute(query.order_by(desc(FlowChatMessage.created_at)))
-        .scalars()
-        .first()
-    )
+    return session.execute(query.order_by(desc(FlowChatMessage.created_at))).scalars().first()
 
 
 def clear_flow_chat_messages(session: Session, flow_id: UUID) -> None:
@@ -316,9 +321,11 @@ def clear_flow_chat_messages(session: Session, flow_id: UUID) -> None:
     from datetime import datetime
 
     # Get or create the chat session record
-    chat_session = session.execute(
-        select(FlowChatSession).where(FlowChatSession.flow_id == flow_id)
-    ).scalars().first()
+    chat_session = (
+        session.execute(select(FlowChatSession).where(FlowChatSession.flow_id == flow_id))
+        .scalars()
+        .first()
+    )
 
     if not chat_session:
         chat_session = FlowChatSession(flow_id=flow_id)
@@ -342,7 +349,18 @@ def create_tenant_with_config(
     target_audience: str | None = None,
     communication_style: str | None = None,
 ) -> Tenant:
-    """Create a tenant with associated project configuration."""
+    """Create a tenant with associated project configuration.
+    
+    If no communication_style is provided, defaults to 'concise_direct' personality.
+    """
+    from app.core.personality_presets import get_personality_by_id
+    
+    # Set default communication style to 'concise_direct' if not provided
+    if communication_style is None:
+        default_personality = get_personality_by_id("concise_direct")
+        if default_personality:
+            communication_style = default_personality.communication_style
+    
     tenant = Tenant(
         owner_first_name=first_name,
         owner_last_name=last_name,
@@ -463,8 +481,9 @@ def get_channel_instances_by_tenant(session: Session, tenant_id: UUID) -> Sequen
 def get_channel_instance_by_id(session: Session, channel_id: UUID) -> ChannelInstance | None:
     """Get a channel instance by its ID."""
     return session.execute(
-        select(ChannelInstance)
-        .where(ChannelInstance.id == channel_id, ChannelInstance.deleted_at.is_(None))
+        select(ChannelInstance).where(
+            ChannelInstance.id == channel_id, ChannelInstance.deleted_at.is_(None)
+        )
     ).scalar_one_or_none()
 
 
@@ -551,8 +570,7 @@ def get_flows_by_channel_instance(session: Session, channel_instance_id: UUID) -
 def get_flow_by_id(session: Session, flow_id: UUID) -> Flow | None:
     """Get a specific flow by its ID."""
     return session.execute(
-        select(Flow)
-        .where(Flow.id == flow_id, Flow.deleted_at.is_(None))
+        select(Flow).where(Flow.id == flow_id, Flow.deleted_at.is_(None))
     ).scalar_one_or_none()
 
 
@@ -710,7 +728,9 @@ def update_contact_consent(
     return contact
 
 
-def get_threads_needing_human_review(session: Session, tenant_id: UUID | None = None) -> list[ChatThread]:
+def get_threads_needing_human_review(
+    session: Session, tenant_id: UUID | None = None
+) -> list[ChatThread]:
     """Get threads that have requested human handoff but haven't been reviewed yet."""
     query = select(ChatThread).where(
         ChatThread.human_handoff_requested_at.is_not(None),
@@ -720,7 +740,9 @@ def get_threads_needing_human_review(session: Session, tenant_id: UUID | None = 
     if tenant_id:
         query = query.where(ChatThread.tenant_id == tenant_id)
 
-    return list(session.execute(query.order_by(ChatThread.human_handoff_requested_at.desc())).scalars())
+    return list(
+        session.execute(query.order_by(ChatThread.human_handoff_requested_at.desc())).scalars()
+    )
 
 
 def get_completed_threads(session: Session, tenant_id: UUID | None = None) -> list[ChatThread]:
@@ -777,12 +799,16 @@ def create_flow_version(
     session.flush()
 
     # Clean up old versions (keep only last 50)
-    old_versions = session.execute(
-        select(FlowVersion)
-        .where(FlowVersion.flow_id == flow_id)
-        .order_by(desc(FlowVersion.version_number))
-        .offset(50)
-    ).scalars().all()
+    old_versions = (
+        session.execute(
+            select(FlowVersion)
+            .where(FlowVersion.flow_id == flow_id)
+            .order_by(desc(FlowVersion.version_number))
+            .offset(50)
+        )
+        .scalars()
+        .all()
+    )
 
     for old_version in old_versions:
         session.delete(old_version)
@@ -790,11 +816,7 @@ def create_flow_version(
     return version
 
 
-def get_flow_versions(
-    session: Session,
-    flow_id: UUID,
-    limit: int = 20
-) -> Sequence[FlowVersion]:
+def get_flow_versions(session: Session, flow_id: UUID, limit: int = 20) -> Sequence[FlowVersion]:
     """Get flow version history."""
     return (
         session.execute(
@@ -809,16 +831,12 @@ def get_flow_versions(
 
 
 def get_flow_version_by_number(
-    session: Session,
-    flow_id: UUID,
-    version_number: int
+    session: Session, flow_id: UUID, version_number: int
 ) -> FlowVersion | None:
     """Get a specific flow version by number."""
     return session.execute(
-        select(FlowVersion)
-        .where(
-            FlowVersion.flow_id == flow_id,
-            FlowVersion.version_number == version_number
+        select(FlowVersion).where(
+            FlowVersion.flow_id == flow_id, FlowVersion.version_number == version_number
         )
     ).scalar_one_or_none()
 
@@ -836,7 +854,9 @@ def update_flow_with_versioning(
         return None
 
     # Create version snapshot of current state before updating
-    logger.info(f"Repository: About to create version snapshot for flow {flow_id}, current version: {flow.version}")
+    logger.info(
+        f"Repository: About to create version snapshot for flow {flow_id}, current version: {flow.version}"
+    )
     try:
         created_version = create_flow_version(
             session,
@@ -845,9 +865,13 @@ def update_flow_with_versioning(
             change_description=change_description,
             created_by=created_by,
         )
-        logger.info(f"Repository: Created version snapshot {created_version.version_number} for flow {flow_id}")
+        logger.info(
+            f"Repository: Created version snapshot {created_version.version_number} for flow {flow_id}"
+        )
     except Exception as e:
-        logger.error(f"Repository: CRITICAL ERROR - Failed to create version snapshot for flow {flow_id}: {e}")
+        logger.error(
+            f"Repository: CRITICAL ERROR - Failed to create version snapshot for flow {flow_id}: {e}"
+        )
         raise
 
     # Update the flow with explicit change detection for JSON fields
@@ -856,6 +880,7 @@ def update_flow_with_versioning(
 
     # CRITICAL: Force SQLAlchemy to detect the JSON field change
     from sqlalchemy.orm.attributes import flag_modified
+
     flag_modified(flow, "definition")
 
     session.flush()
@@ -871,16 +896,21 @@ def update_flow_with_versioning(
 # Admin-specific repository functions
 def get_active_tenants(session: Session) -> list[Tenant]:
     """Get all active tenants with their project configs."""
-    return list(session.execute(
-        select(Tenant).options(selectinload(Tenant.project_config))
-        .where(Tenant.deleted_at.is_(None))
-        .order_by(Tenant.id)
-    ).scalars().all())
+    return list(
+        session.execute(
+            select(Tenant)
+            .options(selectinload(Tenant.project_config))
+            .where(Tenant.deleted_at.is_(None))
+            .order_by(Tenant.id)
+        )
+        .scalars()
+        .all()
+    )
 
 
 def get_active_tenants_with_counts(session: Session) -> list[tuple[Tenant, int, int]]:
     """Get all active tenants with their channel and flow counts in a single optimized query.
-    
+
     Returns:
         List of tuples: (tenant, channel_count, flow_count)
     """
@@ -889,10 +919,7 @@ def get_active_tenants_with_counts(session: Session) -> list[tuple[Tenant, int, 
 
     # Subquery for channel counts
     channel_counts = (
-        select(
-            ChannelInstance.tenant_id,
-            func.count(ChannelInstance.id).label("channel_count")
-        )
+        select(ChannelInstance.tenant_id, func.count(ChannelInstance.id).label("channel_count"))
         .where(ChannelInstance.deleted_at.is_(None))
         .group_by(ChannelInstance.tenant_id)
         .subquery()
@@ -900,10 +927,7 @@ def get_active_tenants_with_counts(session: Session) -> list[tuple[Tenant, int, 
 
     # Subquery for flow counts
     flow_counts = (
-        select(
-            Flow.tenant_id,
-            func.count(Flow.id).label("flow_count")
-        )
+        select(Flow.tenant_id, func.count(Flow.id).label("flow_count"))
         .where(Flow.deleted_at.is_(None))
         .group_by(Flow.tenant_id)
         .subquery()
@@ -914,7 +938,7 @@ def get_active_tenants_with_counts(session: Session) -> list[tuple[Tenant, int, 
         select(
             Tenant,
             func.coalesce(channel_counts.c.channel_count, 0).label("channel_count"),
-            func.coalesce(flow_counts.c.flow_count, 0).label("flow_count")
+            func.coalesce(flow_counts.c.flow_count, 0).label("flow_count"),
         )
         .options(selectinload(Tenant.project_config))
         .outerjoin(channel_counts, Tenant.id == channel_counts.c.tenant_id)
@@ -929,9 +953,7 @@ def get_active_tenants_with_counts(session: Session) -> list[tuple[Tenant, int, 
 def get_tenant_by_id(session: Session, tenant_id: UUID) -> Tenant | None:
     """Get a tenant by ID with project config."""
     return session.execute(
-        select(Tenant)
-        .options(selectinload(Tenant.project_config))
-        .where(Tenant.id == tenant_id)
+        select(Tenant).options(selectinload(Tenant.project_config)).where(Tenant.id == tenant_id)
     ).scalar_one_or_none()
 
 
@@ -985,16 +1007,16 @@ def delete_tenant_cascade(session: Session, tenant_id: UUID) -> None:
 
 def get_channel_instances_by_tenant(session: Session, tenant_id: UUID) -> list[ChannelInstance]:
     """Get all channel instances for a tenant."""
-    return list(session.execute(
-        select(ChannelInstance).where(ChannelInstance.tenant_id == tenant_id)
-    ).scalars().all())
+    return list(
+        session.execute(select(ChannelInstance).where(ChannelInstance.tenant_id == tenant_id))
+        .scalars()
+        .all()
+    )
 
 
 def get_flows_by_tenant(session: Session, tenant_id: UUID) -> list[Flow]:
     """Get all flows for a tenant."""
-    return list(session.execute(
-        select(Flow).where(Flow.tenant_id == tenant_id)
-    ).scalars().all())
+    return list(session.execute(select(Flow).where(Flow.tenant_id == tenant_id)).scalars().all())
 
 
 def update_flow_definition(session: Session, flow_id: UUID, definition: dict) -> Flow | None:
@@ -1008,6 +1030,7 @@ def update_flow_definition(session: Session, flow_id: UUID, definition: dict) ->
 
     # Force SQLAlchemy to detect JSON field change
     from sqlalchemy.orm.attributes import flag_modified
+
     flag_modified(flow, "definition")
 
     session.flush()

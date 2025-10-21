@@ -49,7 +49,7 @@ class EngineState:
 class SimpleFlowEngine:
     """
     Simplified flow engine that acts as a pure state machine.
-    
+
     Key principles:
     1. No LLM decision-making - just tracks state
     2. Provides current state and available options
@@ -77,7 +77,7 @@ class SimpleFlowEngine:
     ) -> EngineState:
         """
         Get current state and available options.
-        
+
         This is the main entry point that:
         1. Returns the current node state
         2. Provides available navigation options
@@ -122,12 +122,12 @@ class SimpleFlowEngine:
     ) -> EngineState:
         """
         Navigate to a specific node.
-        
+
         Args:
             ctx: Flow context
             target_node_id: Target node ID
             validate: Whether to validate the transition
-        
+
         Returns:
             New engine state after navigation
         """
@@ -170,7 +170,7 @@ class SimpleFlowEngine:
     ) -> None:
         """
         Update an answer in the context.
-        
+
         This is a simple state update - no validation or navigation.
         """
         ctx.answers[field] = value
@@ -187,7 +187,7 @@ class SimpleFlowEngine:
     ) -> EngineState:
         """
         Advance from current node following default edges.
-        
+
         This follows the first valid edge based on guards.
         """
         edges = self._get_edges_from_node(ctx.current_node_id)
@@ -215,7 +215,7 @@ class SimpleFlowEngine:
         ctx.user_intent = None
         ctx.conversation_style = None
         ctx.clarification_count = 0
-        ctx.is_complete = False
+        ctx._is_complete = False  # Reset the internal complete flag
         ctx.escalation_reason = None
 
     # Private helper methods
@@ -325,7 +325,7 @@ class SimpleFlowEngine:
     def _build_terminal_state(self, ctx: FlowContext, node: TerminalNode) -> EngineState:
         """Build state for a terminal node."""
         ctx.mark_node_visited(node.id, NodeStatus.COMPLETED)
-        ctx.is_complete = True
+        ctx._is_complete = True  # Use internal field
 
         return EngineState(
             state=StateSnapshot(

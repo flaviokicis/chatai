@@ -1,4 +1,4 @@
-"""Enhanced compiler for v2 Flow IR with validation and optimization."""
+"""Enhanced compiler for Flow IR with validation and optimization."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ class CompiledValidation:
                     )
 
             elif self.rule.type == "length":
-                if not isinstance(value, (str, list, dict)):
+                if not isinstance(value, str | list | dict):
                     return False, "Value must be a string, list, or dict"
 
                 length = len(value)

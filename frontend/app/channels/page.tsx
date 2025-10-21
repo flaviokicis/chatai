@@ -11,13 +11,8 @@ import { api, getOrInitDefaultTenantId } from "@/lib/api-client";
 import { toast } from "sonner";
 import Link from "next/link";
 
-interface Channel {
-  id: string;
-  channel_type: string;  // Allow any channel type, not just "whatsapp"
-  identifier: string;
-  phone_number?: string; // Match ChannelWithFlows type
-  flows: Flow[];
-}
+// Use the ChannelWithFlows type from api-client
+type Channel = import("@/lib/api-client").ChannelWithFlows;
 
 interface Flow {
   id: string;

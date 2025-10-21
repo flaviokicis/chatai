@@ -1,0 +1,78 @@
+<chunks>
+  <chunk id="chunk_001">
+    <chunk_metadata>
+      <about>Avisos de segurança, voltagem, ferramentas e EPIs necessários antes da instalação</about>
+      <category>installation</category>
+      <keywords>aviso importante, segurança, desligar energia, voltagem 110V-240V, bivolt automático, ferramentas, chave de fenda, alicate, multímetro, escada, EPIs</keywords>
+      <possible_questions>
+        <question id="q1">Preciso desligar a energia antes de instalar a luminária LED?</question>
+        <question id="q2">Quais ferramentas e EPIs são necessários para a instalação?</question>
+      </possible_questions>
+    </chunk_metadata>
+    <chunk_content>
+      Manual de Instalação - Luminárias LED
+      LEIA ANTES DE INSTALAR!!!
+      Avisos Importantes:
+      - CUIDADO: Desligue a energia antes de qualquer instalação.
+      - Voltagem: 110V-240V (bivolt automático na maioria dos modelos).
+
+      Ferramentas Necessárias:
+      - Chave de fenda
+      - Alicate
+      - Multímetro (recomendado)
+      - Escada
+
+      EPIs obrigatórios.
+    </chunk_content>
+    <related_chunks>
+      <related_chunk id="chunk_002">
+        <relationship_reason>Orientações iniciais de segurança e preparo antes de executar a instalação Highbay.</relationship_reason>
+      </related_chunk>
+      <related_chunk id="chunk_003">
+        <relationship_reason>As conexões elétricas devem ser feitas após cumprir os avisos e preparar as ferramentas.</relationship_reason>
+      </related_chunk>
+      <related_chunk id="chunk_007">
+        <relationship_reason>O cumprimento dos avisos (ex.: aterramento) impacta a manutenção da garantia.</relationship_reason>
+      </related_chunk>
+      <related_chunk id="chunk_008">
+        <relationship_reason>Identificação da versão do manual para referência.</relationship_reason>
+      </related_chunk>
+    </related_chunks>
+  </chunk>
+
+  <chunk id="chunk_002">
+    <chunk_metadata>
+      <about>Instalação de luminárias Highbay: verificação estrutural e espaçamento por pé direito</about>
+      <category>installation</category>
+      <keywords>instalação highbay, estrutura do telhado, suporte 5kg, espaçamento entre luminárias, pé direito 6m, pé direito 8m, pé direito 10m, acima de 12m, suporte técnico</keywords>
+      <possible_questions>
+        <question id="q1">Qual o espaçamento recomendado entre luminárias para pé direito de 8 m?</question>
+        <question id="q2">Quanto peso a estrutura do telhado deve suportar por ponto de fixação?</question>
+      </possible_questions>
+    </chunk_metadata>
+    <chunk_content>
+      INSTALAÇÃO HIGHBAY
+      1. Verificar a estrutura do telhado (suporta até 5kg por ponto).
+      2. Distância entre luminárias:
+         - Pé direito 6m: espaçamento de 4-5m
+         - Pé direito 8m: espaçamento de 6-7m
+         - Pé direito 10m: espaçamento de 7-8m
+      ATENÇÃO: Para pé direito acima de 12m, consulte nosso departamento técnico.
+    </chunk_content>
+    <related_chunks>
+      <related_chunk id="chunk_001">
+        <relationship_reason>Segurança e preparação (ferramentas/EPIs) antes da instalação física.</relationship_reason>
+      </related_chunk>
+      <related_chunk id="chunk_003">
+        <relationship_reason>Após fixação mecânica, realizar as conexões elétricas conforme especificado.</relationship_reason>
+      </related_chunk>
+      <related_chunk id="chunk_005">
+        <relationship_reason>Manutenção preventiva influencia performance e vida útil em instalações Highbay.</relationship_reason>
+      </related_chunk>
+    </related_chunks>
+  </chunk>
+
+  <chunk id="chunk_003">
+    <chunk_metadata>
+      <about>Conexões elétricas, cores dos fios e diagrama de ligação com disjuntor, driver e LED</about>
+      <

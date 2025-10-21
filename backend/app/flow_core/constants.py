@@ -80,7 +80,6 @@ HANDOFF_TOO_COMPLEX = "too_complex"
 HANDOFF_TECHNICAL = "technical_issue"
 
 # Tool names (for type safety)
-TOOL_REQUEST_HANDOFF = "RequestHumanHandoff"
 TOOL_PERFORM_ACTION = "PerformAction"
 
 # Model names
@@ -136,6 +135,9 @@ BR_GREETINGS = ["olá", "oi", "boa tarde", "bom dia", "boa noite"]
 # Timeout values (in milliseconds)
 THOUGHT_TRACE_TIMEOUT_MS = 30000
 TOOL_EXECUTION_TIMEOUT_MS = 10000
+
+# Escalation settings
+ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS = 3600  # 1 hour
 
 # Cache settings
 MAX_CONTEXT_CACHE_SIZE = 100

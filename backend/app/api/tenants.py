@@ -19,6 +19,7 @@ router = APIRouter(prefix="/tenants", tags=["public_tenants"])
 
 class PublicTenantResponse(BaseModel):
     """Public tenant info (no sensitive data)."""
+
     id: UUID
     name: str  # Could be derived from owner name or business name
     description: str | None = None
@@ -26,6 +27,7 @@ class PublicTenantResponse(BaseModel):
 
 class PublicFlowResponse(BaseModel):
     """Public flow info (no sensitive definition data)."""
+
     id: UUID
     name: str
     flow_id: str
@@ -34,7 +36,7 @@ class PublicFlowResponse(BaseModel):
 
 @router.get("", response_model=list[PublicTenantResponse])
 async def list_public_tenants(
-    session: Session = Depends(get_db_session)
+    session: Session = Depends(get_db_session),
 ) -> list[PublicTenantResponse]:
     """List tenants (public info only, no auth required)."""
     tenants = get_active_tenants(session)
@@ -42,7 +44,9 @@ async def list_public_tenants(
         PublicTenantResponse(
             id=tenant.id,
             name=f"{tenant.owner_first_name} {tenant.owner_last_name}",
-            description=tenant.project_config.project_description if tenant.project_config else None,
+            description=tenant.project_config.project_description
+            if tenant.project_config
+            else None,
         )
         for tenant in tenants
     ]
@@ -50,8 +54,7 @@ async def list_public_tenants(
 
 @router.get("/{tenant_id}/flows", response_model=list[PublicFlowResponse])
 async def list_public_tenant_flows(
-    tenant_id: UUID,
-    session: Session = Depends(get_db_session)
+    tenant_id: UUID, session: Session = Depends(get_db_session)
 ) -> list[PublicFlowResponse]:
     """List flows for a tenant (public info only, no auth required)."""
     flows = get_flows_by_tenant(session, tenant_id)
@@ -64,5 +67,3 @@ async def list_public_tenant_flows(
         )
         for flow in flows
     ]
-
-

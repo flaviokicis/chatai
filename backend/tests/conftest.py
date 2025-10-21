@@ -1,156 +1,87 @@
-from __future__ import annotations
-
 import os
-from typing import Any
+import sys
+import types
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
 
-from app.agents.base import BaseAgentDeps, FlowAgent
-from app.core.llm import LLMClient
-from app.core.state import InMemoryStore
-from app.flow_core.builders import build_flow_from_questions
-from app.flow_core.compiler import compile_flow
-from app.main import app
-from app.services.human_handoff import LoggingHandoff
+# Ensure the backend root (containing the `app` package) is importable
+_TESTS_DIR = os.path.dirname(__file__)
+_BACKEND_ROOT = os.path.abspath(os.path.join(_TESTS_DIR, os.pardir))
+if _BACKEND_ROOT not in sys.path:
+    sys.path.insert(0, _BACKEND_ROOT)
 
 
-class SeqLLM(LLMClient):
-    def __init__(self, results: list[dict[str, Any]]) -> None:
-        self._results = results
-        self._i = 0
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "unit: Fast unit tests with mocks only")
 
-    def extract(self, prompt: str, tools: list[type[object]]) -> dict[str, Any]:  # type: ignore[override]
-        if self._i < len(self._results):
-            res = self._results[self._i]
-            self._i += 1
-            return res
-        return {}
+    # Stub heavy/optional external modules so unit tests run in isolation
+    if "sqlalchemy" not in sys.modules:
+        sa = types.ModuleType("sqlalchemy")
 
+        def _identity(value, *args, **kwargs):  # type: ignore[no-untyped-def]
+            return value
 
-@pytest.fixture
-def compiled_flow():
-    flow = build_flow_from_questions(
-        [
-            {"key": "a", "prompt": "Ask A?", "priority": 10},
-            {"key": "b", "prompt": "Ask B?", "priority": 20, "dependencies": ["a"]},
-        ],
-        flow_id="test",
-    )
-    return compile_flow(flow)
+        def _return_tuple(*args, **kwargs):  # type: ignore[no-untyped-def]
+            return args or kwargs
 
+        sa.desc = _identity  # type: ignore[attr-defined]
+        sa.select = _return_tuple  # type: ignore[attr-defined]
+        sa.text = _identity  # type: ignore[attr-defined]
 
-@pytest.fixture
-def store() -> InMemoryStore:
-    return InMemoryStore()
+        orm = types.ModuleType("sqlalchemy.orm")
+        orm.Session = object
+        orm.selectinload = _identity  # type: ignore[attr-defined]
+        sa.orm = orm  # type: ignore[attr-defined]
+        sys.modules["sqlalchemy"] = sa
+        sys.modules["sqlalchemy.orm"] = orm
 
+    # Stub heavy repository module to avoid database imports during unit tests
+    if "app.db.repository" not in sys.modules:
+        repo = types.ModuleType("app.db.repository")
 
-@pytest.fixture
-def handoff() -> LoggingHandoff:
-    return LoggingHandoff()
+        def _return_none(*_a, **_k):  # type: ignore[no-untyped-def]
+            return None
 
+        repo.get_tenant_by_id = _return_none  # type: ignore[attr-defined]
+        repo.find_channel_instance_by_identifier = _return_none  # type: ignore[attr-defined]
+        repo.update_tenant_project_config = _return_none  # type: ignore[attr-defined]
+        repo.get_tenant_by_channel_identifier = _return_none  # type: ignore[attr-defined]
+        sys.modules["app.db.repository"] = repo
 
-@pytest.fixture
-def make_agent(store: InMemoryStore, handoff: LoggingHandoff, compiled_flow):
-    def _make(results: list[dict[str, Any]]):
-        llm = SeqLLM(results)
-        deps = BaseAgentDeps(store=store, llm=llm, handoff=handoff)
-        return FlowAgent("u", deps, compiled_flow=compiled_flow)
+    if "langfuse" not in sys.modules:
+        lf = types.ModuleType("langfuse")
 
-    return _make
+        def _get_client():  # type: ignore[no-redef]
+            class _C:  # minimal stub
+                pass
 
+            return _C()
 
-@pytest.fixture(scope="function")
-def db_session():
-    """Create a test database session using in-memory SQLite."""
-    # Set up encryption key for EncryptedString fields
-    if not os.environ.get("PII_ENCRYPTION_KEY"):
-        from cryptography.fernet import Fernet
-        os.environ["PII_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
+        lf.get_client = _get_client
+        sys.modules["langfuse"] = lf
 
-    # Create SQLite engine
-    engine = create_engine(
-        "sqlite:///:memory:",
-        echo=False,
-        connect_args={"check_same_thread": False}
-    )
+    # Stub flow_modification executor to avoid DB/agent deps during imports
+    mod_name = "app.flow_core.actions.flow_modification"
+    if mod_name not in sys.modules:
+        fm = types.ModuleType(mod_name)
 
-    # Disable foreign key constraints for SQLite testing
-    @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=OFF")
-        cursor.close()
+        class FlowModificationExecutor:  # type: ignore[too-many-ancestors]
+            def __init__(self, *_a, **_k):
+                pass
 
-    # Create the specific tables we need for clear chat functionality tests
-    from sqlalchemy import Boolean, Column, DateTime, Integer, MetaData, String, Table, Text
-    from sqlalchemy.dialects.sqlite import JSON
+            @property
+            def action_name(self) -> str:  # pragma: no cover
+                return "modify_flow"
 
-    test_metadata = MetaData()
+            async def execute(self, parameters: dict, context: dict):  # pragma: no cover
+                # Minimal ActionResult-like object
+                return types.SimpleNamespace(
+                    success=True,
+                    is_success=True,
+                    message="ok",
+                    error=None,
+                    data={},
+                )
 
-    # Create flows table (replace JSONB definition with JSON)
-    from sqlalchemy.sql import func
-
-    # Include all columns that the Flow model expects (including TimestampMixin)
-    flows_table = Table(
-        "flows", test_metadata,
-        Column("id", String, primary_key=True),
-        Column("tenant_id", String),
-        Column("channel_instance_id", String),
-        Column("name", String),
-        Column("flow_id", String),
-        Column("definition", JSON),  # JSONB -> JSON
-        Column("is_active", Boolean, default=True),
-        Column("version", Integer, default=1),
-        Column("created_at", DateTime, nullable=False, server_default=func.now()),
-        Column("updated_at", DateTime, nullable=False, server_default=func.now()),
-        Column("deleted_at", DateTime, nullable=True),  # From TimestampMixin
-    )
-
-    # Create flow_chat_messages table
-    # Include all columns that FlowChatMessage model expects
-    flow_chat_messages_table = Table(
-        "flow_chat_messages", test_metadata,
-        Column("id", String, primary_key=True),
-        Column("flow_id", String),
-        Column("role", String),
-        Column("content", Text),
-        Column("created_at", DateTime, nullable=False, server_default=func.now()),
-        Column("updated_at", DateTime, nullable=False, server_default=func.now()),
-        Column("deleted_at", DateTime, nullable=True),  # From TimestampMixin
-    )
-
-    # Create flow_chat_sessions table
-    # Include all columns that FlowChatSession model expects
-    flow_chat_sessions_table = Table(
-        "flow_chat_sessions", test_metadata,
-        Column("id", String, primary_key=True),
-        Column("flow_id", String),
-        Column("cleared_at", DateTime, nullable=True),
-        Column("created_at", DateTime, nullable=False, server_default=func.now()),
-        Column("updated_at", DateTime, nullable=False, server_default=func.now()),
-        Column("deleted_at", DateTime, nullable=True),  # From TimestampMixin
-    )
-
-    # Create tables
-    test_metadata.create_all(bind=engine)
-
-    # Create session
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    session = SessionLocal()
-
-    try:
-        yield session
-    finally:
-        session.close()
-
-
-@pytest.fixture(scope="function")
-def client():
-    """Create a test client for FastAPI."""
-    return TestClient(app)
-
-
-
+        fm.FlowModificationExecutor = FlowModificationExecutor
+        sys.modules[mod_name] = fm

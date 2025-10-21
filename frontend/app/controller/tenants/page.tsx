@@ -384,7 +384,7 @@ export default function TenantsManagementPage(): React.JSX.Element {
           </div>
           <div className="flex space-x-2">
             <Button onClick={navigateToConversations} variant="outline">
-              <Settings className="h-4 w-4 mr-2" />
+              <MessageSquare className="h-4 w-4 mr-2" />
               Conversations
             </Button>
             <Button onClick={handleLogout} variant="outline">

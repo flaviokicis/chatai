@@ -41,7 +41,10 @@ class TenantService:
         target_audience: str | None = None,
         communication_style: str | None = None,
     ) -> Tenant:
-        """Create a new tenant with project configuration."""
+        """Create a new tenant with project configuration.
+        
+        If no communication_style is provided, defaults to 'concise_direct' personality.
+        """
         try:
             tenant = repository.create_tenant_with_config(
                 self.session,

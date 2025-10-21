@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     redis_password: str | None = Field(default=None, alias="REDIS_PASSWORD")
     # Database
     database_url: str | None = Field(default=None, alias="DATABASE_URL")
+    # Vector database URL for pgvector
+    pg_vector_database_url: str | None = Field(default=None, alias="PG_VECTOR_DATABASE_URL")
     # Legacy debug flag - DEPRECATED: Use DEVELOPMENT_MODE instead
     debug: bool = Field(default=False, alias="DEBUG")
     # Development mode flag - THE UNIFIED FLAG for all development features
@@ -38,7 +40,9 @@ class Settings(BaseSettings):
     admin_username: str = Field(default="super@inboxed.com", alias="ADMIN_USERNAME")
     admin_password: str | None = Field(default=None, alias="ADMIN_PASSWORD")
     # Audio validation
-    max_audio_duration_seconds: int = Field(default=300, alias="MAX_AUDIO_DURATION_SECONDS")  # 5 minutes
+    max_audio_duration_seconds: int = Field(
+        default=300, alias="MAX_AUDIO_DURATION_SECONDS"
+    )  # 5 minutes
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -72,6 +76,16 @@ class Settings(BaseSettings):
             return self.database_url
         return "postgresql+psycopg://postgres:postgres@localhost:5432/chatai"
 
+    @property
+    def vector_database_url(self) -> str:
+        """Return pgvector database URL, falling back to main database if not specified.
+        
+        Prefers PG_VECTOR_DATABASE_URL, falls back to DATABASE_URL, then default.
+        """
+        if self.pg_vector_database_url and self.pg_vector_database_url.strip():
+            return self.pg_vector_database_url
+        return self.sqlalchemy_database_url
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -81,7 +95,7 @@ def get_settings() -> Settings:
 def is_debug_enabled() -> bool:
     """
     DEPRECATED: Use is_development_mode() instead.
-    
+
     This function is kept for backward compatibility only.
     """
     return is_development_mode()
@@ -90,11 +104,11 @@ def is_debug_enabled() -> bool:
 def is_development_mode() -> bool:
     """
     Unified function to check if we're in development mode.
-    
+
     This should be used throughout the codebase for ANY development-only features.
-    
+
     Returns True ONLY if DEVELOPMENT_MODE=true environment variable is set.
-    
+
     This is the single source of truth for development vs production mode.
     """
     try:

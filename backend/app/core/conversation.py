@@ -42,12 +42,10 @@ def run_agent_turn(
         limiter = getattr(app_context, "rate_limiter", None)
         provider = getattr(app_context, "config_provider", None)
         tenant_id = "default"
-        try:
-            meta = getattr(inbound, "metadata", {})
-            if isinstance(meta, dict) and isinstance(meta.get("tenant_id"), str):
-                tenant_id = meta["tenant_id"]
-        except Exception:
-            tenant_id = "default"
+        # Safely access tenant_id from typed metadata
+        if hasattr(inbound, "metadata") and inbound.metadata.tenant_id:
+            tenant_id = str(inbound.metadata.tenant_id)
+
         if limiter is not None:
             limits_raw = provider.get_rate_limit_params(tenant_id) if provider else None
             params = RateLimitParams(
@@ -68,9 +66,7 @@ def run_agent_turn(
                 )
     except Exception:
         # Never block the turn on rate limiter failures
-        logger.warning(
-            "Rate limiter check failed; proceeding without limiting", exc_info=True
-        )
+        logger.warning("Rate limiter check failed; proceeding without limiting", exc_info=True)
 
     history = None
     if hasattr(app_context.store, "get_message_history"):

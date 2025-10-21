@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader } from "@/components/ui/page-header";
-import { Globe, Users, MessageCircle, FileText, Loader2 } from "lucide-react";
+import { PersonalitySelector } from "@/components/ui/personality-selector";
+import { Globe, Users, MessageCircle, FileText, Loader2, Sparkles, AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTenant, useUpdateTenantConfig } from "@/lib/hooks/use-api";
 import { useState, useEffect } from "react";
@@ -184,10 +185,71 @@ Exemplo: Profissionais ocupados de 25 a 45 anos que valorizam eficiência e resu
                 </span>
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-6">
+              {/* Personality Preset Selector */}
+              <div className="space-y-4">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-yellow-500" />
+                  <Label className="text-sm font-medium">
+                    Escolha uma personalidade pronta
+                  </Label>
+                </div>
+                
+                {formData.communication_style && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded-lg border border-amber-200 dark:border-amber-800 space-y-3">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="text-sm text-amber-800 dark:text-amber-200 font-medium">
+                          Atenção: Estilo personalizado será substituído
+                        </p>
+                        <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                          Selecionar uma personalidade pronta irá substituir o texto abaixo:
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className="bg-white dark:bg-gray-900 p-3 rounded border border-amber-300 dark:border-amber-700">
+                      <div className="max-h-32 overflow-y-auto">
+                        <p className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words font-mono">
+                          {formData.communication_style.length > 500 
+                            ? formData.communication_style.substring(0, 500) + "..." 
+                            : formData.communication_style}
+                        </p>
+                      </div>
+                      {formData.communication_style.length > 500 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 italic">
+                          Texto truncado ({formData.communication_style.length} caracteres no total)
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
+                <PersonalitySelector 
+                  tenantId={tenant?.id || ""}
+                  onPersonalityChange={(personalityId) => {
+                    // Reload tenant data to get the updated communication style
+                    window.location.reload();
+                  }}
+                />
+              </div>
+              
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">
+                    ou escreva seu próprio
+                  </span>
+                </div>
+              </div>
+              
+              {/* Custom Communication Style */}
               <div className="space-y-2">
                 <Label htmlFor="communication-style" className="text-sm font-medium">
-                  Compartilhe exemplos de como você se comunica com clientes
+                  Estilo de comunicação personalizado
                 </Label>
                 <Textarea
                   id="communication-style"

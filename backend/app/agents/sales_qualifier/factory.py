@@ -8,6 +8,7 @@ if TYPE_CHECKING:
 
 from app.flow_core.builders import build_flow_from_question_graph_params, build_flow_from_questions
 from app.flow_core.compiler import compile_flow
+from app.flow_core.config_types import QuestionConfig
 
 from .agent import SalesQualifierAgent
 
@@ -30,11 +31,23 @@ def _build_paths_and_settings(params: dict[str, Any]) -> tuple[dict[str, object]
             for name, section in paths.items():
                 if not isinstance(section, dict):
                     continue
-                path_qs = section.get("questions", [])
-                if not isinstance(path_qs, list):
+                path_qs_raw = section.get("questions", [])
+                if not isinstance(path_qs_raw, list):
                     continue
-                combined = [*global_qs, *[q for q in path_qs if isinstance(q, dict)]]
-                flow = build_flow_from_questions(combined, flow_id=f"combined:{name}")
+
+                # Combine global and path-specific questions
+                combined_raw = [*global_qs, *[q for q in path_qs_raw if isinstance(q, dict)]]
+
+                # Convert raw dicts to typed QuestionConfig objects
+                combined_typed: list[QuestionConfig] = []
+                for q_data in combined_raw:
+                    try:
+                        combined_typed.append(QuestionConfig(**q_data))
+                    except (TypeError, ValueError):
+                        # Skip invalid question data
+                        continue
+
+                flow = build_flow_from_questions(combined_typed, flow_id=f"combined:{name}")
                 path_compiled[str(name)] = compile_flow(flow)
     return path_compiled, {}
 

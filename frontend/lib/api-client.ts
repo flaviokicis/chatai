@@ -240,7 +240,7 @@ export const api = {
 
   // Channel endpoints (user-accessible, no admin auth required)
   channels: {
-    list: async (tenantId?: string): Promise<ChannelInstance[]> => {
+    list: async (tenantId?: string): Promise<ChannelWithFlows[]> => {
       const id = tenantId || (await getOrInitDefaultTenantId());
       return apiRequest(`/api/channels/tenant/${id}`);
     },

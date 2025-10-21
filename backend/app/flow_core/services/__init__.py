@@ -1,7 +1,7 @@
-"""Flow core services with clean architecture and clear boundaries.
+"""Flow core services with clear boundaries.
 
 This module contains services that handle specific responsibilities
-in the flow processing system, following FAANG-level architecture principles.
+in the flow processing system.
 """
 
 from .message_generator import MessageGenerationService

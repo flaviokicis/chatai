@@ -16,24 +16,24 @@ from app.db.session import create_session
 
 def _patch_signature_validation(monkeypatch):
     """Bypass Twilio signature validation in tests."""
-    from app.whatsapp.twilio_adapter import TwilioWhatsAppAdapter
+    from app.whatsapp.whatsapp_api_adapter import WhatsAppApiAdapter
 
     async def _ok(_self, request, _sig):
         form = await request.form()
         return {k: str(v) for k, v in form.items()}
 
-    monkeypatch.setattr(TwilioWhatsAppAdapter, "validate_and_parse", _ok)
+    monkeypatch.setattr(WhatsAppApiAdapter, "validate_and_parse", _ok)
 
 
 def create_test_tenant_with_flow(
     flow_definition: dict[str, Any] | None = None,
     tenant_name: str = "Test",
     channel_number: str | None = None,
-    flow_name: str = "Test Flow"
+    flow_name: str = "Test Flow",
 ) -> tuple[Any, Any, Any, str]:
     """
     Create a test tenant with flow in database.
-    
+
     Returns:
         tuple: (tenant, channel_instance, flow, channel_number)
     """
@@ -50,7 +50,7 @@ def create_test_tenant_with_flow(
             email=f"test-{test_id}@example.com",
             project_description="Test project",
             target_audience="Test audience",
-            communication_style="Test style"
+            communication_style="Test style",
         )
 
         # Create WhatsApp channel with unique number if not provided
@@ -63,7 +63,7 @@ def create_test_tenant_with_flow(
             channel_type=ChannelType.whatsapp,
             identifier=channel_number,
             phone_number=channel_number.replace("whatsapp:", ""),
-            extra={"display_name": "Test"}
+            extra={"display_name": "Test"},
         )
 
         # Use provided flow definition or create a simple default
@@ -77,22 +77,18 @@ def create_test_tenant_with_flow(
                         "id": "welcome",
                         "kind": "Question",
                         "key": "intention",
-                        "prompt": "What are you looking to accomplish today?"
+                        "prompt": "What are you looking to accomplish today?",
                     },
-                    {
-                        "id": "complete",
-                        "kind": "Terminal",
-                        "reason": "Thank you!"
-                    }
+                    {"id": "complete", "kind": "Terminal", "reason": "Thank you!"},
                 ],
                 "edges": [
                     {
                         "source": "welcome",
                         "target": "complete",
                         "guard": {"fn": "answers_has", "args": {"key": "intention"}},
-                        "priority": 0
+                        "priority": 0,
                     }
-                ]
+                ],
             }
 
         flow = create_flow(
@@ -101,7 +97,7 @@ def create_test_tenant_with_flow(
             channel_instance_id=channel.id,
             name=flow_name,
             flow_id=f"test_flow_{test_id}",
-            definition=flow_definition
+            definition=flow_definition,
         )
 
         session.commit()
@@ -125,46 +121,42 @@ def create_sales_qualifier_flow() -> dict[str, Any]:
                 "id": "start",
                 "kind": "Question",
                 "key": "intention",
-                "prompt": "O que você está buscando realizar hoje?"
+                "prompt": "O que você está buscando realizar hoje?",
             },
             {
                 "id": "budget_question",
                 "kind": "Question",
                 "key": "budget",
-                "prompt": "Você tem alguma faixa de orçamento em mente?"
+                "prompt": "Você tem alguma faixa de orçamento em mente?",
             },
             {
                 "id": "timeframe_question",
                 "kind": "Question",
                 "key": "timeframe",
-                "prompt": "Qual é o seu prazo ideal?"
+                "prompt": "Qual é o seu prazo ideal?",
             },
-            {
-                "id": "complete",
-                "kind": "Terminal",
-                "reason": "Obrigado pelas informações!"
-            }
+            {"id": "complete", "kind": "Terminal", "reason": "Obrigado pelas informações!"},
         ],
         "edges": [
             {
                 "source": "start",
                 "target": "budget_question",
                 "guard": {"fn": "answers_has", "args": {"key": "intention"}},
-                "priority": 0
+                "priority": 0,
             },
             {
                 "source": "budget_question",
                 "target": "timeframe_question",
                 "guard": {"fn": "answers_has", "args": {"key": "budget"}},
-                "priority": 0
+                "priority": 0,
             },
             {
                 "source": "timeframe_question",
                 "target": "complete",
                 "guard": {"fn": "answers_has", "args": {"key": "timeframe"}},
-                "priority": 0
-            }
-        ]
+                "priority": 0,
+            },
+        ],
     }
 
 
@@ -179,23 +171,21 @@ def create_paths_flow(lock_threshold: int = 2) -> dict[str, Any]:
                 "id": "start",
                 "kind": "Question",
                 "key": "intention",
-                "prompt": "What are you looking to accomplish today?"
+                "prompt": "What are you looking to accomplish today?",
             },
             {
                 "id": "path_selection",
                 "kind": "PathSelection",
                 "paths": {
                     "tennis_court": {
-                        "entry_predicates": [
-                            {"type": "keyword", "any": ["tennis", "court"]}
-                        ],
+                        "entry_predicates": [{"type": "keyword", "any": ["tennis", "court"]}],
                         "questions": [
                             {
                                 "key": "court_type",
                                 "prompt": "Is it indoor or outdoor?",
-                                "priority": 20
+                                "priority": 20,
                             }
-                        ]
+                        ],
                     },
                     "soccer_court": {
                         "entry_predicates": [
@@ -205,63 +195,59 @@ def create_paths_flow(lock_threshold: int = 2) -> dict[str, Any]:
                             {
                                 "key": "field_size",
                                 "prompt": "Approximate field size?",
-                                "priority": 20
+                                "priority": 20,
                             }
-                        ]
-                    }
+                        ],
+                    },
                 },
                 "path_selection": {
                     "lock_threshold": lock_threshold,
-                    "allow_switch_before_lock": True
-                }
+                    "allow_switch_before_lock": True,
+                },
             },
             {
                 "id": "budget_question",
                 "kind": "Question",
                 "key": "budget",
-                "prompt": "Do you have a budget range in mind?"
+                "prompt": "Do you have a budget range in mind?",
             },
             {
                 "id": "timeframe_question",
                 "kind": "Question",
                 "key": "timeframe",
-                "prompt": "What is your ideal timeline?"
+                "prompt": "What is your ideal timeline?",
             },
             {
                 "id": "escalate",
                 "kind": "Escalation",
-                "reason": "Transferindo você para um atendente humano"
+                "reason": "Transferindo você para um atendente humano",
             },
-            {
-                "id": "complete",
-                "kind": "Terminal",
-                "reason": "Thank you!"
-            }
+            {"id": "complete", "kind": "Terminal", "reason": "Thank you!"},
         ],
         "edges": [
             {
                 "source": "start",
                 "target": "path_selection",
                 "guard": {"fn": "answers_has", "args": {"key": "intention"}},
-                "priority": 0
+                "priority": 0,
             },
             {
                 "source": "path_selection",
                 "target": "budget_question",
                 "guard": {"fn": "always"},
-                "priority": 0
+                "priority": 0,
             },
             {
                 "source": "budget_question",
                 "target": "timeframe_question",
                 "guard": {"fn": "answers_has", "args": {"key": "budget"}},
-                "priority": 0
+                "priority": 0,
             },
             {
                 "source": "timeframe_question",
                 "target": "escalate",
                 "guard": {"fn": "answers_has", "args": {"key": "timeframe"}},
-                "priority": 0
-            }
-        ]
+                "priority": 0,
+            },
+        ],
     }

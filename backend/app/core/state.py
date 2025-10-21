@@ -11,7 +11,9 @@ from app.core.redis_keys import RedisKeyBuilder
 logger = logging.getLogger(__name__)
 
 try:
-    from langchain_community.chat_message_histories import RedisChatMessageHistory  # type: ignore[import-not-found]
+    from langchain_community.chat_message_histories import (
+        RedisChatMessageHistory,
+    )
 except Exception:  # pragma: no cover - optional import
     RedisChatMessageHistory = None
 try:
@@ -22,19 +24,32 @@ except Exception:  # pragma: no cover - optional import
 if TYPE_CHECKING:
     from .agent_base import AgentState
 
+from app.core.types import EventDict
+
 
 class ConversationStore(Protocol):
+    _r: Any
+    
+    @property
+    def redis_client(self) -> Any: ...
+    
     def load(self, user_id: str, agent_type: str) -> AgentState | None: ...
 
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None: ...
 
-    def append_event(self, user_id: str, event: dict) -> None: ...
+    def append_event(self, user_id: str, event: EventDict) -> None: ...
 
 
 class InMemoryStore:
     def __init__(self) -> None:
         self._states: dict[tuple[str, str], AgentState] = {}
-        self._events: dict[str, list[dict]] = {}
+        self._events: dict[str, list[EventDict]] = {}
+        self._r: None = None
+
+    @property
+    def redis_client(self) -> Any:
+        """InMemoryStore doesn't use Redis, returns None."""
+        return self._r
 
     def load(self, user_id: str, agent_type: str) -> AgentState | None:
         return self._states.get((user_id, agent_type))
@@ -42,7 +57,15 @@ class InMemoryStore:
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None:
         self._states[(user_id, agent_type)] = state
 
-    def append_event(self, user_id: str, event: dict) -> None:
+    def append_event(self, user_id: str, event: EventDict) -> None:
+        """Append typed event to the event list."""
+        # Validate event has required fields
+        if "timestamp" not in event:
+            import time
+
+            event["timestamp"] = time.time()
+        if "type" not in event:
+            raise ValueError("Event must have a 'type' field")
         self._events.setdefault(user_id, []).append(event)
 
 
@@ -69,6 +92,11 @@ class RedisStore:
         self._state_ttl = int(state_ttl.total_seconds()) if state_ttl else None
         self._events_ttl = int(events_ttl.total_seconds()) if events_ttl else None
 
+    @property
+    def redis_client(self) -> Any:
+        """Public access to Redis client for advanced operations."""
+        return self._r
+
     def _state_key(self, user_id: str, agent_type: str) -> str:
         # Use centralized key builder for consistency with our namespace
         key_builder = RedisKeyBuilder(namespace=self._ns)
@@ -78,15 +106,39 @@ class RedisStore:
         return f"{self._ns}:events:{user_id}"  # Events use simple pattern
 
     def load(self, user_id: str, agent_type: str) -> AgentState | None:
+        """Load agent state with proper typing and validation."""
         raw = self._r.get(self._state_key(user_id, agent_type))
         if not raw:
             return None
         try:
             body = raw.decode("utf-8") if isinstance(raw, bytes | bytearray) else raw
             data = json.loads(body)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to decode state for {user_id}/{agent_type}: {e}")
             return None
-        return data  # type: ignore[no-any-return]
+
+        # For flow agents, try to convert to FlowContext which implements AgentState
+        if agent_type == "flow_agent" and isinstance(data, dict):
+            # Import here to avoid circular dependency
+            from app.flow_core.state import FlowContext
+
+            try:
+                # FlowContext has from_dict method
+                if hasattr(FlowContext, "from_dict"):
+                    return FlowContext.from_dict(data)
+                # Otherwise return the dict - it should implement the protocol
+                # This is a temporary fallback until all agents properly implement AgentState
+                return data  # type: ignore[return-value]
+            except Exception as e:
+                logger.error(f"Failed to reconstruct FlowContext: {e}")
+                return None
+
+        # For other agent types, return the data if it implements the protocol
+        # In practice, agents return dicts that follow the AgentState protocol
+        if isinstance(data, dict):
+            return data  # type: ignore[return-value]
+
+        return None
 
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None:
         # state may be a dict-like as our concrete agents store dicts
@@ -103,7 +155,16 @@ class RedisStore:
         else:
             self._r.set(key, body)
 
-    def append_event(self, user_id: str, event: dict) -> None:
+    def append_event(self, user_id: str, event: EventDict) -> None:
+        """Append typed event with validation."""
+        # Validate event has required fields
+        if "timestamp" not in event:
+            import time
+
+            event["timestamp"] = time.time()
+        if "type" not in event:
+            raise ValueError("Event must have a 'type' field")
+
         key = self._events_key(user_id)
         try:
             self._r.rpush(key, json.dumps(event))
@@ -192,6 +253,69 @@ class RedisStore:
             "Please check your langchain-community version."
         )
         raise RuntimeError(msg)
+
+    def set_escalation_timestamp(self, user_id: str, agent_type: str) -> None:
+        """Mark when escalation occurred for delayed context clearing.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type that escalated
+        """
+        import time
+
+        key = f"{self._ns}:escalation:{user_id}:{agent_type}"
+        self._r.setex(key, 86400, str(time.time()))
+
+    def get_escalation_timestamp(self, user_id: str, agent_type: str) -> float | None:
+        """Get escalation timestamp if exists.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type
+
+        Returns:
+            Timestamp of escalation or None if not escalated
+        """
+        key = f"{self._ns}:escalation:{user_id}:{agent_type}"
+        value = self._r.get(key)
+        if value:
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def clear_escalation_timestamp(self, user_id: str, agent_type: str) -> None:
+        """Clear escalation timestamp.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type
+        """
+        key = f"{self._ns}:escalation:{user_id}:{agent_type}"
+        self._r.delete(key)
+
+    def should_clear_context_after_escalation(
+        self, user_id: str, agent_type: str, grace_period_seconds: int
+    ) -> bool:
+        """Check if enough time has passed since escalation to clear context.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type
+            grace_period_seconds: How long to wait before clearing
+
+        Returns:
+            True if grace period has passed and context should be cleared
+        """
+        import time
+
+        escalation_time = self.get_escalation_timestamp(user_id, agent_type)
+        if escalation_time is None:
+            return False
+
+        elapsed = time.time() - escalation_time
+        return elapsed >= grace_period_seconds
 
     def clear_chat_history(self, user_id: str, agent_type: str | None = None) -> int:
         """Clear chat history for a user and optionally specific agent type.

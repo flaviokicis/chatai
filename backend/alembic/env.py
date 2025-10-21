@@ -68,10 +68,13 @@ def run_migrations_online() -> None:
         # Fallback: use application settings
         try:
             from app.settings import get_settings
+
             settings = get_settings()
             configuration["sqlalchemy.url"] = settings.sqlalchemy_database_url
         except Exception as e:
-            raise RuntimeError(f"No database URL configured. Set DATABASE_URL environment variable or configure alembic.ini. Error: {e}")
+            raise RuntimeError(
+                f"No database URL configured. Set DATABASE_URL environment variable or configure alembic.ini. Error: {e}"
+            )
 
     connectable = engine_from_config(
         configuration,
@@ -80,9 +83,7 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

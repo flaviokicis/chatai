@@ -375,7 +375,15 @@ export default function ConversationsPage(): React.JSX.Element {
               <TableBody>
                 {conversations.map((conversation, index) => {
                   return (
-                  <TableRow key={`${conversation.user_id}-${conversation.agent_type}-${index}`}>
+                  <TableRow 
+                    key={`${conversation.user_id}-${conversation.agent_type}-${index}`}
+                    className="cursor-pointer hover:bg-gray-50"
+                    onClick={() => {
+                      // Navigate to actual chat thread to see all messages
+                      const threadId = conversation.session_id.replace('thread:', '');
+                      router.push(`/chats/${threadId}`);
+                    }}
+                  >
                     <TableCell className="max-w-48">
                       <div className="flex items-center">
                         <User className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
@@ -398,20 +406,7 @@ export default function ConversationsPage(): React.JSX.Element {
                       {formatLastActivity(conversation.last_activity)}
                     </TableCell>
                     <TableCell>
-                      <div className="flex space-x-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            // Navigate to actual chat thread to see all messages
-                            const threadId = conversation.session_id.replace('thread:', '');
-                            router.push(`/chats/${threadId}`);
-                          }}
-                          className="text-green-600 hover:text-green-700"
-                          title="View actual conversation messages"
-                        >
-                          <MessageSquare className="h-3 w-3" />
-                        </Button>
+                      <div className="flex space-x-2" onClick={(e) => e.stopPropagation()}>
                         <Button
                           size="sm"
                           variant="outline"

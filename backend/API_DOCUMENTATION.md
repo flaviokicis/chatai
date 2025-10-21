@@ -7,40 +7,56 @@ Complete API reference for the white-label WhatsApp automation platform.
 ### Base URL
 
 ```
-http://localhost:8000  # Development
+http://localhost:8080  # Development
 https://your-domain.com  # Production
 ```
 
 ### Interactive Documentation
 
-- **Swagger UI**: `http://localhost:8000/docs`
-- **ReDoc**: `http://localhost:8000/redoc`
+- **Swagger UI**: `http://localhost:8080/docs`
+- **ReDoc**: `http://localhost:8080/redoc`
 
 ### Authentication
 
-⚠️ **Currently no authentication implemented** - all endpoints are open. See [ARCHITECTURE.md](./ARCHITECTURE.md) for planned auth strategy.
+- Admin Controller endpoints (`/api/controller/*`) require session-based login via `POST /api/controller/auth`. Set `ADMIN_PASSWORD` in the environment. A session cookie is issued and must be sent on subsequent requests.
+- Public endpoints (`/api/tenants`, `/api/channels`, `/api/chats`, `/api/flows`, `/api/webhooks/*`) are open unless otherwise noted.
+
+### Global API Prefix
+
+All application endpoints are mounted under the global prefix `/api`. Paths shown below are relative to this prefix unless otherwise specified.
 
 ## 📋 API Overview
 
 ### Endpoint Categories
 
-| Category     | Prefix      | Purpose                                  |
-| ------------ | ----------- | ---------------------------------------- |
-| **Admin**    | `/admin`    | Tenant management, configuration         |
-| **Chats**    | `/chats`    | Conversation history, contact management |
-| **Flows**    | `/flows`    | Conversation flow definitions            |
-| **Webhooks** | `/webhooks` | External integrations (Twilio)           |
+| Category             | Prefix                            | Purpose                                        |
+| -------------------- | --------------------------------- | ---------------------------------------------- |
+| **Admin Controller** | `/controller`                     | Admin login; tenant/channel/flow management    |
+| **Public Tenants**   | `/tenants`                        | Public tenant and flow listings                 |
+| **Channels**         | `/channels`                       | Channel instances and associated flows          |
+| **Chats**            | `/chats`                          | Conversation history, contact management        |
+| **Flows**            | `/flows`                          | Flow compilation and example flows              |
+| **Documents**        | `/tenants/{tenant_id}/documents`  | RAG documents upload, status, and clearing      |
+| **Webhooks**         | `/webhooks`                       | External integrations (WhatsApp/Twilio/Cloud)   |
 
 ---
 
-## 🏢 Admin API (`/admin`)
+## 🏢 Admin Controller (`/controller`)
 
 Manage tenants, channels, and conversation flows.
+
+### Admin Login
+
+```http
+POST /api/controller/auth
+```
+
+Authenticates an admin user and issues a session cookie (required for all controller endpoints).
 
 ### Create Tenant
 
 ```http
-POST /admin/tenants
+POST /api/controller/tenants
 ```
 
 Creates a new tenant with project configuration.
@@ -80,7 +96,7 @@ Creates a new tenant with project configuration.
 ### List Tenants
 
 ```http
-GET /admin/tenants
+GET /api/controller/tenants
 ```
 
 Returns all active tenants (soft-deleted tenants excluded).
@@ -103,7 +119,7 @@ Returns all active tenants (soft-deleted tenants excluded).
 ### Create Channel Instance
 
 ```http
-POST /admin/tenants/{tenant_id}/channels
+POST /api/controller/tenants/{tenant_id}/channels
 ```
 
 Adds a WhatsApp number or Instagram account to a tenant.
@@ -144,7 +160,7 @@ Adds a WhatsApp number or Instagram account to a tenant.
 ### List Channel Instances
 
 ```http
-GET /admin/tenants/{tenant_id}/channels
+GET /api/controller/tenants/{tenant_id}/channels
 ```
 
 Returns all channels for a tenant.
@@ -167,7 +183,7 @@ Returns all channels for a tenant.
 ### Create Flow
 
 ```http
-POST /admin/tenants/{tenant_id}/flows
+POST /api/controller/tenants/{tenant_id}/flows
 ```
 
 Uploads a conversation flow definition.
@@ -218,7 +234,7 @@ Uploads a conversation flow definition.
 ### List Flows
 
 ```http
-GET /admin/tenants/{tenant_id}/flows
+GET /api/controller/tenants/{tenant_id}/flows
 ```
 
 Returns all flows for a tenant.
@@ -232,7 +248,7 @@ Access conversation history and manage contacts.
 ### List Chat Threads
 
 ```http
-GET /chats/tenants/{tenant_id}/threads?channel_instance_id=1&limit=50&offset=0
+GET /api/chats/tenants/{tenant_id}/threads?channel_instance_id=1&limit=50&offset=0
 ```
 
 Returns paginated list of conversations.
@@ -277,7 +293,7 @@ Returns paginated list of conversations.
 ### Get Thread Detail
 
 ```http
-GET /chats/tenants/{tenant_id}/threads/{thread_id}
+GET /api/chats/tenants/{tenant_id}/threads/{thread_id}
 ```
 
 Returns complete conversation with all messages.
@@ -333,7 +349,7 @@ Returns complete conversation with all messages.
 ### List Contacts
 
 ```http
-GET /chats/tenants/{tenant_id}/contacts?limit=100&offset=0
+GET /api/chats/tenants/{tenant_id}/contacts?limit=100&offset=0
 ```
 
 Returns all contacts for a tenant.
@@ -359,7 +375,7 @@ Returns all contacts for a tenant.
 ### Update Thread Status
 
 ```http
-PATCH /chats/tenants/{tenant_id}/threads/{thread_id}/status
+PATCH /api/chats/tenants/{tenant_id}/threads/{thread_id}/status
 ```
 
 Changes conversation status (open/closed/archived).
@@ -391,7 +407,7 @@ Changes conversation status (open/closed/archived).
 ### Update Contact Consent
 
 ```http
-POST /chats/tenants/{tenant_id}/contacts/{contact_id}/consent
+POST /api/chats/tenants/{tenant_id}/contacts/{contact_id}/consent
 ```
 
 Manages GDPR/LGPD consent status.
@@ -428,7 +444,7 @@ Manage conversation flow definitions.
 ### Get Example Flow (Raw)
 
 ```http
-GET /flows/example/raw
+GET /api/flows/example/raw
 ```
 
 Returns the example flow JSON from `playground/flow_example.json`.
@@ -436,8 +452,38 @@ Returns the example flow JSON from `playground/flow_example.json`.
 ### Get Example Flow (Compiled)
 
 ```http
-GET /flows/example/compiled
+GET /api/flows/example/compiled
 ```
+
+---
+
+## 📄 Documents API (`/tenants/{tenant_id}/documents`)
+
+Manage tenant documents for Retrieval-Augmented Generation (RAG).
+
+### Upload Document
+
+```http
+POST /api/tenants/{tenant_id}/documents/upload
+```
+
+Uploads and processes a document (PDF, TXT, MD, JSON) for retrieval.
+
+### Document Status
+
+```http
+GET /api/tenants/{tenant_id}/documents/status
+```
+
+Checks if the tenant has any processed documents.
+
+### Clear Documents
+
+```http
+DELETE /api/tenants/{tenant_id}/documents/clear
+```
+
+Deletes all documents and embeddings for the tenant.
 
 Returns the flow compiled by the flow engine (ready for execution).
 
@@ -447,9 +493,18 @@ Returns the flow compiled by the flow engine (ready for execution).
 
 External system integrations.
 
-### Twilio WhatsApp Webhook
+### WhatsApp Webhooks
+
+Primary unified endpoint (supports Twilio and Cloud API):
 
 ```http
+POST /api/webhooks/whatsapp
+```
+
+Legacy Twilio-compatible endpoint (also available without `/api` prefix for backwards compatibility):
+
+```http
+POST /api/webhooks/twilio/whatsapp
 POST /webhooks/twilio/whatsapp
 ```
 
@@ -565,8 +620,13 @@ Simple health check for load balancers.
 ### Complete Tenant Setup
 
 ```bash
-# 1. Create tenant
-curl -X POST http://localhost:8000/admin/tenants \
+# 1. Admin login (get session cookie)
+curl -i -X POST http://localhost:8080/api/controller/auth \
+  -H "Content-Type: application/json" \
+  -d '{"password": "${ADMIN_PASSWORD}"}'
+
+# 2. Create tenant (send Cookie header from previous response)
+curl -X POST http://localhost:8080/api/controller/tenants \
   -H "Content-Type: application/json" \
   -d '{
     "first_name": "John",
@@ -577,8 +637,8 @@ curl -X POST http://localhost:8000/admin/tenants \
     "communication_style": "Friendly but professional"
   }'
 
-# 2. Add WhatsApp number
-curl -X POST http://localhost:8000/admin/tenants/1/channels \
+# 3. Add WhatsApp number
+curl -X POST http://localhost:8080/api/controller/tenants/1/channels \
   -H "Content-Type: application/json" \
   -d '{
     "channel_type": "whatsapp",
@@ -586,8 +646,8 @@ curl -X POST http://localhost:8000/admin/tenants/1/channels \
     "phone_number": "+14155238886"
   }'
 
-# 3. Upload conversation flow
-curl -X POST http://localhost:8000/admin/tenants/1/flows \
+# 4. Upload conversation flow
+curl -X POST http://localhost:8080/api/controller/tenants/1/flows \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Sales Flow",
@@ -601,13 +661,13 @@ curl -X POST http://localhost:8000/admin/tenants/1/flows \
 
 ```bash
 # List recent conversations
-curl http://localhost:8000/chats/tenants/1/threads?limit=10
+curl http://localhost:8080/api/chats/tenants/1/threads?limit=10
 
 # Get conversation detail
-curl http://localhost:8000/chats/tenants/1/threads/1
+curl http://localhost:8080/api/chats/tenants/1/threads/1
 
 # Close conversation
-curl -X PATCH http://localhost:8000/chats/tenants/1/threads/1/status \
+curl -X PATCH http://localhost:8080/api/chats/tenants/1/threads/1/status \
   -H "Content-Type: application/json" \
   -d '{"status": "closed"}'
 ```

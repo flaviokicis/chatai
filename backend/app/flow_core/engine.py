@@ -32,7 +32,7 @@ class EngineResponse:
 class LLMFlowEngine:
     """
     Simplified flow engine that acts as a pure state machine.
-    
+
     Key principles:
     1. No LLM decision-making - just tracks state
     2. Provides current state and available navigation
@@ -120,29 +120,25 @@ class LLMFlowEngine:
                 answer = event["answer"]
                 ctx.answers[node.key] = answer
                 ctx.get_node_state(node.id).status = NodeStatus.COMPLETED
-                return self._advance_from_node(ctx, node, event, project_context)
+                return self._advance_from_node(ctx, node, project_context)
 
             # Handle tool events
             tool_name = event.get("tool_name")
             if tool_name == "RestartConversation":
                 # This is now handled by PerformAction with "restart" action
                 return self._handle_restart(ctx, project_context)
-            if tool_name == "RequestHumanHandoff":
-                return EngineResponse(
-                    kind="escalate",
-                    message="Transferindo você para um atendente humano.",
-                    node_id=node.id,
-                    metadata={"reason": event.get("reason", "requested")},
-                )
+            # RequestHumanHandoff tool is deprecated; use PerformAction with action 'handoff'
 
         # Get available edges for navigation
         edges = self._get_edges_from_node(node.id)
         edge_info = []
         for edge in edges:
-            edge_info.append({
-                "target_node_id": edge.target,
-                "description": self._get_edge_description(edge),
-            })
+            edge_info.append(
+                {
+                    "target_node_id": edge.target,
+                    "description": self._get_edge_description(edge),
+                }
+            )
 
         # Return prompt with navigation options
         return EngineResponse(
@@ -181,11 +177,13 @@ class LLMFlowEngine:
             if ":" in description:
                 path_name = description.split(":", 1)[1].strip()
             path_options.append(path_name)
-            edge_info.append({
-                "target_node_id": edge.target,
-                "description": description,
-                "path_name": path_name,
-            })
+            edge_info.append(
+                {
+                    "target_node_id": edge.target,
+                    "description": description,
+                    "path_name": path_name,
+                }
+            )
 
         ctx.available_paths = path_options
 
@@ -203,7 +201,8 @@ class LLMFlowEngine:
         # Return decision prompt with options
         return EngineResponse(
             kind="prompt",
-            message=getattr(node, "decision_prompt", None) or self._generate_decision_prompt(node, path_options),
+            message=getattr(node, "decision_prompt", None)
+            or self._generate_decision_prompt(node, path_options),
             node_id=node.id,
             metadata={
                 "needs_path_selection": True,
@@ -219,7 +218,7 @@ class LLMFlowEngine:
     ) -> EngineResponse:
         """Process a terminal node."""
         ctx.mark_node_visited(node.id, NodeStatus.COMPLETED)
-        ctx.is_complete = True
+        ctx._is_complete = True  # Use internal field
 
         return EngineResponse(
             kind="terminal",
@@ -232,7 +231,6 @@ class LLMFlowEngine:
         self,
         ctx: FlowContext,
         node: Any,
-        event: dict[str, Any] | None,
         project_context: ProjectContext | None = None,
     ) -> EngineResponse:
         """Advance from current node to next."""
@@ -254,7 +252,7 @@ class LLMFlowEngine:
         """Find the next unanswered question."""
         unanswered = self._get_unanswered_questions(ctx)
         if not unanswered:
-            ctx.is_complete = True
+            ctx._is_complete = True  # Use internal field
             return EngineResponse(
                 kind="terminal",
                 message="Todas as perguntas foram respondidas. Obrigado!",
@@ -287,7 +285,7 @@ class LLMFlowEngine:
         ctx.user_intent = None
         ctx.conversation_style = None
         ctx.clarification_count = 0
-        ctx.is_complete = False
+        ctx._is_complete = False  # Reset the internal complete flag
         ctx.escalation_reason = None
 
         # Process from entry
@@ -302,7 +300,12 @@ class LLMFlowEngine:
         node = self._flow.nodes.get(ctx.current_node_id)
 
         # Ensure pending_field is synchronized with current question node
-        if node and hasattr(node, "key") and hasattr(node, "__class__") and node.__class__.__name__ == "QuestionNode":
+        if (
+            node
+            and hasattr(node, "key")
+            and hasattr(node, "__class__")
+            and node.__class__.__name__ == "QuestionNode"
+        ):
             if ctx.pending_field != node.key:
                 ctx.pending_field = node.key
 
@@ -332,12 +335,14 @@ class LLMFlowEngine:
         for node_id, node in self._flow.nodes.items():
             if isinstance(node, QuestionNode):
                 if node.key not in ctx.answers or ctx.answers[node.key] in (None, ""):
-                    unanswered.append({
-                        "id": node.id,
-                        "key": node.key,
-                        "prompt": node.prompt,
-                        "priority": getattr(node, "priority", 100),
-                    })
+                    unanswered.append(
+                        {
+                            "id": node.id,
+                            "key": node.key,
+                            "prompt": node.prompt,
+                            "priority": getattr(node, "priority", 100),
+                        }
+                    )
 
         return sorted(unanswered, key=lambda x: x["priority"])
 

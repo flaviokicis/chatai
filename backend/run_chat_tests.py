@@ -22,9 +22,12 @@ def run_tests():
     for test_file in test_files:
         print(f"\n📝 Running {test_file}...")
         try:
-            result = subprocess.run([
-                sys.executable, "-m", "pytest", test_file, "-v", "--tb=short"
-            ], check=False, capture_output=True, text=True)
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", test_file, "-v", "--tb=short"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
 
             if result.returncode == 0:
                 print(f"✅ {test_file} - PASSED")
@@ -37,6 +40,7 @@ def run_tests():
 
     print("\n" + "=" * 50)
     print("🏁 Flow chat tests complete!")
+
 
 if __name__ == "__main__":
     run_tests()

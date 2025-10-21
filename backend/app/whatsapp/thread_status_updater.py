@@ -31,7 +31,10 @@ class WhatsAppThreadStatusUpdater(ThreadStatusUpdater):
         request: FlowRequest,
     ) -> None:
         """Update thread status after flow completion."""
-        if flow_response.result not in [FlowProcessingResult.TERMINAL, FlowProcessingResult.ESCALATE]:
+        if flow_response.result not in [
+            FlowProcessingResult.TERMINAL,
+            FlowProcessingResult.ESCALATE,
+        ]:
             return
 
         # Import ChatThread model here to avoid circular imports
@@ -39,7 +42,6 @@ class WhatsAppThreadStatusUpdater(ThreadStatusUpdater):
 
         update_session = create_session()
         try:
-
             thread_for_update = update_session.get(ChatThread, thread_id)
             if not thread_for_update:
                 logger.warning("Thread %s not found for completion update", thread_id)

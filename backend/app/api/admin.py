@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import text
@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.core.app_context import get_app_context
 from app.core.redis_keys import redis_keys
 from app.core.state import RedisStore
+
 # Thought tracing removed - using Langfuse for observability
 from app.db.models import ChannelType
 from app.db.repository import (
@@ -133,7 +134,9 @@ class ConversationInfo(BaseModel):
     is_active: bool = False
     tenant_id: str | None = None
     is_historical: bool = False  # True if from database (completed), False if from Redis (active)
-    flow_name: str | None = None  # Flow identifier for display (e.g., "flow.atendimento_luminarias")
+    flow_name: str | None = (
+        None  # Flow identifier for display (e.g., "flow.atendimento_luminarias")
+    )
 
 
 class ConversationsResponse(BaseModel):
@@ -173,7 +176,7 @@ def get_admin_credentials() -> tuple[str, str]:
     if not settings.admin_password:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Admin authentication not configured. Set ADMIN_PASSWORD environment variable."
+            detail="Admin authentication not configured. Set ADMIN_PASSWORD environment variable.",
         )
 
     return settings.admin_username, settings.admin_password
@@ -199,7 +202,7 @@ def get_client_ip(request: Request) -> str:
 def check_rate_limit(request: Request, ip_address: str) -> tuple[bool, int]:
     """
     Check if IP address has exceeded login attempt rate limit.
-    
+
     Returns:
         tuple[bool, int]: (is_allowed, remaining_cooldown_seconds)
     """
@@ -242,6 +245,7 @@ def check_rate_limit(request: Request, ip_address: str) -> tuple[bool, int]:
     except Exception as e:
         # Log error but fail open for availability
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning("Rate limiting check failed: %s", e)
         return True, 0
@@ -267,6 +271,7 @@ def record_failed_attempt(request: Request, ip_address: str) -> None:
     except Exception as e:
         # Log error but don't fail the request
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning("Failed to record login attempt: %s", e)
 
@@ -291,6 +296,7 @@ def clear_rate_limit(request: Request, ip_address: str) -> None:
     except Exception as e:
         # Log error but don't fail the request
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning("Failed to clear rate limit: %s", e)
 
@@ -315,8 +321,7 @@ def require_admin_auth(request: Request) -> None:
     """Dependency to require admin authentication."""
     if not verify_admin_session(request):
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Admin authentication required"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin authentication required"
         )
 
 
@@ -331,6 +336,7 @@ def get_db() -> Generator[Session, None, None]:
 async def admin_login(request: Request, login_req: AdminLoginRequest) -> AdminLoginResponse:
     """Authenticate admin user with secure password comparison and rate limiting."""
     import logging
+
     logger = logging.getLogger(__name__)
 
     # Get client IP for rate limiting
@@ -339,10 +345,14 @@ async def admin_login(request: Request, login_req: AdminLoginRequest) -> AdminLo
     # Check rate limiting
     is_allowed, cooldown_remaining = check_rate_limit(request, client_ip)
     if not is_allowed:
-        logger.warning("Admin login rate limited for IP %s, %d seconds remaining", client_ip, cooldown_remaining)
+        logger.warning(
+            "Admin login rate limited for IP %s, %d seconds remaining",
+            client_ip,
+            cooldown_remaining,
+        )
         return AdminLoginResponse(
             success=False,
-            message=f"Too many failed attempts. Please try again in {cooldown_remaining} seconds."
+            message=f"Too many failed attempts. Please try again in {cooldown_remaining} seconds.",
         )
 
     # Get admin credentials
@@ -355,19 +365,19 @@ async def admin_login(request: Request, login_req: AdminLoginRequest) -> AdminLo
     # If username not provided, use the configured admin username
     provided_username = login_req.username or admin_username
     username_valid = hmac.compare_digest(
-        provided_username.encode("utf-8"),
-        admin_username.encode("utf-8")
+        provided_username.encode("utf-8"), admin_username.encode("utf-8")
     )
     password_valid = hmac.compare_digest(
-        login_req.password.encode("utf-8"),
-        admin_password.encode("utf-8")
+        login_req.password.encode("utf-8"), admin_password.encode("utf-8")
     )
 
     # Both username and password must be valid
     if not (username_valid and password_valid):
         # Record failed attempt for rate limiting
         record_failed_attempt(request, client_ip)
-        logger.warning("Failed admin login attempt from IP %s with username '%s'", client_ip, provided_username)
+        logger.warning(
+            "Failed admin login attempt from IP %s with username '%s'", client_ip, provided_username
+        )
         return AdminLoginResponse(success=False, message="Invalid username or password")
 
     # Clear rate limiting on successful login
@@ -382,9 +392,7 @@ async def admin_login(request: Request, login_req: AdminLoginRequest) -> AdminLo
     logger.info("Successful admin login for user '%s' from IP %s", admin_username, client_ip)
 
     return AdminLoginResponse(
-        success=True,
-        message="Authentication successful",
-        expires_at=expires_at
+        success=True, message="Authentication successful", expires_at=expires_at
     )
 
 
@@ -392,6 +400,7 @@ async def admin_login(request: Request, login_req: AdminLoginRequest) -> AdminLo
 async def admin_logout(request: Request) -> dict[str, str]:
     """Logout admin user with audit logging."""
     import logging
+
     logger = logging.getLogger(__name__)
 
     # Log logout for audit trail
@@ -405,10 +414,7 @@ async def admin_logout(request: Request) -> dict[str, str]:
 
 
 @router.get("/tenants", response_model=list[TenantResponse])
-async def list_tenants(
-    request: Request,
-    db: Session = Depends(get_db)
-) -> list[TenantResponse]:
+async def list_tenants(request: Request, db: Session = Depends(get_db)) -> list[TenantResponse]:
     """List all tenants with summary information."""
     require_admin_auth(request)
 
@@ -417,28 +423,34 @@ async def list_tenants(
     result = []
 
     for tenant, channel_count, flow_count in tenant_data:
-        result.append(TenantResponse(
-            id=tenant.id,
-            owner_first_name=tenant.owner_first_name,
-            owner_last_name=tenant.owner_last_name,
-            owner_email=tenant.owner_email,
-            created_at=tenant.created_at,
-            updated_at=tenant.updated_at,
-            project_description=tenant.project_config.project_description if tenant.project_config else None,
-            target_audience=tenant.project_config.target_audience if tenant.project_config else None,
-            communication_style=tenant.project_config.communication_style if tenant.project_config else None,
-            channel_count=channel_count,
-            flow_count=flow_count
-        ))
+        result.append(
+            TenantResponse(
+                id=tenant.id,
+                owner_first_name=tenant.owner_first_name,
+                owner_last_name=tenant.owner_last_name,
+                owner_email=tenant.owner_email,
+                created_at=tenant.created_at,
+                updated_at=tenant.updated_at,
+                project_description=tenant.project_config.project_description
+                if tenant.project_config
+                else None,
+                target_audience=tenant.project_config.target_audience
+                if tenant.project_config
+                else None,
+                communication_style=tenant.project_config.communication_style
+                if tenant.project_config
+                else None,
+                channel_count=channel_count,
+                flow_count=flow_count,
+            )
+        )
 
     return result
 
 
 @router.post("/tenants", response_model=TenantResponse)
 async def create_tenant(
-    request: Request,
-    tenant_req: TenantCreateRequest,
-    db: Session = Depends(get_db)
+    request: Request, tenant_req: TenantCreateRequest, db: Session = Depends(get_db)
 ) -> TenantResponse:
     """Create a new tenant."""
     require_admin_auth(request)
@@ -451,7 +463,7 @@ async def create_tenant(
             email=tenant_req.owner_email,
             project_description=tenant_req.project_description,
             target_audience=tenant_req.target_audience,
-            communication_style=tenant_req.communication_style
+            communication_style=tenant_req.communication_style,
         )
         db.commit()
 
@@ -462,11 +474,17 @@ async def create_tenant(
             owner_email=tenant.owner_email,
             created_at=tenant.created_at,
             updated_at=tenant.updated_at,
-            project_description=tenant.project_config.project_description if tenant.project_config else None,
-            target_audience=tenant.project_config.target_audience if tenant.project_config else None,
-            communication_style=tenant.project_config.communication_style if tenant.project_config else None,
+            project_description=tenant.project_config.project_description
+            if tenant.project_config
+            else None,
+            target_audience=tenant.project_config.target_audience
+            if tenant.project_config
+            else None,
+            communication_style=tenant.project_config.communication_style
+            if tenant.project_config
+            else None,
             channel_count=0,
-            flow_count=0
+            flow_count=0,
         )
     except ValueError as e:
         db.rollback()
@@ -481,7 +499,7 @@ async def update_tenant_endpoint(
     request: Request,
     tenant_id: UUID,
     tenant_req: TenantUpdateRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ) -> TenantResponse:
     """Update a tenant."""
     require_admin_auth(request)
@@ -499,7 +517,7 @@ async def update_tenant_endpoint(
             email=tenant_req.owner_email,
             project_description=tenant_req.project_description,
             target_audience=tenant_req.target_audience,
-            communication_style=tenant_req.communication_style
+            communication_style=tenant_req.communication_style,
         )
         db.commit()
 
@@ -513,11 +531,17 @@ async def update_tenant_endpoint(
             owner_email=updated_tenant.owner_email,
             created_at=updated_tenant.created_at,
             updated_at=updated_tenant.updated_at,
-            project_description=updated_tenant.project_config.project_description if updated_tenant.project_config else None,
-            target_audience=updated_tenant.project_config.target_audience if updated_tenant.project_config else None,
-            communication_style=updated_tenant.project_config.communication_style if updated_tenant.project_config else None,
+            project_description=updated_tenant.project_config.project_description
+            if updated_tenant.project_config
+            else None,
+            target_audience=updated_tenant.project_config.target_audience
+            if updated_tenant.project_config
+            else None,
+            communication_style=updated_tenant.project_config.communication_style
+            if updated_tenant.project_config
+            else None,
             channel_count=len(channels),
-            flow_count=len(flows)
+            flow_count=len(flows),
         )
     except Exception as e:
         db.rollback()
@@ -526,9 +550,7 @@ async def update_tenant_endpoint(
 
 @router.delete("/tenants/{tenant_id}")
 async def delete_tenant_endpoint(
-    request: Request,
-    tenant_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request, tenant_id: UUID, db: Session = Depends(get_db)
 ) -> dict[str, str]:
     """Delete a tenant and all associated data (cascading)."""
     require_admin_auth(request)
@@ -548,9 +570,7 @@ async def delete_tenant_endpoint(
 
 @router.get("/tenants/{tenant_id}/channels", response_model=list[ChannelResponse])
 async def list_tenant_channels(
-    request: Request,
-    tenant_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request, tenant_id: UUID, db: Session = Depends(get_db)
 ) -> list[ChannelResponse]:
     """List channels for a tenant."""
     require_admin_auth(request)
@@ -563,7 +583,7 @@ async def list_tenant_channels(
             identifier=channel.identifier,
             phone_number=channel.phone_number,
             extra=channel.extra,
-            created_at=channel.created_at
+            created_at=channel.created_at,
         )
         for channel in channels
     ]
@@ -574,7 +594,7 @@ async def create_tenant_channel(
     request: Request,
     tenant_id: UUID,
     channel_req: ChannelCreateRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ) -> ChannelResponse:
     """Create a new channel for a tenant."""
     require_admin_auth(request)
@@ -591,7 +611,7 @@ async def create_tenant_channel(
             channel_type=channel_req.channel_type,
             identifier=channel_req.identifier,
             phone_number=channel_req.phone_number,
-            extra=channel_req.extra
+            extra=channel_req.extra,
         )
         db.commit()
 
@@ -601,7 +621,7 @@ async def create_tenant_channel(
             identifier=channel.identifier,
             phone_number=channel.phone_number,
             extra=channel.extra,
-            created_at=channel.created_at
+            created_at=channel.created_at,
         )
     except Exception as e:
         db.rollback()
@@ -610,9 +630,7 @@ async def create_tenant_channel(
 
 @router.get("/tenants/{tenant_id}/flows", response_model=list[FlowResponse])
 async def list_tenant_flows(
-    request: Request,
-    tenant_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request, tenant_id: UUID, db: Session = Depends(get_db)
 ) -> list[FlowResponse]:
     """List flows for a tenant."""
     require_admin_auth(request)
@@ -634,10 +652,7 @@ async def list_tenant_flows(
 
 @router.put("/flows/{flow_id}", response_model=FlowResponse)
 async def update_flow_endpoint(
-    request: Request,
-    flow_id: UUID,
-    flow_req: FlowUpdateRequest,
-    db: Session = Depends(get_db)
+    request: Request, flow_id: UUID, flow_req: FlowUpdateRequest, db: Session = Depends(get_db)
 ) -> FlowResponse:
     """Update a flow's definition (JSON editor)."""
     require_admin_auth(request)
@@ -666,9 +681,7 @@ async def update_flow_endpoint(
 
 @router.get("/flows/{flow_id}/training-password")
 async def get_flow_training_password(
-    request: Request,
-    flow_id: UUID,
-    db: Session = Depends(get_db)
+    request: Request, flow_id: UUID, db: Session = Depends(get_db)
 ) -> dict[str, str | None]:
     """Get training password for a flow."""
     require_admin_auth(request)
@@ -688,7 +701,7 @@ async def update_flow_training_password(
     request: Request,
     flow_id: UUID,
     password_req: FlowTrainingPasswordRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ) -> dict[str, str]:
     """Update training password for a flow."""
     require_admin_auth(request)
@@ -719,17 +732,14 @@ async def admin_health(request: Request) -> dict[str, str]:
 
 @router.get("/conversations", response_model=ConversationsResponse)
 async def list_conversations(
-    request: Request,
-    active_only: bool = False,
-    limit: int = 100,
-    db: Session = Depends(get_db)
+    request: Request, active_only: bool = False, limit: int = 100, db: Session = Depends(get_db)
 ) -> ConversationsResponse:
     """
     List actual customer conversations from ChatThread data.
-    
+
     This shows real customer conversations, not agent debugging traces.
     Each customer gets one conversation per channel, properly consolidated.
-    
+
     Key features:
     1. Shows ChatThread data (actual customer conversations)
     2. One conversation per customer per channel
@@ -748,10 +758,7 @@ async def list_conversations(
         # Query actual customer conversations (ChatThread)
         query = (
             db.query(ChatThread)
-            .options(
-                selectinload(ChatThread.contact),
-                selectinload(ChatThread.channel_instance)
-            )
+            .options(selectinload(ChatThread.contact), selectinload(ChatThread.channel_instance))
             .filter(ChatThread.deleted_at.is_(None))
             .order_by(ChatThread.last_message_at.desc())
             .limit(limit)
@@ -813,39 +820,35 @@ async def list_conversations(
                 flow = db.query(Flow).filter(Flow.id == thread.flow_id).first()
                 flow_name = flow.name if flow else None
 
-            conversations.append(ConversationInfo(
-                user_id=user_id,
-                agent_type="flow",  # Most conversations are flow-based
-                session_id=f"thread:{thread.id}",
-                last_activity=thread.last_message_at,
-                message_count=message_count,
-                is_active=is_active,
-                tenant_id=str(thread.tenant_id),
-                is_historical=not is_active,
-                flow_name=flow_name
-            ))
+            conversations.append(
+                ConversationInfo(
+                    user_id=user_id,
+                    agent_type="flow",  # Most conversations are flow-based
+                    session_id=f"thread:{thread.id}",
+                    last_activity=thread.last_message_at,
+                    message_count=message_count,
+                    is_active=is_active,
+                    tenant_id=str(thread.tenant_id),
+                    is_historical=not is_active,
+                    flow_name=flow_name,
+                )
+            )
 
         active_count = sum(1 for conv in conversations if conv.is_active)
 
         return ConversationsResponse(
-            conversations=conversations,
-            total_count=len(conversations),
-            active_count=active_count
+            conversations=conversations, total_count=len(conversations), active_count=active_count
         )
 
     except Exception as e:
         logger.exception("Failed to retrieve customer conversations")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to retrieve customer conversations: {e!s}"
+            status_code=500, detail=f"Failed to retrieve customer conversations: {e!s}"
         )
 
 
 @router.get("/conversations/stats")
-async def get_conversation_stats(
-    request: Request,
-    db: Session = Depends(get_db)
-) -> dict[str, Any]:
+async def get_conversation_stats(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     """
     Get conversation statistics without loading full data.
     Much faster for dashboard metrics.
@@ -870,22 +873,18 @@ async def get_conversation_stats(
             "total_conversations": result.total_traces if result else 0,
             "unique_tenants": result.unique_tenants if result else 0,
             "most_recent_activity": result.most_recent_activity if result else None,
-            "avg_thoughts_per_conversation": float(result.avg_thoughts_per_conversation) if result and result.avg_thoughts_per_conversation else 0.0
+            "avg_thoughts_per_conversation": float(result.avg_thoughts_per_conversation)
+            if result and result.avg_thoughts_per_conversation
+            else 0.0,
         }
 
     except Exception as e:
         logger.exception("Failed to get conversation stats")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get conversation stats: {e!s}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to get conversation stats: {e!s}")
 
 
 @router.get("/tenants/summary")
-async def get_tenants_summary(
-    request: Request,
-    db: Session = Depends(get_db)
-) -> dict[str, Any]:
+async def get_tenants_summary(request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
     """
     Get tenant summary with optimized queries.
     """
@@ -913,31 +912,26 @@ async def get_tenants_summary(
 
         tenants_summary = []
         for row in results:
-            tenants_summary.append({
-                "id": str(row.id),
-                "name": f"{row.owner_first_name} {row.owner_last_name}",
-                "created_at": row.created_at,
-                "channel_count": row.channel_count,
-                "flow_count": row.flow_count
-            })
+            tenants_summary.append(
+                {
+                    "id": str(row.id),
+                    "name": f"{row.owner_first_name} {row.owner_last_name}",
+                    "created_at": row.created_at,
+                    "channel_count": row.channel_count,
+                    "flow_count": row.flow_count,
+                }
+            )
 
-        return {
-            "tenants": tenants_summary,
-            "total_tenants": len(tenants_summary)
-        }
+        return {"tenants": tenants_summary, "total_tenants": len(tenants_summary)}
 
     except Exception as e:
         logger.exception("Failed to get tenants summary")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to get tenants summary: {e!s}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to get tenants summary: {e!s}")
 
 
 @router.post("/conversations/reset")
 async def reset_conversation_context(
-    request: Request,
-    reset_req: ResetConversationRequest
+    request: Request, reset_req: ResetConversationRequest
 ) -> dict[str, str]:
     """Reset conversation Redis context only (preserves debugging data)."""
     require_admin_auth(request)
@@ -945,8 +939,7 @@ async def reset_conversation_context(
     app_context = get_app_context(request.app)  # type: ignore[arg-type]
     if not isinstance(app_context.store, RedisStore):
         raise HTTPException(
-            status_code=503,
-            detail="Conversation management requires Redis storage"
+            status_code=503, detail="Conversation management requires Redis storage"
         )
 
     try:
@@ -964,14 +957,12 @@ async def reset_conversation_context(
                 flow_id = reset_req.agent_type[5:]  # Remove "flow:" prefix
 
             patterns_to_delete = redis_keys.get_conversation_patterns(
-                user_id=reset_req.user_id,
-                flow_id=flow_id
+                user_id=reset_req.user_id, flow_id=flow_id
             )
         else:
             # Reset all conversations for user
             patterns_to_delete = redis_keys.get_conversation_patterns(
-                user_id=reset_req.user_id,
-                flow_id=None
+                user_id=reset_req.user_id, flow_id=None
             )
 
         # Delete keys using patterns
@@ -993,21 +984,92 @@ async def reset_conversation_context(
         # Those are valuable for debugging and customer support.
         # Reset only clears Redis context to allow conversation restart.
 
-        flow_info = f" for flow '{reset_req.agent_type}'" if reset_req.agent_type else " for all flows"
+        flow_info = (
+            f" for flow '{reset_req.agent_type}'" if reset_req.agent_type else " for all flows"
+        )
         return {
             "message": f"Successfully reset Redis context for user '{reset_req.user_id}'{flow_info}",
-            "deleted_keys": str(deleted_keys)
+            "deleted_keys": str(deleted_keys),
         }
 
     except Exception as e:
         logger.exception("Failed to reset conversation context")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to reset conversation: {e!s}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to reset conversation: {e!s}")
 
 
 # /agent-traces endpoint removed - thought tracing functionality replaced by Langfuse
 
 
 # All thought tracing endpoints removed - functionality replaced by Langfuse observability
+
+
+# Personality Presets API
+class PersonalityPresetResponse(BaseModel):
+    """Response model for personality presets."""
+    id: str
+    name: str
+    description: str
+    examples: list[dict[str, str]]
+    avatar_url: str
+    recommended_for: list[str]
+
+
+class ApplyPersonalityRequest(BaseModel):
+    """Request to apply a personality preset to a tenant."""
+    personality_id: str
+
+
+@router.get("/personalities", response_model=list[PersonalityPresetResponse])
+def get_personality_presets(request: Request) -> list[PersonalityPresetResponse]:
+    """Get all available personality presets."""
+    require_admin_auth(request)
+    
+    from app.core.personality_presets import get_all_personalities
+    
+    personalities = get_all_personalities()
+    return [
+        PersonalityPresetResponse(
+            id=p.id,
+            name=p.name,
+            description=p.description,
+            examples=[{"context": e.context, "message": e.message} for e in p.examples],
+            avatar_url=p.avatar_url,
+            recommended_for=p.recommended_for
+        )
+        for p in personalities
+    ]
+
+
+@router.post("/tenants/{tenant_id}/apply-personality")
+def apply_personality_to_tenant(
+    request: Request,
+    tenant_id: str,
+    personality_req: ApplyPersonalityRequest,
+    db: Session = Depends(db_session),
+) -> dict[str, str]:
+    """Apply a personality preset to a tenant's communication style."""
+    require_admin_auth(request)
+    
+    from app.core.personality_presets import get_personality_by_id
+    
+    personality = get_personality_by_id(personality_req.personality_id)
+    if not personality:
+        raise HTTPException(status_code=404, detail="Personality preset not found")
+    
+    # Update tenant's communication style
+    updated_tenant = update_tenant(
+        db=db,
+        tenant_id=UUID(tenant_id),
+        communication_style=personality.communication_style
+    )
+    
+    if not updated_tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+    
+    db.commit()
+    
+    return {
+        "message": f"Successfully applied '{personality.name}' personality to tenant",
+        "personality_id": personality.id,
+        "tenant_id": tenant_id
+    }

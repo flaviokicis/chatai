@@ -60,7 +60,7 @@ def load_english_course_flow() -> dict:
 def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
     """
     Get existing tenant or create a demo tenant with dentist configuration.
-    
+
     Returns:
         tuple: (tenant_id, channel_instance_id, flow_id)
     """
@@ -72,12 +72,16 @@ def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
         if existing_tenants:
             # Use the first existing tenant
             tenant = existing_tenants[0]
-            logger.info(f"Using existing tenant: {tenant.id} ({tenant.owner_first_name} {tenant.owner_last_name})")
+            logger.info(
+                f"Using existing tenant: {tenant.id} ({tenant.owner_first_name} {tenant.owner_last_name})"
+            )
 
             # Get existing channel
             channels = get_channel_instances_by_tenant(session, tenant.id)
             if not channels:
-                logger.error("❌ Existing tenant has no channels. Please create one manually or delete the tenant.")
+                logger.error(
+                    "❌ Existing tenant has no channels. Please create one manually or delete the tenant."
+                )
                 sys.exit(1)
 
             channel = channels[0]
@@ -102,7 +106,7 @@ def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
                     channel_instance_id=channel.id,
                     name="Atendimento Consultório Dentista",
                     flow_id="dentist_consultation_flow_v1",
-                    definition=flow_definition
+                    definition=flow_definition,
                 )
                 session.commit()
                 logger.info(f"Created dentist flow: {dentist_flow.id}")
@@ -120,7 +124,7 @@ def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
             email="ana@clinicadentista.com.br",
             project_description="Clínica odontológica moderna oferecendo tratamentos completos desde limpeza até ortodontia, com foco no atendimento humanizado",
             target_audience="Pacientes de todas as idades que buscam cuidados dentários de qualidade, desde consultas de rotina até procedimentos especializados",
-            communication_style="Receptiva calorosa mas profissional de uma clínica dentária brasileira. Tom amigável e acolhedor, mas sempre transmitindo confiança e competência médica. Use linguagem clara e acessível, evitando jargões técnicos desnecessários. Demonstre empatia com possíveis medos ou ansiedades do paciente, seja paciente com dúvidas, e mantenha sempre um tom tranquilizador e positivo."
+            communication_style="Receptiva calorosa mas profissional de uma clínica dentária brasileira. Tom amigável e acolhedor, mas sempre transmitindo confiança e competência médica. Use linguagem clara e acessível, evitando jargões técnicos desnecessários. Demonstre empatia com possíveis medos ou ansiedades do paciente, seja paciente com dúvidas, e mantenha sempre um tom tranquilizador e positivo.",
         )
 
         logger.info(f"Created tenant: {tenant.id}")
@@ -137,8 +141,8 @@ def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
             phone_number="+15550489424",  # Actual display phone number
             extra={
                 "display_name": "Clínica Dra. Ana Silva",
-                "business_hours": "Segunda a Sexta: 8h-18h, Sábado: 8h-12h"
-            }
+                "business_hours": "Segunda a Sexta: 8h-18h, Sábado: 8h-12h",
+            },
         )
 
         logger.info(f"Created channel: {channel.id}")
@@ -153,7 +157,7 @@ def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
             channel_instance_id=channel.id,
             name="Atendimento Consultório Dentista",
             flow_id="dentist_consultation_flow_v1",
-            definition=flow_definition
+            definition=flow_definition,
         )
 
         logger.info(f"Created flow: {flow.id}")
@@ -166,12 +170,6 @@ def get_or_create_demo_tenant() -> tuple[UUID, UUID, UUID]:
         logger.info(f"📞 WhatsApp Number: {channel.phone_number}")
 
         return tenant.id, channel.id, flow.id
-
-
-
-
-
-
 
 
 def main() -> None:
@@ -217,7 +215,9 @@ def main() -> None:
     logger.info("Next steps:")
     logger.info("1. Configure Twilio webhook to: http://your-domain.com/webhooks/twilio/whatsapp")
     logger.info("2. Test dentist flow with CLI: python -m app.flow_core.cli --tenant default --llm")
-    logger.info("3. Test English flow with CLI: python -m app.flow_core.cli --tenant default --flow-id english_course_sales_flow_v1 --llm")
+    logger.info(
+        "3. Test English flow with CLI: python -m app.flow_core.cli --tenant default --flow-id english_course_sales_flow_v1 --llm"
+    )
     logger.info("")
     logger.info("✅ Both flows are ready on your existing tenant!")
 

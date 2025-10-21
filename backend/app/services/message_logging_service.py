@@ -40,7 +40,7 @@ class MessageLoggingService:
         text: str | None,
         direction: MessageDirection,
         provider_message_id: str | None = None,
-        payload: dict | None = None,
+        payload: dict[str, object] | None = None,
         status: MessageStatus = MessageStatus.sent,
         sent_at: datetime | None = None,
         delivered_at: datetime | None = None,
@@ -80,7 +80,7 @@ class MessageLoggingService:
         text: str | None,
         direction: MessageDirection,
         provider_message_id: str | None = None,
-        payload: dict | None = None,
+        payload: dict[str, object] | None = None,
         status: MessageStatus = MessageStatus.sent,
         sent_at: datetime | None = None,
         delivered_at: datetime | None = None,
@@ -133,7 +133,7 @@ class MessageLoggingService:
                     await asyncio.sleep(wait_time)
 
             except Exception as e:
-                last_exception = e
+                last_exception = SQLAlchemyError(str(e))
                 logger.error(f"Unexpected error saving message (attempt {attempt + 1}): {e}")
 
                 if attempt < self.max_retries - 1:
@@ -150,20 +150,14 @@ class MessageLoggingService:
 
     async def save_conversation_batch_async(
         self,
-        messages: Sequence[dict],
+        messages: Sequence[dict[str, object]],
     ) -> None:
-        """
-        Save multiple messages as a batch operation.
-
-        This method is useful when you need to save both inbound and outbound
-        messages from the same conversation turn.
-        """
+        """Save multiple messages as a batch operation."""
         tasks = []
         for msg_data in messages:
-            task = self._save_message_with_retry(**msg_data)
+            task = self._save_message_with_retry(**msg_data)  # type: ignore[arg-type]
             tasks.append(task)
 
-        # Run all saves concurrently
         await asyncio.gather(*tasks, return_exceptions=True)
 
 

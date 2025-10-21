@@ -1,61 +1,68 @@
-"""Tool execution service for processing flow tool responses.
+"""Clean tool execution service with external action support.
 
-This service handles the execution and processing of tool responses,
-updating the flow context and determining navigation actions.
+This service handles tool execution with proper feedback loops for external actions.
+It ensures the LLM is always aware of the actual results of tool executions.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-if TYPE_CHECKING:
-    from ..state import FlowContext
-
-from ..constants import (
-    CLARIFICATION_NEEDS_EXPLANATION,
-    DEFAULT_CLARIFICATION_COUNT,
-    DEFAULT_PATH_CORRECTIONS,
-    META_NAV_TYPE,
-    META_REASONING,
-    META_RESTART,
-)
-from ..types import (
-    AnswersDict,
-    MetadataDict,
-    PerformActionCall,
-    ToolExecutionError,
-)
+from ..actions import ActionRegistry, ActionResult
+from ..constants import META_NAV_TYPE, META_RESTART
+from ..state import FlowContext
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ToolExecutionResult:
-    """Result of executing a flow tool."""
+    """Result of tool execution with proper external action feedback.
 
-    updates: AnswersDict = field(default_factory=dict)
-    navigation: str | None = None
+    Typed result used across runner/responder to avoid dicts and ensure stability.
+    """
+
+    # Core execution results
+    updates: dict[str, Any] = field(default_factory=dict)
+    navigation: dict[str, Any] | None = None
     escalate: bool = False
     terminal: bool = False
-    metadata: MetadataDict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
-    @property
-    def requires_navigation(self) -> bool:
-        """Check if this result requires navigation to a different node."""
-        return self.navigation is not None
+    # External action results
+    external_action_executed: bool = False
+    external_action_result: ActionResult | None = None
 
     @property
     def has_updates(self) -> bool:
         """Check if there are any answer updates."""
         return bool(self.updates)
 
+    @property
+    def requires_llm_feedback(self) -> bool:
+        """Check if this result requires LLM feedback."""
+        return self.external_action_executed and self.external_action_result is not None
+
 
 class ToolExecutionService:
-    """Service for executing flow tools and processing their results."""
+    """Service for executing flow tools with external action support.
 
-    def execute_tool(
+    This service provides clean separation between:
+    - Internal actions (navigation, updates) - executed immediately
+    - External actions (flow modification, calendar) - executed with feedback
+    """
+
+    def __init__(self, action_registry: ActionRegistry):
+        """Initialize the tool execution service.
+
+        Args:
+            action_registry: Registry of external action executors
+        """
+        self._action_registry = action_registry
+
+    async def execute_tool(
         self,
         tool_name: str,
         tool_data: dict[str, Any],
@@ -63,146 +70,168 @@ class ToolExecutionService:
         pending_field: str | None = None,
     ) -> ToolExecutionResult:
         """Execute a tool and process its result.
-        
+
         Args:
             tool_name: Name of the tool to execute
             tool_data: Tool parameters from LLM
             context: Current flow context
             pending_field: Currently pending field (if any)
-            
+
         Returns:
-            Execution result with updates and navigation info
-            
-        Raises:
-            ToolExecutionError: If tool execution fails
+            Execution result with updates and potential external action results
         """
-        logger.debug(f"Executing tool {tool_name} with data: {tool_data}")
+        logger.info(f"🔧 Executing tool: {tool_name}")
 
         try:
-            # Route to appropriate handler based on tool name
             if tool_name == "PerformAction":
-                return self._handle_perform_action(tool_data, context, pending_field)
-            if tool_name == "RequestHumanHandoff":
-                return ToolExecutionResult(
-                    updates={},
-                    navigation=None,
-                    escalate=True,
-                    terminal=False,
-                    metadata={"reason": tool_data.get("reason", "user_requested")},
-                )
+                return await self._handle_perform_action(tool_data, context, pending_field)
+            
             logger.warning(f"Unknown tool: {tool_name}")
-            return self._create_empty_result()
+            return ToolExecutionResult()
 
         except Exception as e:
-            logger.exception(f"Tool execution failed for {tool_name}: {e}")
-            raise ToolExecutionError(
-                tool_name=tool_name,
-                message=f"Failed to execute {tool_name}: {e}",
-                original_error=e,
-            )
+            logger.error(f"Tool execution failed for {tool_name}: {e}", exc_info=True)
+            return ToolExecutionResult(metadata={"error": str(e), "tool_name": tool_name})
 
-
-    def _handle_perform_action(
+    async def _handle_perform_action(
         self,
         tool_data: dict[str, Any],
         context: FlowContext,
         pending_field: str | None,
     ) -> ToolExecutionResult:
-        """Handle PerformAction unified tool with sequential actions."""
-        # Extract actions directly from tool_data (tool already validated by responder)
-        actions = tool_data.get("actions", ["stay"])
-        reasoning = tool_data.get("reasoning", "No reasoning provided")
-        
-        # Initialize result that will accumulate all actions
-        result = ToolExecutionResult(
-            updates={},
-            navigation=None,
-            escalate=False,
-            terminal=False,
-            metadata={
-                META_REASONING: reasoning,
-                "actions": actions  # Store actions for downstream processing
-            }
-        )
-        
-        # Process each action in sequence
+        """Handle PerformAction tool with clean action separation."""
+        actions = tool_data.get("actions", [])
+        result = ToolExecutionResult(metadata={"tool_name": "PerformAction"})
+
+        logger.info(f"Processing {len(actions)} actions: {actions}")
+
         for action in actions:
-            if action == "stay":
-                # Increment clarification count if needed
-                clarification_reason = tool_data.get("clarification_reason")
-                if clarification_reason == CLARIFICATION_NEEDS_EXPLANATION:
-                    context.clarification_count += 1
-                result.metadata["clarification_reason"] = clarification_reason
-                # Stay doesn't change navigation or updates
-                
-            elif action == "update":
-                # Add updates to the result
-                updates = tool_data.get("updates")
-                if updates:
-                    result.updates.update(updates)
-                    # Also update context immediately
-                    context.answers.update(updates)
-                
+            if action == "update":
+                self._handle_update_action(tool_data, result, pending_field)
             elif action == "navigate":
-                # Set navigation target
-                result.navigation = tool_data.get("target_node_id")
-                result.metadata[META_NAV_TYPE] = "explicit"
-                
+                self._handle_navigate_action(tool_data, result)
+            elif action == "stay":
+                self._handle_stay_action(tool_data, result)
             elif action == "handoff":
-                # Mark for escalation
-                result.escalate = True
-                result.metadata["reason"] = tool_data.get("handoff_reason") or "requested"
-                
+                self._handle_handoff_action(tool_data, result)
             elif action == "complete":
-                # Mark as terminal
-                result.terminal = True
-                
+                self._handle_complete_action(result)
             elif action == "restart":
-                # Reset context state
-                context.answers.clear()
-                context.path_confidence.clear()
-                context.clarification_count = DEFAULT_CLARIFICATION_COUNT
-                context.path_corrections = DEFAULT_PATH_CORRECTIONS
-                context.active_path = None
-                context.is_complete = False
-                # Navigate to entry node
-                result.navigation = context.flow_id
-                result.metadata[META_RESTART] = True
-                
-            elif action == "modify_flow":
-                # Handle flow modification (admin only)
-                instruction = tool_data.get("flow_modification_instruction", "")
-                target_node = tool_data.get("flow_modification_target")
-                modification_type = tool_data.get("flow_modification_type", "general")
-                
-                logger.info("=" * 80)
-                logger.info("📝 FLOW MODIFICATION ACTION TRIGGERED")
-                logger.info("=" * 80)
-                logger.info(f"Instruction: {instruction[:200]}..." if len(instruction) > 200 else f"Instruction: {instruction}")
-                logger.info(f"Target node: {target_node}")
-                logger.info(f"Modification type: {modification_type}")
-                logger.info(f"Context node: {context.current_node_id}")
-                logger.info("=" * 80)
-                
-                # Store modification metadata for flow processor to handle
-                result.metadata.update({
-                    "flow_modification_requested": True,
-                    "modification_instruction": instruction,
-                    "target_node": target_node,
-                    "modification_type": modification_type,
-                    "admin_action": True,
-                })
-                
-                logger.info("✅ Flow modification metadata stored for processor")
-        
+                self._handle_restart_action(result)
+            elif action == "modify_flow" or action == "update_communication_style":
+                await self._handle_external_action(action, tool_data, context, result)
+            else:
+                logger.warning(f"Unknown action: {action}")
+
         return result
 
-    def _create_empty_result(self) -> ToolExecutionResult:
-        """Create an empty result for fallback cases."""
-        return ToolExecutionResult(
-            updates={},
-            navigation=None,
-            escalate=False,
-            terminal=False,
-            metadata={}
-        )
+    def _handle_update_action(
+        self, tool_data: dict[str, Any], result: ToolExecutionResult, pending_field: str | None
+    ) -> None:
+        """Handle answer updates."""
+        updates = tool_data.get("updates", {})
+        if updates and pending_field:
+            result.updates[pending_field] = updates.get(pending_field)
+            logger.info(f"Updated field '{pending_field}' with value")
+
+    def _handle_navigate_action(
+        self, tool_data: dict[str, Any], result: ToolExecutionResult
+    ) -> None:
+        """Handle navigation to target node."""
+        target_node = tool_data.get("target_node_id")
+        if target_node:
+            result.navigation = {META_NAV_TYPE: target_node}
+            logger.info(f"Navigating to node '{target_node}'")
+
+    def _handle_stay_action(
+        self, tool_data: dict[str, Any], result: ToolExecutionResult  
+    ) -> None:
+        """Handle staying on current node."""
+        clarification_reason = tool_data.get("clarification_reason")
+        if clarification_reason:
+            result.metadata["clarification_reason"] = clarification_reason
+        logger.info("Staying on current node")
+
+    def _handle_handoff_action(
+        self, tool_data: dict[str, Any], result: ToolExecutionResult
+    ) -> None:
+        """Handle handoff request."""
+        handoff_reason = tool_data.get("handoff_reason")
+        result.escalate = True
+        result.metadata["handoff_reason"] = handoff_reason
+        logger.info(f"Requesting handoff: {handoff_reason}")
+
+    def _handle_complete_action(self, result: ToolExecutionResult) -> None:
+        """Handle flow completion."""
+        result.terminal = True
+        logger.info("Flow completed")
+
+    def _handle_restart_action(self, result: ToolExecutionResult) -> None:
+        """Handle flow restart."""
+        result.navigation = {META_RESTART: True}
+        logger.info("Restarting flow")
+
+    async def _handle_external_action(
+        self,
+        action_name: str,
+        tool_data: dict[str, Any],
+        context: FlowContext,
+        result: ToolExecutionResult,
+    ) -> None:
+        """Handle external actions that require feedback.
+
+        Args:
+            action_name: Name of the external action
+            tool_data: Tool parameters
+            context: Flow context
+            result: Result object to update
+        """
+        logger.info("=" * 80)
+        logger.info(f"🚀 EXECUTING EXTERNAL ACTION: {action_name}")
+        logger.info("=" * 80)
+
+        # Get the appropriate executor
+        executor = self._action_registry.get_executor(action_name)
+        if not executor:
+            logger.error(f"No executor found for action: {action_name}")
+            result.external_action_executed = True
+            result.external_action_result = ActionResult(
+                success=False,
+                message=f"❌ Erro interno: ação '{action_name}' não suportada",
+                error=f"No executor registered for action: {action_name}",
+            )
+            return
+
+        # Prepare execution context
+        execution_context = {
+            "user_id": context.user_id,
+            "session_id": context.session_id,
+            "tenant_id": context.tenant_id,
+            "channel_id": context.channel_id,
+            "current_node_id": context.current_node_id,
+        }
+
+        # Add flow_id to parameters for flow modification
+        if action_name == "modify_flow":
+            tool_data["flow_id"] = context.flow_id
+
+        try:
+            # Execute the external action
+            action_result = await executor.execute(tool_data, execution_context)
+
+            result.external_action_executed = True
+            result.external_action_result = action_result
+
+            if action_result.is_success:
+                logger.info(f"✅ External action '{action_name}' completed successfully")
+            else:
+                logger.error(f"❌ External action '{action_name}' failed: {action_result.error}")
+
+        except Exception as e:
+            logger.error(f"❌ External action '{action_name}' raised exception: {e}", exc_info=True)
+            result.external_action_executed = True
+            result.external_action_result = ActionResult(
+                success=False, message=f"❌ Erro interno ao executar {action_name}", error=str(e)
+            )
+
+    # Deprecated legacy handler removed: RequestHumanHandoff

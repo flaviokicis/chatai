@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { api, type ChatThread, type Message } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
@@ -136,12 +136,19 @@ export default function ChatDetailPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   // Load thread details
   const loadThread = async (showRefreshing = false) => {
     try {
       if (showRefreshing) setRefreshing(true);
       const data = await api.chats.getThread(undefined, threadId);
+      
       setThread(data);
       setError(null);
     } catch (error) {
@@ -159,6 +166,12 @@ export default function ChatDetailPage() {
       loadThread();
     }
   }, [threadId]);
+
+  useEffect(() => {
+    if (thread?.messages && thread.messages.length > 0) {
+      scrollToBottom();
+    }
+  }, [thread?.messages]);
 
   // Copy contact info to clipboard
   const copyToClipboard = (text: string, label: string) => {
@@ -321,6 +334,7 @@ export default function ChatDetailPage() {
               {thread.messages.map((message) => (
                 <MessageBubble key={message.id} message={message} />
               ))}
+              <div ref={messagesEndRef} />
             </div>
           ) : (
             <div className="text-center py-12">

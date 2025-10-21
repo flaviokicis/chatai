@@ -136,10 +136,7 @@ def _sanitize_compiled(compiled: _CompiledFlow) -> dict[str, Any]:
 
 @router.get("/example/compiled")
 async def get_example_flow_compiled() -> dict[str, Any]:
-    """Return the example flow compiled to v2 CompiledFlow.
-
-    This upgrades schema to v2 in-memory before compile.
-    """
+    """Return the example flow compiled to CompiledFlow format."""
     path = _playground_flow_path()
     if not path.exists():
         raise HTTPException(status_code=404, detail="Example flow not found")
@@ -157,8 +154,7 @@ async def get_example_flow_compiled() -> dict[str, Any]:
 
 @router.get("/{flow_id}/compiled")
 async def get_flow_compiled(
-    flow_id: UUID = Path(...),
-    session: Session = Depends(get_db_session)
+    flow_id: UUID = Path(...), session: Session = Depends(get_db_session)
 ) -> dict[str, Any]:
     """Return a specific flow compiled to CompiledFlow format."""
     try:
@@ -172,16 +168,10 @@ async def get_flow_compiled(
         if not flow_data:
             raise HTTPException(status_code=404, detail="Flow definition not found")
 
-        # Ensure schema version is v2
-        if isinstance(flow_data, dict) and flow_data.get("schema_version") != "v2":
-            flow_data["schema_version"] = "v2"
-
         # Validate and compile flow
         flow = Flow.model_validate(flow_data)
         compiled = compile_flow(flow)
         return _sanitize_compiled(compiled)
 
     except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to compile flow: {exc}"
-        ) from exc
+        raise HTTPException(status_code=500, detail=f"Failed to compile flow: {exc}") from exc

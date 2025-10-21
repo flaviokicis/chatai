@@ -1,17 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from app.core.agent_base import Agent
 from app.core.messages import AgentResult, InboundMessage, OutboundMessage
+from app.flow_core.constants import ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS
 from app.flow_core.runner import FlowTurnRunner
 from app.flow_core.state import FlowContext
 
-# Tool imports removed - no longer needed
-
-if TYPE_CHECKING:  # pragma: no cover - import-time only for typing
+if TYPE_CHECKING:
     from app.core.llm import LLMClient
     from app.core.state import ConversationStore
     from app.core.tools import HumanHandoffTool
@@ -33,17 +33,59 @@ class BaseAgent(Agent):
         super().__init__(user_id)
         self.deps = deps
 
-    # Helper used by concrete agents
+    async def _clear_context_after_delay(
+        self, user_id: str, agent_type: str, delay_seconds: int
+    ) -> None:
+        """Background task to clear context after grace period.
+
+        Args:
+            user_id: User identifier
+            agent_type: Agent type
+            delay_seconds: How long to wait before clearing
+        """
+        await asyncio.sleep(delay_seconds)
+
+        if hasattr(self.deps.store, "clear_chat_history"):
+            try:
+                deleted_keys = self.deps.store.clear_chat_history(user_id, agent_type)
+                logger.info(
+                    "Cleared %d chat history keys for user %s after %ds grace period",
+                    deleted_keys,
+                    user_id,
+                    delay_seconds,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Failed to clear chat history after grace period for user %s: %s",
+                    user_id,
+                    e,
+                )
+
+        if hasattr(self.deps.store, "clear_escalation_timestamp"):
+            self.deps.store.clear_escalation_timestamp(user_id, agent_type)
+
     def _escalate(self, reason: str, summary: dict[str, Any]) -> AgentResult:
         self.deps.handoff.escalate(self.user_id, reason, summary)
 
-        # Clear chat history to prevent context bleeding when user re-engages
-        if hasattr(self.deps.store, "clear_chat_history"):
+        if hasattr(self.deps.store, "set_escalation_timestamp"):
+            self.deps.store.set_escalation_timestamp(self.user_id, self.agent_type)
+            logger.info(
+                "Escalation marked for user %s. Context will be cleared after %ds grace period.",
+                self.user_id,
+                ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS,
+            )
+
             try:
-                deleted_keys = self.deps.store.clear_chat_history(self.user_id, self.agent_type)
-                logger.info("Cleared %d chat history keys for user %s after handoff", deleted_keys, self.user_id)
-            except Exception as e:
-                logger.warning("Failed to clear chat history after handoff for user %s: %s", self.user_id, e)
+                asyncio.create_task(
+                    self._clear_context_after_delay(
+                        self.user_id, self.agent_type, ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS
+                    )
+                )
+            except RuntimeError:
+                logger.warning(
+                    "Could not schedule delayed context clear (no event loop). "
+                    "Context will be cleared on next user message after grace period."
+                )
 
         return AgentResult(
             outbound=OutboundMessage(
@@ -148,7 +190,29 @@ class FlowAgent(BaseAgent):
         return stored
 
     def handle(self, message: InboundMessage) -> AgentResult:  # type: ignore[no-untyped-def]
-        # Load state
+        if hasattr(self.deps.store, "should_clear_context_after_escalation"):
+            if self.deps.store.should_clear_context_after_escalation(
+                self.user_id, self.agent_type, ESCALATION_CONTEXT_CLEAR_DELAY_SECONDS
+            ):
+                if hasattr(self.deps.store, "clear_chat_history"):
+                    try:
+                        deleted_keys = self.deps.store.clear_chat_history(
+                            self.user_id, self.agent_type
+                        )
+                        logger.info(
+                            "Cleared %d chat history keys for user %s (grace period expired)",
+                            deleted_keys,
+                            self.user_id,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to clear expired chat history for user %s: %s",
+                            self.user_id,
+                            e,
+                        )
+                if hasattr(self.deps.store, "clear_escalation_timestamp"):
+                    self.deps.store.clear_escalation_timestamp(self.user_id, self.agent_type)
+
         stored = self.deps.store.load(self.user_id, self.agent_type) or {}
         agent_state = self.load_agent_state(stored)
 
@@ -167,25 +231,41 @@ class FlowAgent(BaseAgent):
             answers = dict(stored.get("answers", {}))
             ctx.answers.update(answers)
 
-        # Extract project context from message metadata if available
-        project_context = message.metadata.get("project_context") if message.metadata else None
+        # Extract project context from typed message metadata
+        project_context = message.metadata.project_context if hasattr(message, "metadata") else None
 
         # Process one turn
-        result = runner.process_turn(ctx, message.text or None, project_context=project_context)
+        result = runner.process_turn(ctx, message.text or "", project_context=project_context)
 
-        # Handle terminal
+        # Handle terminal state - NO LONGER clear context, just mark as complete
         if result.terminal:
-            return self._escalate("checklist_complete", {"answers": result.ctx.answers})
+            # Mark context as complete but keep it active for follow-up questions
+            ctx._is_complete = True
+            # Store the completion state but don't escalate
+            stored_out = {
+                "flow_context": ctx.to_dict(),
+                "answers": ctx.answers,
+                "flow_completed": True,  # Track that flow reached terminal
+            }
+            stored_out = self.save_agent_state(stored_out, agent_state)
+            self.deps.store.save(self.user_id, self.agent_type, stored_out)
+            
+            # Return the terminal message without clearing context
+            return AgentResult(
+                outbound=OutboundMessage(text=result.assistant_message or ""),
+                handoff=None,
+                state_diff={},
+            )
 
-        # Handle escalation
+        # Handle escalation request
         if result.escalate:
-            return self._escalate("user_requested_handoff", {"answers": result.ctx.answers})
+            return self._escalate("user_requested_handoff", {"answers": ctx.answers})
 
         # After applying updates, re-evaluate path selection if any answers changed
         if result.answers_diff:
             updated_stored = {
-                "flow_context": result.ctx.to_dict(),
-                "answers": result.ctx.answers,
+                "flow_context": ctx.to_dict(),
+                "answers": ctx.answers,
             }
             updated_stored = self.save_agent_state(updated_stored, agent_state)
             new_flow = self.select_flow(updated_stored, message.text or "")
@@ -194,19 +274,13 @@ class FlowAgent(BaseAgent):
             if new_flow != selected_flow:
                 # Switch to new flow while preserving answers/history
                 new_runner = FlowTurnRunner(new_flow, self.deps.llm, strict_mode=self._strict_mode)
-                old_answers = result.ctx.answers.copy()
-                old_history = result.ctx.history.copy()
-                ctx2 = new_runner.initialize_context()
-                ctx2.answers.update(old_answers)
-                ctx2.history = old_history
+                old_answers = ctx.answers.copy()
+                old_history = ctx.history.copy()
+                ctx = new_runner.initialize_context()  # Re-assign ctx
+                ctx.answers.update(old_answers)
+                ctx.history = old_history
                 # Produce next prompt in the new path (no new user input)
-                result = new_runner.process_turn(ctx2, None)
-                # Replace ctx for persistence below
-                ctx = ctx2
-            else:
-                ctx = result.ctx
-        else:
-            ctx = result.ctx
+                result = new_runner.process_turn(ctx, None)
 
         # Persist state
         stored_out = {

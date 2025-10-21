@@ -162,11 +162,10 @@ validations={
 The system is backward compatible. Existing flows work as-is:
 
 ```python
-# Old v1 flow continues to work
-from app.flow_core.compat import create_engine
+# Create flow engine
+from app.flow_core.engine import LLMFlowEngine
 
-engine = create_engine(compiled_flow, use_v2=False)  # Use v1
-engine = create_engine(compiled_flow, llm, use_v2=True)  # Use v2
+engine = LLMFlowEngine(llm_client, compiled_flow)
 ```
 
 ## Best Practices
