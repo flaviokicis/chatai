@@ -36,13 +36,15 @@ class EncryptedString(TypeDecorator):
             EncryptedString._fernet_cache = Fernet(encryption_key.encode())
         return EncryptedString._fernet_cache
     
-    def process_bind_param(self, value: str | None, dialect: Any) -> str | None:
+    def process_bind_param(self, value: Any, dialect: Any) -> Any:
         """Encrypt value before storing in database."""
         if value is None:
             return None
-        return self.fernet.encrypt(value.encode()).decode()
+        if isinstance(value, str):
+            return self.fernet.encrypt(value.encode()).decode()
+        return value
     
-    def process_result_value(self, value: str | None, dialect: Any) -> str | None:
+    def process_result_value(self, value: Any, dialect: Any) -> Any:
         """Decrypt value when reading from database."""
         if value is None:
             return None
@@ -50,7 +52,9 @@ class EncryptedString(TypeDecorator):
             value = bytes(value).decode()
         elif isinstance(value, bytes):
             value = value.decode()
-        return self.fernet.decrypt(value.encode()).decode()
+        if isinstance(value, str):
+            return self.fernet.decrypt(value.encode()).decode()
+        return value
 
 
 @dataclass(frozen=True, slots=True)

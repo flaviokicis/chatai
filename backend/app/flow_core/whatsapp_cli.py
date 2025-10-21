@@ -493,6 +493,27 @@ class WhatsAppSimulatorCLI:
             # Create session manager with proper ConversationStore
             self.session_manager = RedisSessionManager(redis_store)
 
+            # Initialize RAG service if configured
+            rag_service = None
+            pg_vector_url = settings.pg_vector_database_url
+            if pg_vector_url and settings.openai_api_key:
+                try:
+                    from app.services.rag.rag_service import RAGService
+                    
+                    rag_service = RAGService(
+                        openai_api_key=settings.openai_api_key,
+                        vector_db_url=pg_vector_url,
+                        max_retrieval_attempts=3
+                    )
+                    print("📚 RAG service initialized")
+                    logger.info("RAG service initialized with pgvector database")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize RAG service: {e}")
+                    print(f"⚠️  RAG service failed to initialize: {e}")
+                    rag_service = None
+            else:
+                logger.info("RAG service not initialized (PG_VECTOR_DATABASE_URL or OPENAI_API_KEY not configured)")
+
             # Create app context
             self.app_context = AppContext(
                 config_provider=None,  # Not needed for CLI
@@ -502,6 +523,7 @@ class WhatsAppSimulatorCLI:
                 session_policy=None,
                 rate_limiter=None,
                 cancellation_manager=ProcessingCancellationManager(store=redis_store),
+                rag_service=rag_service,
             )
 
             # Initialize FlowProcessor

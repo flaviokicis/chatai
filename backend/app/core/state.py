@@ -83,6 +83,11 @@ class RedisStore:
         self._state_ttl = int(state_ttl.total_seconds()) if state_ttl else None
         self._events_ttl = int(events_ttl.total_seconds()) if events_ttl else None
 
+    @property
+    def redis_client(self) -> object:
+        """Public access to Redis client for advanced operations."""
+        return self._r
+
     def _state_key(self, user_id: str, agent_type: str) -> str:
         # Use centralized key builder for consistency with our namespace
         key_builder = RedisKeyBuilder(namespace=self._ns)

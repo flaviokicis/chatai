@@ -456,7 +456,7 @@ class WhatsAppMessageProcessor:
     def _is_likely_retry(self, message_data: ExtractedMessageData, app_context: AppContext) -> bool:
         """Check if this is likely a webhook retry based on timing and patterns."""
         # Check if we've recently processed a message from this user
-        if not app_context.store or not hasattr(app_context.store, "_r"):
+        if not app_context.store or not hasattr(app_context.store, "redis_client"):
             return False
 
         try:
@@ -472,11 +472,12 @@ class WhatsAppMessageProcessor:
             retry_key = f"webhook_processed:{sender}:{message_hash}"
 
             # Check if we've seen this exact message recently (within 2 minutes)
-            if app_context.store._r.get(retry_key):
+            redis_client = app_context.store.redis_client
+            if redis_client.get(retry_key):
                 return True
 
             # Mark this message as processed for 2 minutes (webhook retry window)
-            app_context.store._r.setex(retry_key, 120, "1")
+            redis_client.setex(retry_key, 120, "1")
             return False
         except Exception as e:
             logger.warning(f"Failed to check retry status: {e}")
@@ -627,7 +628,6 @@ class WhatsAppMessageProcessor:
 
         # Create dependencies with dependency injection
         session_manager = RedisSessionManager(app_context.store)
-        thread_updater = WhatsAppThreadStatusUpdater()
 
         # Create clean flow processor with injected dependencies
         if not app_context.llm:
@@ -699,6 +699,8 @@ class WhatsAppMessageProcessor:
             reply_text = flow_response.message or ""
 
         # Check for cancellation before naturalizing
+        cancellation_manager = None
+        session_id = None
         try:
             cancellation_manager = (
                 flow_response.metadata.get("cancellation_manager")
@@ -818,8 +820,7 @@ class WhatsAppMessageProcessor:
                 # Log inbound message (single message only)
                 params_obj = message_data["params"]
                 provider_id = None
-                if isinstance(params_obj, dict):
-                    provider_id = str(params_obj.get("SmsMessageSid") or params_obj.get("MessageSid") or "")
+                provider_id = str(params_obj.get("SmsMessageSid") or params_obj.get("MessageSid") or "")
                 
                 await message_logging_service.save_message_async(
                     tenant_id=conversation_setup.tenant_id,
