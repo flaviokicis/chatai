@@ -14,6 +14,12 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
+    pkg-config \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libgdk-pixbuf2.0-dev \
+    libffi-dev \
+    shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip to avoid build issues
