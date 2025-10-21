@@ -246,6 +246,11 @@ def create_message(
     )
     session.add(message)
     session.flush()
+    
+    thread = session.get(ChatThread, thread_id)
+    if thread:
+        thread.last_message_at = message.created_at
+    
     return message
 
 

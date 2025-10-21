@@ -1,0 +1,58 @@
+# Page snapshot
+
+```yaml
+- generic:
+  - generic [active]:
+    - generic [ref=e5] [cursor=pointer]:
+      - button "Open Next.js Dev Tools" [ref=e6]:
+        - img [ref=e7]
+      - button "Open issues overlay" [ref=e11]:
+        - generic [ref=e12]:
+          - generic [ref=e13]: "0"
+          - generic [ref=e14]: "1"
+        - generic [ref=e15]: Issue
+    - generic [ref=e18]:
+      - generic [ref=e19]:
+        - generic [ref=e20]:
+          - navigation [ref=e21]:
+            - button "previous" [disabled] [ref=e22]:
+              - img "previous" [ref=e23]
+            - generic [ref=e25]:
+              - generic [ref=e26]: 1/
+              - text: "1"
+            - button "next" [disabled] [ref=e27]:
+              - img "next" [ref=e28]
+          - img
+        - generic [ref=e30]:
+          - link "Next.js 15.4.6 (stale) Turbopack" [ref=e31] [cursor=pointer]:
+            - /url: https://nextjs.org/docs/messages/version-staleness
+            - img [ref=e32]
+            - generic "There is a newer version (15.5.6) available, upgrade recommended!" [ref=e34]: Next.js 15.4.6 (stale)
+            - generic [ref=e35]: Turbopack
+          - img
+      - dialog "Build Error" [ref=e37]:
+        - generic [ref=e40]:
+          - generic [ref=e41]:
+            - generic [ref=e42]:
+              - generic [ref=e44]: Build Error
+              - generic [ref=e45]:
+                - button "Copy Stack Trace" [ref=e46] [cursor=pointer]:
+                  - img [ref=e47]
+                - button "No related documentation found" [disabled] [ref=e49]:
+                  - img [ref=e50]
+                - link "Learn more about enabling Node.js inspector for server code with Chrome DevTools" [ref=e52] [cursor=pointer]:
+                  - /url: https://nextjs.org/docs/app/building-your-application/configuring/debugging#server-side-code
+                  - img [ref=e53]
+            - paragraph [ref=e62]: Error evaluating Node.js code
+          - generic [ref=e64]:
+            - generic [ref=e66]:
+              - img [ref=e68]
+              - generic [ref=e70]: ./app/globals.css
+              - button "Open in editor" [ref=e71] [cursor=pointer]:
+                - img [ref=e73]
+            - generic [ref=e77]: "Error evaluating Node.js code Error: Cannot find module 'unknown' [at eval (turbopack:///[project]/node_modules/.pnpm/lightningcss@1.30.1/node_modules/lightningcss/node/index.js:22:19)] [at Object.[project]/node_modules/.pnpm/lightningcss@1.30.1/node_modules/lightningcss/node/index.js [postcss] (ecmascript) (turbopack:///[project]/node_modules/.pnpm/lightningcss@1.30.1/node_modules/lightningcss/node/index.js:22:19] [at instantiateModule (turbopack:///[turbopack]/nodejs/runtime.ts:266:19)] [at getOrInstantiateModuleFromParent (turbopack:///[turbopack]/nodejs/runtime.ts:323:10)] [at esmImport (turbopack:///[turbopack]/shared/runtime-utils.ts:264:18)] [at Module.[project]/node_modules/.pnpm/lightningcss@1.30.1/node_modules/lightningcss/node/index.mjs [postcss] (ecmascript) (turbopack:///[project]/node_modules/.pnpm/lightningcss@1.30.1/node_modules/lightningcss/node/index.mjs:1:1] [at instantiateModule (turbopack:///[turbopack]/nodejs/runtime.ts:266:19)] [at getOrInstantiateModuleFromParent (turbopack:///[turbopack]/nodejs/runtime.ts:323:10)] [at esmImport (turbopack:///[turbopack]/shared/runtime-utils.ts:264:18)] [at Module.[project]/node_modules/.pnpm/@tailwindcss+node@4.1.11/node_modules/@tailwindcss/node/dist/index.mjs [postcss] (ecmascript) <module evaluation> (turbopack:///[project]/node_modules/.pnpm/@tailwindcss+node@4.1.11/node_modules/@tailwindcss/node/dist/index.mjs:16:139] Import trace: ./app/globals.css [Client Component Browser] ./app/layout.tsx [Server Component]"
+        - generic [ref=e78]:
+          - generic [ref=e79]: "1"
+          - generic [ref=e80]: "2"
+  - alert [ref=e81]
+```

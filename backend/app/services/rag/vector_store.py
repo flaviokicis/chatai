@@ -5,6 +5,7 @@ document embeddings using pgvector.
 """
 
 import logging
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, or_, select, text
@@ -387,17 +388,147 @@ class VectorStoreRepository:
             )
             return len(result.scalars().all())
     
-    async def delete_document(self, document_id: UUID):
-        """Delete a document and all its chunks.
+    async def get_documents_summary(self, tenant_id: UUID) -> list[dict]:
+        """Get summary information for all documents belonging to a tenant.
         
         Args:
+            tenant_id: Tenant UUID
+            
+        Returns:
+            List of document summaries without chunk payloads
+        """
+        async with self.async_session() as session:
+            query = text("""
+                SELECT 
+                    d.id,
+                    d.file_name,
+                    d.file_type,
+                    d.file_size,
+                    d.created_at,
+                    COUNT(c.id) AS chunk_count
+                FROM tenant_documents d
+                LEFT JOIN document_chunks c ON d.id = c.document_id
+                WHERE d.tenant_id = :tenant_id
+                GROUP BY d.id, d.file_name, d.file_type, d.file_size, d.created_at
+                ORDER BY d.created_at DESC
+            """)
+            
+            result = await session.execute(query, {"tenant_id": tenant_id})
+            rows = result.fetchall()
+            
+            summaries = []
+            for row in rows:
+                summaries.append({
+                    "id": row.id,
+                    "file_name": row.file_name,
+                    "file_type": row.file_type,
+                    "file_size": row.file_size,
+                    "created_at": row.created_at,
+                    "chunk_count": int(row.chunk_count or 0),
+                })
+            
+            return summaries
+    
+    async def get_document_details(
+        self,
+        tenant_id: UUID,
+        document_id: UUID
+    ) -> dict | None:
+        """Get a single document with its chunk details.
+        
+        Args:
+            tenant_id: Tenant UUID
+            document_id: Document UUID
+            
+        Returns:
+            Document dictionary with chunk payload or None if not found
+        """
+        async with self.async_session() as session:
+            doc_result = await session.execute(
+                select(TenantDocument).where(
+                    TenantDocument.id == document_id,
+                    TenantDocument.tenant_id == tenant_id,
+                )
+            )
+            document = doc_result.scalar_one_or_none()
+            if not document:
+                return None
+            
+            chunk_result = await session.execute(
+                select(DocumentChunk)
+                .where(DocumentChunk.document_id == document_id)
+                .order_by(DocumentChunk.chunk_index)
+            )
+            chunks = chunk_result.scalars().all()
+            
+            chunk_payload = []
+            for chunk in chunks:
+                chunk_payload.append({
+                    "id": chunk.id,
+                    "chunk_index": chunk.chunk_index,
+                    "content": chunk.content,
+                    "category": chunk.category,
+                    "keywords": chunk.keywords,
+                    "possible_questions": chunk.possible_questions,
+                    "metadata": chunk.chunk_metadata or {},
+                    "created_at": chunk.created_at,
+                    "updated_at": chunk.updated_at,
+                })
+            
+            return {
+                "id": document.id,
+                "tenant_id": document.tenant_id,
+                "file_name": document.file_name,
+                "file_type": document.file_type,
+                "file_size": document.file_size,
+                "created_at": document.created_at,
+                "updated_at": document.updated_at,
+                "metadata": document.document_metadata or {},
+                "chunk_count": len(chunk_payload),
+                "chunks": chunk_payload,
+            }
+    
+    async def delete_document(self, tenant_id: UUID, document_id: UUID) -> bool:
+        """Delete a document and all its chunks if it belongs to the tenant.
+        
+        Args:
+            tenant_id: Tenant UUID
             document_id: Document UUID to delete
+            
+        Returns:
+            True if the document was deleted, False otherwise
         """
         async with self.async_session() as session:
             document = await session.get(TenantDocument, document_id)
-            if document:
-                await session.delete(document)
-                await session.commit()
+            if not document or document.tenant_id != tenant_id:
+                return False
+            
+            await session.delete(document)
+            await session.commit()
+            return True
+    
+    async def update_document_metadata(
+        self, tenant_id: UUID, document_id: UUID, metadata: dict[str, Any]
+    ) -> bool:
+        """Update metadata for a document.
+        
+        Args:
+            tenant_id: Tenant UUID
+            document_id: Document UUID to update
+            metadata: New metadata dictionary
+            
+        Returns:
+            True if the update was successful, False otherwise
+        """
+        async with self.async_session() as session:
+            document = await session.get(TenantDocument, document_id)
+            if not document or document.tenant_id != tenant_id:
+                return False
+            
+            document.metadata = metadata
+            document.updated_at = datetime.utcnow()
+            await session.commit()
+            return True
     
     async def get_tenant_documents(self, tenant_id: UUID) -> list[dict]:
         """Get all documents with chunk info for a tenant.

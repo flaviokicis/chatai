@@ -6,7 +6,7 @@ coordinating document parsing, chunking, embedding, and retrieval.
 
 import asyncio
 import logging
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 from uuid import UUID
 
 from langgraph.graph import END, START, StateGraph
@@ -34,12 +34,16 @@ class RAGState(TypedDict):
     thread_id: UUID | None
 
 
-class RAGQueryResult(TypedDict):
+class RAGQueryResult(TypedDict, total=False):
     """Structured result for RAG queries to avoid leaking error text upstream."""
     success: bool
     context: str | None
     error: str | None
     no_documents: bool
+    chunks: list[dict[str, Any]]
+    judge_reasoning: str | None
+    attempts: int
+    sufficient: bool
 
 
 class RAGService:
@@ -251,6 +255,10 @@ class RAGService:
                 "context": None,
                 "error": None,
                 "no_documents": True,
+                "chunks": [],
+                "judge_reasoning": None,
+                "attempts": 0,
+                "sufficient": False,
             }
 
         # Run the retrieval graph
@@ -271,10 +279,11 @@ class RAGService:
             result = await self.retrieval_app.ainvoke(initial_state)
 
             # Save retrieval session for analytics
-            if result.get("chunks"):
+            retrieved_chunks = result.get("chunks") or []
+            if retrieved_chunks:
                 chunks_data = [
                     {"id": str(c.chunk_id), "score": c.score}
-                    for c in result["chunks"][:20]
+                    for c in retrieved_chunks[:20]
                 ]
 
                 # Save retrieval session for analytics (skip on error to prevent hanging)
@@ -294,19 +303,41 @@ class RAGService:
                 except Exception as e:
                     logger.debug(f"Skipped saving retrieval session: {e}")
 
+            chunk_summaries = [
+                {
+                    "id": str(chunk.chunk_id),
+                    "content": chunk.content,
+                    "score": float(chunk.score),
+                    "category": chunk.category,
+                    "keywords": chunk.keywords,
+                    "possible_questions": chunk.possible_questions,
+                    "metadata": chunk.metadata or {},
+                    "document_name": chunk.document_name,
+                }
+                for chunk in retrieved_chunks
+            ]
+
+            base_response: RAGQueryResult = {
+                "chunks": chunk_summaries,
+                "judge_reasoning": result.get("judge_reasoning"),
+                "attempts": result.get("attempts", 0),
+                "sufficient": result.get("sufficient", False),
+                "no_documents": False,
+            }
+
             if result.get("sufficient") and result.get("context"):
                 return {
+                    **base_response,
                     "success": True,
                     "context": result["context"],
                     "error": None,
-                    "no_documents": False,
                 }
 
             return {
+                **base_response,
                 "success": False,
                 "context": None,
                 "error": None,
-                "no_documents": False,
             }
 
         except Exception as e:
@@ -316,6 +347,10 @@ class RAGService:
                 "context": None,
                 "error": str(e),
                 "no_documents": False,
+                "chunks": [],
+                "judge_reasoning": None,
+                "attempts": 0,
+                "sufficient": False,
             }
     
     def _build_retrieval_graph(self) -> StateGraph:
@@ -514,13 +549,22 @@ class RAGService:
         
         return state
     
-    async def delete_document(self, document_id: UUID):
+    async def delete_document(self, tenant_id: UUID, document_id: UUID) -> bool:
         """Delete a document and all its chunks.
         
         Args:
+            tenant_id: Tenant UUID
             document_id: Document UUID to delete
         """
-        await self.vector_store.delete_document(document_id)
+        return await self.vector_store.delete_document(tenant_id, document_id)
+
+    async def list_documents(self, tenant_id: UUID) -> list[dict[str, Any]]:
+        """List document summaries for a tenant."""
+        return await self.vector_store.get_documents_summary(tenant_id)
+
+    async def get_document(self, tenant_id: UUID, document_id: UUID) -> dict[str, Any] | None:
+        """Get document details (including chunks) for a tenant."""
+        return await self.vector_store.get_document_details(tenant_id, document_id)
     
     async def get_tenant_stats(self, tenant_id: UUID) -> dict:
         """Get statistics for a tenant's documents.
