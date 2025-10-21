@@ -30,6 +30,9 @@ from app.core.types import EventDict
 class ConversationStore(Protocol):
     _r: Any
     
+    @property
+    def redis_client(self) -> Any: ...
+    
     def load(self, user_id: str, agent_type: str) -> AgentState | None: ...
 
     def save(self, user_id: str, agent_type: str, state: AgentState) -> None: ...
@@ -41,6 +44,12 @@ class InMemoryStore:
     def __init__(self) -> None:
         self._states: dict[tuple[str, str], AgentState] = {}
         self._events: dict[str, list[EventDict]] = {}
+        self._r: None = None
+
+    @property
+    def redis_client(self) -> Any:
+        """InMemoryStore doesn't use Redis, returns None."""
+        return self._r
 
     def load(self, user_id: str, agent_type: str) -> AgentState | None:
         return self._states.get((user_id, agent_type))
@@ -84,7 +93,7 @@ class RedisStore:
         self._events_ttl = int(events_ttl.total_seconds()) if events_ttl else None
 
     @property
-    def redis_client(self) -> object:
+    def redis_client(self) -> Any:
         """Public access to Redis client for advanced operations."""
         return self._r
 

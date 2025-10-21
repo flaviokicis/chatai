@@ -172,7 +172,7 @@ class FlowTurnRunner:
                     if structured.get("success") and structured.get("context"):
                         ctx.rag_documents = [
                             {
-                                "content": structured["context"],
+                                "content": structured.get("context", ""),
                                 "source": "RAG System",
                                 "query": user_message,
                             }

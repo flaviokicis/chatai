@@ -456,10 +456,14 @@ class WhatsAppMessageProcessor:
     def _is_likely_retry(self, message_data: ExtractedMessageData, app_context: AppContext) -> bool:
         """Check if this is likely a webhook retry based on timing and patterns."""
         # Check if we've recently processed a message from this user
-        if not app_context.store or not hasattr(app_context.store, "redis_client"):
+        if not app_context.store:
             return False
 
         try:
+            redis_client = app_context.store.redis_client
+            if not redis_client:
+                return False
+
             # Create a unique key for this specific message content and sender
             message_text = message_data.get("message_text", "")
             sender = message_data.get("sender_number", "")
@@ -472,7 +476,6 @@ class WhatsAppMessageProcessor:
             retry_key = f"webhook_processed:{sender}:{message_hash}"
 
             # Check if we've seen this exact message recently (within 2 minutes)
-            redis_client = app_context.store.redis_client
             if redis_client.get(retry_key):
                 return True
 
