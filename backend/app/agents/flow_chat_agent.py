@@ -127,7 +127,7 @@ class FlowChatAgent:
             logger.error(error_msg)
             return FlowChatResponse(
                 messages=[
-                    "Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente."
+                    "Desculpe, estou com dificuldades técnicas no momento. Nossa equipe já foi notificada."
                 ],
                 flow_was_modified=False,
                 modification_summary=None,

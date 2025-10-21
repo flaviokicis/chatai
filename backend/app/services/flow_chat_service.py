@@ -179,7 +179,7 @@ class FlowChatService:
                     self.session,
                     flow_id=flow_id,
                     role=FlowChatRole.assistant,
-                    content="❌ Desculpe, ocorreu um erro ao processar sua solicitação. Por favor, tente novamente.",
+                    content="❌ Desculpe, estou com dificuldades técnicas no momento. Nossa equipe já foi notificada.",
                 )
                 self.session.commit()
 

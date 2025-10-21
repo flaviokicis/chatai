@@ -603,7 +603,7 @@ class WhatsAppMessageProcessor:
                 flow_response.message,
             )
             return self.adapter.build_sync_response(
-                "Desculpe, erro interno do sistema. Tente novamente."
+                "Desculpe, estou com dificuldades técnicas no momento. Nossa equipe já foi notificada."
             )
 
         # Determine reply text

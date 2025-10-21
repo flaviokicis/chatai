@@ -99,7 +99,7 @@ ROLE_ASSISTANT = "assistant"
 ROLE_SYSTEM = "system"
 
 # Default messages
-DEFAULT_ERROR_MESSAGE = "Desculpe, tive um problema. Pode repetir sua mensagem?"
+DEFAULT_ERROR_MESSAGE = "Desculpe, estou com dificuldades técnicas no momento. Nossa equipe já foi notificada."
 DEFAULT_HELP_MESSAGE = "Entendi. Vou te ajudar com isso."
 DEFAULT_ACKNOWLEDGMENT = "Ok, entendi."
 

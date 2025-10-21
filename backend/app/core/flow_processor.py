@@ -192,7 +192,7 @@ class FlowProcessor:
             logger.error("❌ Flow processing failed", exc_info=True)
             return FlowResponse(
                 result=FlowProcessingResult.ERROR,
-                message="❌ Erro interno do sistema. Tente novamente.",
+                message="❌ Desculpe, estou com dificuldades técnicas no momento. Nossa equipe já foi notificada.",
                 context=existing_context,
                 metadata={"error": str(e)},
             )
