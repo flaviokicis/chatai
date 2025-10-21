@@ -32,7 +32,6 @@ from app.services.session_manager import RedisSessionManager
 from app.services.speech_to_text_service import SpeechToTextService
 from app.services.tenant_config_service import ProjectContext
 from app.settings import get_settings
-from app.whatsapp.thread_status_updater import WhatsAppThreadStatusUpdater
 from app.whatsapp.types import (
     BufferedMessage,
     ConversationSetup,
@@ -181,8 +180,9 @@ class WhatsAppMessageProcessor:
                     message_data["original_message_count"] = len(individual_messages)
                     message_data["skip_inbound_logging"] = True  # Don't log aggregated version
             elif result == "process_single":
-                # Single message - will be saved normally
-                pass
+                # Single message - clear buffer to prevent false cancellation detection
+                cancellation_manager.get_and_clear_messages(session_id)
+                logger.debug(f"Cleared buffer for single message processing: {session_id}")
 
         # Step 9: Process through flow processor with dependency injection
         flow_response = await self._process_through_flow_processor(
@@ -486,61 +486,8 @@ class WhatsAppMessageProcessor:
             logger.warning(f"Failed to check retry status: {e}")
             return False
 
-    # Removed: _debounced_wait, use centralized method in ProcessingCancellationManager
-
-    async def _wait_and_send_typing_indicator(
-        self, message_data: ExtractedMessageData, tenant_config: dict[str, object] | None = None
-    ) -> None:
-        if tenant_config is None:
-            tenant_config = {}
-
-        wait_ms_val = tenant_config.get("wait_time_before_replying_ms", 60000)
-        if isinstance(wait_ms_val, (int, float)):
-            wait_ms = int(wait_ms_val)
-        else:
-            wait_ms = 60000
-        
-        typing_enabled_val = tenant_config.get("typing_indicator_enabled", True)
-        typing_enabled = bool(typing_enabled_val)
-        
-        natural_delays_val = tenant_config.get("natural_delays_enabled", True)
-        natural_delays = bool(natural_delays_val)
-        
-        variance_percent_val = tenant_config.get("delay_variance_percent", 20)
-        if isinstance(variance_percent_val, (int, float)):
-            variance_percent = int(variance_percent_val)
-        else:
-            variance_percent = 20
-
-        if natural_delays and variance_percent > 0:
-            import secrets
-            variance = (secrets.randbelow(2 * variance_percent + 1) - variance_percent) / 100
-            wait_ms = int(wait_ms * (1 + variance))
-
-        wait_ms = max(100, min(wait_ms, 120000))
-
-        # Wait for the configured duration
-        logger.debug(f"Waiting {wait_ms}ms before processing message")
-        await asyncio.sleep(wait_ms / 1000.0)
-
-        # Send typing indicator if enabled
-        if (
-            typing_enabled
-            and self.settings.whatsapp_provider == "cloud_api"
-            and message_data["message_id"]
-            and hasattr(self.adapter, "send_typing_indicator")
-        ):
-            try:
-                clean_to = message_data["sender_number"].replace("whatsapp:", "")
-                clean_from = message_data["receiver_number"].replace("whatsapp:", "")
-
-                if hasattr(self.adapter, "send_typing_indicator"):
-                    self.adapter.send_typing_indicator(clean_to, clean_from, message_data["message_id"])
-                logger.debug(
-                    "Sent WhatsApp typing indicator for message %s", message_data["message_id"]
-                )
-            except Exception as e:
-                logger.warning("Failed to send WhatsApp typing indicator: %s", e)
+    # Removed: _debounced_wait and _wait_and_send_typing_indicator
+    # All debouncing now handled by centralized ProcessingCancellationManager
 
     def _setup_conversation_context(self, message_data: ExtractedMessageData) -> ConversationSetup:
         from app.db.session import db_transaction
@@ -563,41 +510,13 @@ class WhatsAppMessageProcessor:
         return conversation_setup.project_context
     
     def _extract_wait_time_ms(self, project_context: ProjectContext) -> int:
+        """Extract debouncing wait time from project context."""
         try:
             if project_context:
                 return project_context.wait_time_before_replying_ms or 60000
         except Exception:
             pass
         return 60000
-    
-    def _get_tenant_timing_config_dict(self, conversation_setup: ConversationSetup) -> dict[str, object]:
-        try:
-            if conversation_setup.project_context:
-                pc = conversation_setup.project_context
-                return {
-                    "wait_time_before_replying_ms": getattr(
-                        pc, "wait_time_before_replying_ms", 60000
-                    ),
-                    "typing_indicator_enabled": getattr(pc, "typing_indicator_enabled", True),
-                    "min_typing_duration_ms": getattr(pc, "min_typing_duration_ms", 1000),
-                    "max_typing_duration_ms": getattr(pc, "max_typing_duration_ms", 5000),
-                    "message_reset_enabled": getattr(pc, "message_reset_enabled", True),
-                    "natural_delays_enabled": getattr(pc, "natural_delays_enabled", True),
-                    "delay_variance_percent": getattr(pc, "delay_variance_percent", 20),
-                }
-        except Exception as e:
-            logger.warning(f"Failed to get tenant timing config: {e}")
-
-        # Return defaults if config not available
-        return {
-            "wait_time_before_replying_ms": 60000,
-            "typing_indicator_enabled": True,
-            "min_typing_duration_ms": 1000,
-            "max_typing_duration_ms": 5000,
-            "message_reset_enabled": True,
-            "natural_delays_enabled": True,
-            "delay_variance_percent": 20,
-        }
 
     async def _process_through_flow_processor(
         self, message_data: ExtractedMessageData, conversation_setup: ConversationSetup, app_context: AppContext

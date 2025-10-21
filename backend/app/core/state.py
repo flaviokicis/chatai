@@ -15,11 +15,11 @@ try:
         RedisChatMessageHistory,
     )
 except Exception:  # pragma: no cover - optional import
-    RedisChatMessageHistory = None
+    RedisChatMessageHistory = None  # type: ignore[assignment,misc]
 try:
     import redis
 except Exception:  # pragma: no cover - optional import
-    redis = None
+    redis = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from .agent_base import AgentState
@@ -28,6 +28,11 @@ from app.core.types import EventDict
 
 
 class ConversationStore(Protocol):
+    """Protocol for conversation storage.
+    
+    Note: save() accepts both AgentState objects and plain dicts for flexibility.
+    This allows the store to be used for agent state, session metadata, and other data.
+    """
     _r: Any
     
     @property
@@ -35,14 +40,14 @@ class ConversationStore(Protocol):
     
     def load(self, user_id: str, agent_type: str) -> AgentState | None: ...
 
-    def save(self, user_id: str, agent_type: str, state: AgentState) -> None: ...
+    def save(self, user_id: str, agent_type: str, state: AgentState | dict[str, Any]) -> None: ...
 
     def append_event(self, user_id: str, event: EventDict) -> None: ...
 
 
 class InMemoryStore:
     def __init__(self) -> None:
-        self._states: dict[tuple[str, str], AgentState] = {}
+        self._states: dict[tuple[str, str], AgentState | dict[str, Any]] = {}
         self._events: dict[str, list[EventDict]] = {}
         self._r: None = None
 
@@ -52,9 +57,13 @@ class InMemoryStore:
         return self._r
 
     def load(self, user_id: str, agent_type: str) -> AgentState | None:
-        return self._states.get((user_id, agent_type))
+        result = self._states.get((user_id, agent_type))
+        # Cast to AgentState | None since we store both AgentState and dict[str, Any]
+        # but the Protocol expects AgentState | None on return
+        return result  # type: ignore[return-value]
 
-    def save(self, user_id: str, agent_type: str, state: AgentState) -> None:
+    def save(self, user_id: str, agent_type: str, state: AgentState | dict[str, Any]) -> None:
+        # Accept both AgentState and plain dicts for flexibility
         self._states[(user_id, agent_type)] = state
 
     def append_event(self, user_id: str, event: EventDict) -> None:
@@ -140,7 +149,12 @@ class RedisStore:
 
         return None
 
-    def save(self, user_id: str, agent_type: str, state: AgentState) -> None:
+    def save(self, user_id: str, agent_type: str, state: AgentState | dict[str, Any]) -> None:
+        """Save agent state or metadata dict.
+        
+        Accepts both AgentState objects (which have to_dict()) and plain dicts
+        for flexibility in storing various types of data (agent state, session metadata, etc).
+        """
         # state may be a dict-like as our concrete agents store dicts
         if isinstance(state, dict):
             payload: Any = state
@@ -213,7 +227,7 @@ class RedisStore:
         try:
             return RedisChatMessageHistory(
                 session_id=session_id,
-                redis_client=self._r,  # some versions use redis_client
+                redis_client=self._r,  # type: ignore[call-arg]  # some versions use redis_client
                 key_prefix=f"{self._ns}:history:",
             )
         except TypeError as e2:
@@ -222,7 +236,7 @@ class RedisStore:
         # Try 3: Older versions use host/port/db parameters
         try:
             pool_kwargs = self._r.connection_pool.connection_kwargs
-            return RedisChatMessageHistory(
+            return RedisChatMessageHistory(  # type: ignore[call-arg]
                 session_id=session_id,
                 redis_host=pool_kwargs.get("host", "localhost"),  # Note: redis_host not just host
                 redis_port=int(pool_kwargs.get("port", 6379)),
@@ -236,7 +250,7 @@ class RedisStore:
         # Try 4: Even older versions might use different param names
         try:
             pool_kwargs = self._r.connection_pool.connection_kwargs
-            return RedisChatMessageHistory(
+            return RedisChatMessageHistory(  # type: ignore[call-arg]
                 session_id=session_id,
                 host=pool_kwargs.get("host", "localhost"),
                 port=int(pool_kwargs.get("port", 6379)),
