@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Brain, ListChecks } from "lucide-react";
+import { Brain, ListChecks, Loader2 } from "lucide-react";
 
 import type { QueryResult } from "@/lib/rag-admin";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ export function QueryTester({
     event.preventDefault();
     const trimmed = query.trim();
     if (!trimmed) {
-      setError("Please provide a query to test retrieval.");
+      setError("Por favor, insira uma consulta para testar.");
       return;
     }
 
@@ -43,7 +43,7 @@ export function QueryTester({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-lg">
             <Brain className="h-5 w-5 text-primary" />
-            Retrieval QA Sandbox
+            Testar Recuperação de Contexto
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -71,31 +71,53 @@ export function QueryTester({
       </Card>
 
       {result && (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <Card className="lg:col-span-1">
+        <div className="space-y-4">
+          <Card>
             <CardHeader>
               <CardTitle className="text-base font-semibold">
-                Context returned to LLM
+                Resposta Provável da IA
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {result.generatedAnswer ? (
+                <div className="rounded-lg bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 p-4">
+                  <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                    {result.generatedAnswer}
+                  </p>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary mr-2" />
+                  <span className="text-sm text-muted-foreground">Gerando resposta com GPT-5-mini...</span>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">
+                Contexto Retornado para IA
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                 <Badge variant={result.success ? "default" : "secondary"}>
-                  {result.success ? "Relevant context" : "Insufficient context"}
+                  {result.success ? "Contexto relevante" : "Contexto insuficiente"}
                 </Badge>
                 {result.sufficient ? (
-                  <Badge variant="outline">Judge: sufficient</Badge>
+                  <Badge variant="outline">Análise: suficiente</Badge>
                 ) : (
                   <Badge variant="destructive" className="bg-destructive/10 text-destructive">
-                    Judge: insufficient
+                    Análise: insuficiente
                   </Badge>
                 )}
-                <Badge variant="secondary">Attempts: {result.attempts}</Badge>
+                <Badge variant="secondary">Tentativas: {result.attempts}</Badge>
               </div>
 
               {result.judgeReasoning && (
                 <p className="text-sm text-muted-foreground">
-                  <span className="font-medium text-foreground">Judge notes:</span>{" "}
+                  <span className="font-medium text-foreground">Notas da análise:</span>{" "}
                   {result.judgeReasoning}
                 </p>
               )}
@@ -107,7 +129,7 @@ export function QueryTester({
               )}
 
               {result.context ? (
-                <pre className="max-h-[420px] whitespace-pre-wrap rounded-lg bg-muted/30 p-4 text-sm leading-relaxed text-foreground">
+                <pre className="max-h-[420px] whitespace-pre-wrap rounded-lg bg-muted/30 p-4 text-sm leading-relaxed text-foreground overflow-y-auto">
                   {result.context}
                 </pre>
               ) : (
@@ -124,11 +146,11 @@ export function QueryTester({
             </CardContent>
           </Card>
 
-          <Card className="lg:col-span-1">
+          <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base font-semibold">
                 <ListChecks className="h-4 w-4 text-primary" />
-                Retrieved chunks ({result.chunks.length})
+                Chunks Recuperados ({result.chunks.length})
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -145,7 +167,7 @@ export function QueryTester({
                     >
                       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                         <Badge variant="secondary">
-                          Score: {chunk.score.toFixed(3)}
+                          Relevância: {chunk.score.toFixed(3)}
                         </Badge>
                         {chunk.documentName && (
                           <Badge variant="outline">{chunk.documentName}</Badge>
