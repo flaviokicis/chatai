@@ -227,7 +227,8 @@ Não diga "não sei" e fique parado. ESCALE para resolver a dúvida do cliente."
         node_prompts = {}
         if flow_graph and "nodes" in flow_graph:
             for node in flow_graph["nodes"]:
-                node_types[node["id"]] = node["type"]
+                # Support both "kind" (new IR format) and "type" (legacy)
+                node_types[node["id"]] = node.get("kind") or node.get("type", "unknown")
                 # Get the prompt or reason for display
                 node_prompts[node["id"]] = (
                     node.get("prompt") or node.get("reason") or node.get("label") or node["id"]
@@ -241,13 +242,13 @@ Não diga "não sei" e fique parado. ESCALE para resolver a dúvida do cliente."
             target_prompt = node_prompts.get(target, target)
 
             # If target is a routing/decision node, show what's beyond it
-            if target_type == "DecisionNode":
+            if target_type in ("DecisionNode", "Decision"):
                 # Show paths through the decision node
                 next_nodes = edge_lookup.get(target, [])
                 for next_node in next_nodes:
                     next_type = node_types.get(next_node, "unknown")
                     next_prompt = node_prompts.get(next_node, next_node)
-                    if next_type != "DecisionNode":  # Skip nested routers
+                    if next_type not in ("DecisionNode", "Decision"):  # Skip nested routers
                         # Show a preview of the question/terminal
                         preview = next_prompt[:50] + "..." if len(next_prompt) > 50 else next_prompt
                         paths.append(f'→ {next_node} ({next_type}): "{preview}"')
