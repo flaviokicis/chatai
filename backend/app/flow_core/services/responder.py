@@ -388,7 +388,9 @@ REGRAS CRÍTICAS - FIDELIDADE AO FLUXO:
    - NÃO apenas responda perguntas - SEMPRE conduza para a próxima etapa
 
 2. **Quando o usuário faz uma PERGUNTA que revela interesse/intenção de compra**:
-   - OBRIGATÓRIO: Responda brevemente (usando RAG se disponível)
+   - OBRIGATÓRIO: Responda brevemente
+   - Use RAG SOMENTE se a pergunta exigir especificações técnicas (lumens, watts, dimensões, IP, etc.)
+   - Para perguntas simples (ex: "trabalham com X?"), responda apenas sim/não sem specs
    - OBRIGATÓRIO: Na MESMA resposta, avance imediatamente para a próxima pergunta do fluxo
    - Use actions=["update", "navigate"] para salvar o interesse e mover para o próximo nó
    - A conversa NUNCA deve parar após responder - mantenha o momentum de vendas

@@ -200,8 +200,16 @@ class FlowTurnRunner:
                     ctx.rag_query_performed = False
 
             # Step 1: Get initial LLM response with full context
+            # Extract prompt from node (QuestionNode has 'prompt', others may not)
+            node_prompt = ""
+            if current_node:
+                if hasattr(current_node, "prompt"):
+                    node_prompt = current_node.prompt
+                elif hasattr(current_node, "text"):
+                    node_prompt = current_node.text
+            
             responder_output = await self._responder.respond(
-                prompt=current_node.text if current_node and hasattr(current_node, "text") else "",
+                prompt=node_prompt,
                 pending_field=pending_field,
                 context=ctx,
                 user_message=user_message,
