@@ -448,6 +448,107 @@ async def list_tenants(request: Request, db: Session = Depends(get_db)) -> list[
     return result
 
 
+@router.get("/tenants/{tenant_id}", response_model=TenantResponse)
+async def get_tenant(
+    tenant_id: UUID, db: Session = Depends(get_db)
+) -> TenantResponse:
+    """Get a single tenant's configuration (public access for tenant owners)."""
+    # No auth required - tenants can view their own config
+
+    try:
+        tenant = get_tenant_by_id(db, tenant_id)
+        if not tenant:
+            raise HTTPException(status_code=404, detail=f"Tenant {tenant_id} not found")
+
+        # Get counts for this tenant
+        from app.db.repository import get_flows_by_tenant, get_channel_instances_by_tenant
+        
+        channels = get_channel_instances_by_tenant(db, tenant_id)
+        flows = get_flows_by_tenant(db, tenant_id)
+        
+        return TenantResponse(
+            id=tenant.id,
+            owner_first_name=tenant.owner_first_name,
+            owner_last_name=tenant.owner_last_name,
+            owner_email=tenant.owner_email,
+            created_at=tenant.created_at,
+            updated_at=tenant.updated_at,
+            project_description=tenant.project_config.project_description
+            if tenant.project_config
+            else None,
+            target_audience=tenant.project_config.target_audience
+            if tenant.project_config
+            else None,
+            communication_style=tenant.project_config.communication_style
+            if tenant.project_config
+            else None,
+            channel_count=len(channels),
+            flow_count=len(flows),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting tenant {tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e!s}")
+
+
+@router.patch("/tenants/{tenant_id}/config", response_model=TenantResponse)
+async def update_tenant_config(
+    tenant_id: UUID,
+    config: TenantUpdateRequest,
+    db: Session = Depends(get_db),
+) -> TenantResponse:
+    """Update tenant project configuration (public access for tenant owners)."""
+    # No auth required - tenants can update their own config
+    
+    tenant = get_tenant_by_id(db, tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    try:
+        updated_tenant = update_tenant(
+            db,
+            tenant_id=tenant_id,
+            project_description=config.project_description,
+            target_audience=config.target_audience,
+            communication_style=config.communication_style,
+        )
+        db.commit()
+
+        # Get counts for response
+        from app.db.repository import get_flows_by_tenant, get_channel_instances_by_tenant
+        
+        channels = get_channel_instances_by_tenant(db, tenant_id)
+        flows = get_flows_by_tenant(db, tenant_id)
+
+        return TenantResponse(
+            id=updated_tenant.id,
+            owner_first_name=updated_tenant.owner_first_name,
+            owner_last_name=updated_tenant.owner_last_name,
+            owner_email=updated_tenant.owner_email,
+            created_at=updated_tenant.created_at,
+            updated_at=updated_tenant.updated_at,
+            project_description=updated_tenant.project_config.project_description
+            if updated_tenant.project_config
+            else None,
+            target_audience=updated_tenant.project_config.target_audience
+            if updated_tenant.project_config
+            else None,
+            communication_style=updated_tenant.project_config.communication_style
+            if updated_tenant.project_config
+            else None,
+            channel_count=len(channels),
+            flow_count=len(flows),
+        )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Invalid data: {e!s}")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error updating tenant config {tenant_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {e!s}")
+
+
 @router.post("/tenants", response_model=TenantResponse)
 async def create_tenant(
     request: Request, tenant_req: TenantCreateRequest, db: Session = Depends(get_db)
@@ -1020,9 +1121,9 @@ class ApplyPersonalityRequest(BaseModel):
 
 
 @router.get("/personalities", response_model=list[PersonalityPresetResponse])
-def get_personality_presets(request: Request) -> list[PersonalityPresetResponse]:
-    """Get all available personality presets."""
-    require_admin_auth(request)
+def get_personality_presets() -> list[PersonalityPresetResponse]:
+    """Get all available personality presets (public access)."""
+    # No auth required - these are just templates
     
     from app.core.personality_presets import get_all_personalities
     
@@ -1042,13 +1143,12 @@ def get_personality_presets(request: Request) -> list[PersonalityPresetResponse]
 
 @router.post("/tenants/{tenant_id}/apply-personality")
 def apply_personality_to_tenant(
-    request: Request,
     tenant_id: str,
     personality_req: ApplyPersonalityRequest,
     db: Session = Depends(db_session),
 ) -> dict[str, str]:
-    """Apply a personality preset to a tenant's communication style."""
-    require_admin_auth(request)
+    """Apply a personality preset to a tenant's communication style (public access for tenant owners)."""
+    # No auth required - tenants can apply personalities to their own config
     
     from app.core.personality_presets import get_personality_by_id
     

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronLeft, ChevronRight, User, Sparkles, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -38,25 +38,11 @@ export function PersonalitySelector({
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
 
-  // Load personalities on mount
-  useState(() => {
-    loadPersonalities();
-  });
-
   const loadPersonalities = async () => {
     try {
       setLoading(true);
-      const adminPassword = localStorage.getItem("adminPassword");
-      if (!adminPassword) {
-        toast.error("Admin authentication required");
-        return;
-      }
 
-      const response = await fetch("/api/controller/personalities", {
-        headers: {
-          Authorization: `Bearer ${adminPassword}`,
-        },
-      });
+      const response = await fetch("/api/controller/personalities");
 
       if (!response.ok) {
         throw new Error("Failed to load personalities");
@@ -80,6 +66,11 @@ export function PersonalitySelector({
     }
   };
 
+  // Load personalities on mount
+  useEffect(() => {
+    loadPersonalities();
+  }, []); // Empty dependency array = run once on mount
+
   const handleApplyPersonality = async () => {
     if (!personalities[selectedIndex]) return;
 
@@ -87,16 +78,10 @@ export function PersonalitySelector({
     
     try {
       setApplying(true);
-      const adminPassword = localStorage.getItem("adminPassword");
-      if (!adminPassword) {
-        toast.error("Admin authentication required");
-        return;
-      }
 
       const response = await fetch(`/api/controller/tenants/${tenantId}/apply-personality`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${adminPassword}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

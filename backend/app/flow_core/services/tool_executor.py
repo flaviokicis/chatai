@@ -213,7 +213,65 @@ class ToolExecutionService:
 
         # Add flow_id to parameters for flow modification
         if action_name == "modify_flow":
-            tool_data["flow_id"] = context.flow_id
+            # context.flow_id is a string like "flow.atendimento_luminarias"
+            # We need to get the actual UUID from the database
+            # The flow UUID should be available in the FlowRequest metadata
+            # For now, we'll need to query it from the tenant_id + flow_id string
+            from app.db.session import create_session
+            from app.db.repository import get_flows_by_tenant
+            
+            if context.tenant_id and context.flow_id:
+                try:
+                    with create_session() as session:
+                        flows = get_flows_by_tenant(session, context.tenant_id)
+                        matching_flow = next(
+                            (f for f in flows if f.flow_id == context.flow_id),
+                            None
+                        )
+                        if matching_flow:
+                            tool_data["flow_id"] = str(matching_flow.id)
+                            logger.info(f"Resolved flow_id '{context.flow_id}' to UUID {matching_flow.id}")
+                        else:
+                            logger.error(f"Could not find flow with flow_id='{context.flow_id}' for tenant {context.tenant_id}")
+                            result.external_action_executed = True
+                            result.external_action_result = ActionResult(
+                                success=False,
+                                message="A modificação do fluxo falhou porque o sistema não conseguiu identificar qual fluxo modificar. Isso pode ser um erro temporário no banco de dados.",
+                                error=f"Flow resolution failed: No flow found with flow_id='{context.flow_id}' for tenant_id={context.tenant_id}",
+                                data={
+                                    "error_type": "flow_not_found",
+                                    "attempted_flow_id": context.flow_id,
+                                    "tenant_id": str(context.tenant_id),
+                                },
+                            )
+                            return
+                except Exception as e:
+                    logger.error(f"Error resolving flow UUID: {e}", exc_info=True)
+                    result.external_action_executed = True
+                    result.external_action_result = ActionResult(
+                        success=False,
+                        message="A modificação do fluxo falhou devido a um erro ao acessar o banco de dados. Pode ser uma instabilidade temporária do sistema.",
+                        error=f"Database error while resolving flow UUID: {type(e).__name__}: {str(e)}",
+                        data={
+                            "error_type": "database_error",
+                            "exception_type": type(e).__name__,
+                        },
+                    )
+                    return
+            else:
+                logger.error(f"Missing tenant_id or flow_id in context: tenant_id={context.tenant_id}, flow_id={context.flow_id}")
+                result.external_action_executed = True
+                result.external_action_result = ActionResult(
+                    success=False,
+                    message="A modificação do fluxo falhou porque o sistema não tem informações suficientes sobre qual fluxo modificar. Isso indica um problema na configuração interna.",
+                    error=f"Missing required context: tenant_id={'present' if context.tenant_id else 'MISSING'}, flow_id={'present' if context.flow_id else 'MISSING'}",
+                    data={
+                        "error_type": "missing_context",
+                        "has_tenant_id": bool(context.tenant_id),
+                        "has_flow_id": bool(context.flow_id),
+                    },
+                )
+                return
 
         try:
             # Execute the external action
@@ -230,8 +288,22 @@ class ToolExecutionService:
         except Exception as e:
             logger.error(f"❌ External action '{action_name}' raised exception: {e}", exc_info=True)
             result.external_action_executed = True
+            
+            # Provide user-friendly message based on action type
+            if action_name == "modify_flow":
+                user_message = "A modificação do fluxo falhou devido a um erro inesperado durante a execução. Nenhuma mudança foi aplicada."
+            else:
+                user_message = f"A ação '{action_name}' falhou devido a um erro inesperado."
+            
             result.external_action_result = ActionResult(
-                success=False, message=f"❌ Erro interno ao executar {action_name}", error=str(e)
+                success=False,
+                message=user_message,
+                error=f"Unexpected exception during {action_name} execution: {type(e).__name__}: {str(e)}",
+                data={
+                    "error_type": "unexpected_exception",
+                    "exception_type": type(e).__name__,
+                    "action_name": action_name,
+                },
             )
 
     # Deprecated legacy handler removed: RequestHumanHandoff
