@@ -282,8 +282,32 @@ class ToolExecutionService:
 
             if action_result.is_success:
                 logger.info(f"✅ External action '{action_name}' completed successfully")
+                
+                # Append success confirmation message directly
+                success_message = self._build_success_message(action_name, action_result)
+                if success_message:
+                    # Get existing messages or create new list
+                    existing_messages = result.metadata.get("messages", [])
+                    # Append success message with delay
+                    existing_messages.append({
+                        "text": success_message,
+                        "delay_ms": 2000
+                    })
+                    result.metadata["messages"] = existing_messages
+                    logger.info(f"📨 Appended success message: {success_message}")
             else:
                 logger.error(f"❌ External action '{action_name}' failed: {action_result.error}")
+                
+                # Append failure message directly
+                failure_message = self._build_failure_message(action_name, action_result)
+                if failure_message:
+                    existing_messages = result.metadata.get("messages", [])
+                    existing_messages.append({
+                        "text": failure_message,
+                        "delay_ms": 2000
+                    })
+                    result.metadata["messages"] = existing_messages
+                    logger.info(f"📨 Appended failure message: {failure_message}")
 
         except Exception as e:
             logger.error(f"❌ External action '{action_name}' raised exception: {e}", exc_info=True)
@@ -305,5 +329,52 @@ class ToolExecutionService:
                     "action_name": action_name,
                 },
             )
+
+    def _build_success_message(self, action_name: str, action_result: ActionResult) -> str | None:
+        """Build a user-friendly success message for the completed action.
+        
+        Args:
+            action_name: Name of the action that completed
+            action_result: Result from the action execution
+            
+        Returns:
+            Success message in Portuguese, or None if no message needed
+        """
+        if action_name == "modify_flow":
+            # Check if there's a custom message in the result
+            if action_result.message:
+                return action_result.message
+            
+            # Get summary from result data
+            summary = action_result.data.get("summary", "Modificação aplicada") if action_result.data else "Modificação aplicada"
+            return f"✅ Pronto! {summary}"
+        
+        if action_name == "update_communication_style":
+            return "✅ Estilo de comunicação atualizado com sucesso!"
+        
+        # For other actions, use the result message if available
+        return action_result.message if action_result.message else None
+    
+    def _build_failure_message(self, action_name: str, action_result: ActionResult) -> str | None:
+        """Build a user-friendly failure message for the failed action.
+        
+        Args:
+            action_name: Name of the action that failed
+            action_result: Result from the action execution
+            
+        Returns:
+            Failure message in Portuguese, or None if no message needed
+        """
+        # Use the action result's message which should be user-friendly
+        if action_result.message:
+            return f"❌ {action_result.message}"
+        
+        # Fallback generic message
+        if action_name == "modify_flow":
+            return "❌ A modificação do fluxo falhou. Nenhuma mudança foi aplicada."
+        if action_name == "update_communication_style":
+            return "❌ Não foi possível atualizar o estilo de comunicação."
+        
+        return f"❌ A ação '{action_name}' falhou."
 
     # Deprecated legacy handler removed: RequestHumanHandoff
