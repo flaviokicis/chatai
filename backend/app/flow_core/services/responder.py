@@ -388,11 +388,12 @@ REGRAS CRÍTICAS - FIDELIDADE AO FLUXO:
    - NÃO apenas responda perguntas - SEMPRE conduza para a próxima etapa
 
 2. **Quando o usuário faz uma PERGUNTA que revela interesse/intenção de compra**:
-   - OBRIGATÓRIO: Responda brevemente
+   - OBRIGATÓRIO: Responda brevemente E inclua o campo "messages"
    - Use RAG SOMENTE se a pergunta exigir especificações técnicas (lumens, watts, dimensões, IP, etc.)
    - Para perguntas simples (ex: "trabalham com X?"), responda apenas sim/não sem specs
    - OBRIGATÓRIO: Na MESMA resposta, avance imediatamente para a próxima pergunta do fluxo
    - Use actions=["update", "navigate"] para salvar o interesse e mover para o próximo nó
+   - **CRITICAL: Mesmo navegando, você DEVE incluir "messages" com sua resposta ao usuário, "messages" é sempre obrigatorio**
    - A conversa NUNCA deve parar após responder - mantenha o momentum de vendas
    - Qualifique o projeto ativamente: tipo, dimensões, especificações
    - Regra de ouro: "Responder + Qualificar" em uma única interação
@@ -424,14 +425,21 @@ Confiança e confirmação:
 - Baixa (<0.7): peça confirmação antes de prosseguir (use ["stay"]) 
 
 Ferramenta: PerformAction (única disponível)
-- Sempre envie 1–3 mensagens WhatsApp na resposta (exceto em nós de decisão/routers)
-- Campos principais: actions, messages, reasoning, confidence
+- SEMPRE inclua o campo "messages" com 1–3 mensagens WhatsApp
+- ÚNICA EXCEÇÃO: se o NÓ ATUAL for tipo Decision/Router (veja "kind" no nó atual)
+- Campos obrigatórios: actions, messages, reasoning, confidence
 - Extras quando fizer sentido: updates, target_node_id, clarification_reason
 - Padrão comum: ["update", "navigate"] para salvar e seguir
 
-Nós de decisão (routers):
+**CRITICAL: MESSAGES FIELD IS MANDATORY**
+- Se você está em nó Question/Terminal: SEMPRE inclua messages (mesmo quando navegando)
+- Se você está em nó Decision (router): NÃO inclua messages
+- Como saber? Veja o "kind" do nó atual acima: Question = precisa messages, Decision = não precisa
+
+Nós de decisão (routers) - ÚNICA EXCEÇÃO:
+- Tipo "Decision" no campo "kind"
 - Não enviam mensagens ao usuário, apenas roteiam para o próximo nó apropriado
-- Navegue imediatamente usando "navigate" com actions=["navigate"] sem incluir messages
+- Navegue imediatamente usando "navigate" com actions=["navigate"] SEM messages
 - Use "AVAILABLE PATHS" e o grafo para escolher o destino
 - O nó seguinte (após o router) é que enviará mensagens ao usuário
 
@@ -576,7 +584,13 @@ Arguments: {{
   ]
 }}''' if flow_already_complete else ''}
 
-Lembrete: sempre inclua messages no tool call."""
+🚨 CRITICAL REMINDER 🚨
+VOCÊ ESTÁ NO NÓ: {context.current_node_id}
+
+O campo 'messages' é OBRIGATÓRIO para nós tipo Question/Terminal!
+Se você está fazendo actions=["update", "navigate"], AINDA ASSIM precisa de messages!
+
+NUNCA retorne apenas actions sem messages - o usuário ficará sem resposta!"""
 
         return instruction
 
@@ -1106,8 +1120,8 @@ When an admin requests communication style changes:
             tool_args["confidence"] = 0.8
         if "messages" not in tool_args:
             # Generate default messages based on content
-            logger.warning("[DEBUG] No messages found in tool_args! Using fallback.")
-            tool_args["messages"] = [{"text": content or "Entendi!", "delay_ms": 0}]
+            logger.error("[BUG] LLM did not include 'messages' field! This should never happen.")
+            tool_args["messages"] = [{"text": content or "⚠️ Erro interno: resposta sem mensagem. Contate o administrador.", "delay_ms": 0}]
         else:
             logger.info(f"[DEBUG] Found {len(tool_args['messages'])} messages in tool_args")
 
