@@ -74,16 +74,21 @@ class FlowTurnRunner:
             Initialized flow context
         """
         if existing_context:
+            # Auto-repair broken contexts: if current_node_id is empty but we have an entry node, initialize it
+            if not existing_context.current_node_id and self._compiled_flow and self._compiled_flow.entry:
+                logger.warning(f"Detected broken context with empty current_node_id, initializing to entry node: {self._compiled_flow.entry}")
+                existing_context.current_node_id = self._compiled_flow.entry
             return existing_context
 
-        # Create new context
+        # Create new context - initialize to entry node
+        entry_node_id = self._compiled_flow.entry if self._compiled_flow else ""
         return FlowContext(
             user_id="",
             session_id="",
             tenant_id=None,
             channel_id="",
             flow_id="",
-            current_node_id="",
+            current_node_id=entry_node_id,
             answers={},
             history=[],
         )
