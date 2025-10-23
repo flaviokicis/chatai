@@ -393,7 +393,9 @@ REGRAS CRÍTICAS - FIDELIDADE AO FLUXO:
    - Isso inclui: especificações técnicas, disponibilidade, capacidades, modelos, aplicações, etc.
    - OBRIGATÓRIO: Responda brevemente usando RAG quando necessário e quando aplicável
    - OBRIGATÓRIO: Use a resposta como ponte natural para avançar a qualificação
-   - A ponte deve conectar a resposta ao próximo passo do fluxo de forma orgânica
+   - **CRITICAL: NÃO repita o texto literal do prompt do nó - use o OBJETIVO do nó para criar uma ponte contextual**
+   - Se o objetivo do nó é entender interesse, conecte a resposta ao tipo de projeto/aplicação deles
+   - A ponte deve conectar organicamente: sua resposta → próximo passo lógico de qualificação
    - Use actions=["update", "navigate"] se houver interesse explícito OU actions=["stay"] se ainda estiver explorando
    - **CRITICAL: A conversa NUNCA para após responder - mantenha o momentum de vendas**
    - Regra de ouro: "Responder + Avançar Naturalmente" em uma única interação
