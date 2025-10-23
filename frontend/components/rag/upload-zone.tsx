@@ -25,10 +25,11 @@ interface UploadZoneProps {
   maxFiles?: number;
 }
 
-export function UploadZone({ onUpload, onUploadComplete, disabled = false, maxFiles = 10 }: UploadZoneProps): React.JSX.Element {
+export function UploadZone({ onUpload, onUploadComplete, disabled = false, maxFiles = 50 }: UploadZoneProps): React.JSX.Element {
   const [files, setFiles] = useState<UploadFile[]>([]);
 
   const validateFile = (file: File): string | null => {
+    console.log('[UploadZone] Validating file:', file.name, 'type:', file.type, 'size:', file.size);
     const validTypes = ["application/pdf", "text/plain", "text/markdown", "application/json"];
     const validExtensions = [".pdf", ".txt", ".md", ".json"];
     
@@ -36,17 +37,21 @@ export function UploadZone({ onUpload, onUploadComplete, disabled = false, maxFi
     const hasValidType = validTypes.includes(file.type);
     
     if (!hasValidExtension && !hasValidType) {
+      console.log('[UploadZone] File rejected - invalid type');
       return "Tipo de arquivo não suportado. Use PDF, TXT, MD ou JSON.";
     }
     
     if (file.size > 10 * 1024 * 1024) {
+      console.log('[UploadZone] File rejected - too large');
       return "Arquivo muito grande. Máximo: 10MB.";
     }
     
+    console.log('[UploadZone] File validation passed');
     return null;
   };
 
   const handleUploadFile = useCallback(async (uploadFile: UploadFile) => {
+    console.log('[UploadZone] handleUploadFile called for:', uploadFile.file.name);
     setFiles(prev => prev.map(f => 
       f.id === uploadFile.id ? { ...f, status: "uploading", currentStep: "uploading" } : f
     ));
@@ -64,7 +69,9 @@ export function UploadZone({ onUpload, onUploadComplete, disabled = false, maxFi
     }, 3000);
 
     try {
+      console.log('[UploadZone] Calling onUpload callback for:', uploadFile.file.name);
       const result = await onUpload(uploadFile.file);
+      console.log('[UploadZone] Upload result:', result);
       
       clearInterval(stepInterval);
 
@@ -97,27 +104,61 @@ export function UploadZone({ onUpload, onUploadComplete, disabled = false, maxFi
     }
   }, [onUpload, onUploadComplete]);
 
-  const onDrop = useCallback((acceptedFiles: File[]) => {
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any[]) => {
+    console.log('[UploadZone] onDrop called - acceptedFiles:', acceptedFiles.length, 'rejectedFiles:', rejectedFiles.length);
+    console.log('[UploadZone] Current files in state:', files.length, 'maxFiles:', maxFiles);
+    
+    const allNewFiles: UploadFile[] = [];
+    
+    if (rejectedFiles.length > 0) {
+      console.log('[UploadZone] Rejected files:', rejectedFiles);
+      rejectedFiles.forEach((rejection, index) => {
+        console.log(`[UploadZone] Rejected file ${index + 1}:`, {
+          name: rejection.file?.name,
+          type: rejection.file?.type,
+          size: rejection.file?.size,
+          errors: rejection.errors
+        });
+        
+        const errorMessages = rejection.errors?.map((e: any) => {
+          if (e.code === 'file-invalid-type') return 'Tipo de arquivo não suportado';
+          if (e.code === 'file-too-large') return 'Arquivo muito grande (máx 10MB)';
+          if (e.code === 'too-many-files') return 'Muitos arquivos selecionados';
+          return e.message || 'Erro desconhecido';
+        }).join(', ') || 'Arquivo rejeitado';
+        
+        allNewFiles.push({
+          file: rejection.file,
+          id: `${Date.now()}-${Math.random()}-${index}`,
+          status: "error",
+          error: errorMessages,
+        });
+      });
+    }
+    
     const filesToAdd = acceptedFiles.slice(0, maxFiles - files.length);
+    console.log('[UploadZone] Files to add:', filesToAdd.length);
 
-    const newFiles: UploadFile[] = filesToAdd.map((file) => {
+    filesToAdd.forEach((file) => {
       const error = validateFile(file);
-      return {
+      allNewFiles.push({
         file,
         id: `${Date.now()}-${Math.random()}`,
         status: error ? "error" : "pending",
         error: error || undefined,
-      };
+      });
     });
 
-    setFiles(prev => [...prev, ...newFiles]);
+    console.log('[UploadZone] New files created:', allNewFiles.length);
+    setFiles(prev => [...prev, ...allNewFiles]);
 
-    newFiles.forEach(uploadFile => {
+    allNewFiles.forEach(uploadFile => {
       if (uploadFile.status !== "error") {
+        console.log('[UploadZone] Starting upload for:', uploadFile.file.name);
         void handleUploadFile(uploadFile);
       }
     });
-  }, [files.length, maxFiles, handleUploadFile]);
+  }, [files.length, maxFiles, handleUploadFile, validateFile]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -131,7 +172,13 @@ export function UploadZone({ onUpload, onUploadComplete, disabled = false, maxFi
     maxFiles,
     disabled: disabled || files.length >= maxFiles,
     multiple: true,
+    onDragEnter: () => console.log('[UploadZone] Drag enter detected'),
+    onDragLeave: () => console.log('[UploadZone] Drag leave detected'),
+    onDropAccepted: (files) => console.log('[UploadZone] Drop accepted:', files.length, 'files'),
+    onDropRejected: (fileRejections) => console.log('[UploadZone] Drop rejected:', fileRejections),
   });
+  
+  console.log('[UploadZone] Render - isDragActive:', isDragActive, 'disabled:', disabled, 'files.length:', files.length);
 
   const removeFile = useCallback((id: string) => {
     setFiles(prev => prev.filter(f => f.id !== id));
@@ -181,7 +228,7 @@ export function UploadZone({ onUpload, onUploadComplete, disabled = false, maxFi
           </h3>
           
           <p className="text-sm text-muted-foreground mb-4">
-            PDF, TXT, Markdown ou JSON • Máximo {maxFiles} arquivos • Até 10MB cada
+            PDF, TXT, Markdown ou JSON • Até {maxFiles} arquivos por vez • Máximo 10MB cada
           </p>
 
           <Button

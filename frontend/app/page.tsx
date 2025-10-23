@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, Settings, User, Globe, MessageCircle, Clock, ArrowRight, TrendingUp, Users, CheckCircle, BarChart3, Smartphone } from "lucide-react";
+import { Bot, Settings, User, Globe, MessageCircle, Clock, ArrowRight, TrendingUp, Users, CheckCircle, BarChart3, Smartphone, FileText } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ const shortcuts = [
   { href: "/chats", icon: MessageCircle, label: "Conversas", description: "Visualizar e gerenciar conversas com clientes" },
   { href: "/flows", icon: Bot, label: "Fluxos", description: "Gerenciar fluxos e agentes relacionados" },
   { href: "/channels", icon: Smartphone, label: "Canais", description: "Gerenciar canais do WhatsApp e fluxos ativos" },
+  { href: "/documents", icon: FileText, label: "Base de Conhecimento", description: "Adicionar e gerenciar documentos para sua IA" },
   { href: "/account", icon: User, label: "Conta", description: "Informações pessoais" },
   { href: "/project", icon: Globe, label: "Configurações Globais", description: "Definições padrão para todos os fluxos" },
   { href: "/settings", icon: Settings, label: "Configurações", description: "Preferências e configuração do app" },

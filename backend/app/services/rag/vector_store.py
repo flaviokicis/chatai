@@ -62,8 +62,15 @@ class VectorStoreRepository:
         elif database_url.startswith("postgresql+psycopg://"):
             database_url = database_url.replace("postgresql+psycopg://", "postgresql+asyncpg://")
         
-        self.engine = create_async_engine(database_url, echo=False)
-        self.async_session = async_sessionmaker(self.engine, class_=AsyncSession)
+        self.engine = create_async_engine(
+            database_url,
+            echo=False,
+            pool_size=30,
+            max_overflow=50,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+        )
+        self.async_session = async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
     
     async def initialize(self):
         """Initialize the vector store (ensure extension is enabled)."""

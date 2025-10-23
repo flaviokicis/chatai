@@ -257,7 +257,17 @@ class FlowTurnRunner:
                     if isinstance(args, dict):
                         msgs = args.get("messages")
                         if msgs:
-                            tool_result.metadata["messages"] = msgs
+                            # Preserve any existing messages (e.g., success messages from external actions)
+                            # and append new messages from feedback
+                            existing = tool_result.metadata.get("messages", [])
+                            # Only merge if we have existing messages that aren't already in the new messages
+                            if existing and existing != msgs:
+                                # Keep existing messages and append only new ones that aren't duplicates
+                                seen_texts = {m.get("text") for m in msgs if isinstance(m, dict)}
+                                unique_existing = [m for m in existing if isinstance(m, dict) and m.get("text") not in seen_texts]
+                                tool_result.metadata["messages"] = msgs + unique_existing
+                            else:
+                                tool_result.metadata["messages"] = msgs
 
             return tool_result
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bot, Home, User, Globe, Settings, MessageCircle, BarChart3, Smartphone } from "lucide-react";
+import { Bot, Home, User, Globe, Settings, MessageCircle, BarChart3, Smartphone, FileText } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ const sidebarItems = [
   { href: "/chats", icon: MessageCircle, label: "Conversas" },
   { href: "/flows", icon: Bot, label: "Fluxos" },
   { href: "/channels", icon: Smartphone, label: "Canais" },
+  { href: "/documents", icon: FileText, label: "Base de Conhecimento" },
   { href: "/account", icon: User, label: "Conta" },
   { href: "/project", icon: Globe, label: "Configurações Globais" },
   { href: "/settings", icon: Settings, label: "Configurações" },

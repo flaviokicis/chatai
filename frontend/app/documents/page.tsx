@@ -158,7 +158,9 @@ export default function DocumentsPage(): React.JSX.Element {
   }, [tenantId, loadDocuments]);
 
   const handleUpload = useCallback(async (file: File) => {
+    console.log('[DocumentsPage] handleUpload called for:', file.name, 'tenantId:', tenantId);
     if (!tenantId) {
+      console.log('[DocumentsPage] No tenantId available');
       return {
         success: false,
         chunksCreated: 0,
@@ -168,7 +170,9 @@ export default function DocumentsPage(): React.JSX.Element {
     }
 
     try {
+      console.log('[DocumentsPage] Calling uploadTenantDocument');
       const response = await uploadTenantDocument(tenantId, file);
+      console.log('[DocumentsPage] Upload response:', response);
       return {
         success: response.success,
         chunksCreated: response.chunksCreated,
@@ -177,6 +181,7 @@ export default function DocumentsPage(): React.JSX.Element {
         message: response.message,
       };
     } catch (err) {
+      console.error('[DocumentsPage] Upload error:', err);
       return {
         success: false,
         chunksCreated: 0,
@@ -433,7 +438,7 @@ export default function DocumentsPage(): React.JSX.Element {
               onUpload={handleUpload}
               onUploadComplete={refreshDocuments}
               disabled={disableActions}
-              maxFiles={10}
+              maxFiles={50}
             />
           </CardContent>
         </Card>
