@@ -1133,9 +1133,9 @@ When an admin requests communication style changes:
         if "confidence" not in tool_args:
             tool_args["confidence"] = 0.8
         if "messages" not in tool_args:
-            # Generate default messages based on content
+            # Generate default messages based on content (friendly, non-technical)
             logger.error("[BUG] LLM did not include 'messages' field! This should never happen.")
-            tool_args["messages"] = [{"text": content or "⚠️ Erro interno: resposta sem mensagem. Contate o administrador.", "delay_ms": 0}]
+            tool_args["messages"] = [{"text": content or DEFAULT_ERROR_MESSAGE, "delay_ms": NO_DELAY_MS}]
         else:
             logger.info(f"[DEBUG] Found {len(tool_args['messages'])} messages in tool_args")
 

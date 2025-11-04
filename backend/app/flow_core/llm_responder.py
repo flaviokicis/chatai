@@ -21,6 +21,7 @@ from app.core.flow_response import FlowProcessingResult
 from app.core.flow_response import FlowResponse as UnifiedFlowResponse
 
 from .services.responder import EnhancedFlowResponder
+from .constants import DEFAULT_ERROR_MESSAGE
 
 
 @dataclass(slots=True)
@@ -113,13 +114,38 @@ class LLMFlowResponder:
         # Convert to FlowResponse format
         result = output.tool_result
 
-        # Use first message as primary message
-        primary_message = output.messages[0]["text"] if output.messages else ""
+        # Use first message as primary message with robust fallback
+        primary_message = ""
+        if output.messages:
+            first_message = output.messages[0]
+            if isinstance(first_message, dict):
+                primary_message = str(first_message.get("text") or "").strip()
+            else:
+                primary_message = str(first_message)
+
+        # Fallback to messages produced during tool execution (e.g., external actions)
+        meta_messages = None
+        if not primary_message:
+            meta_messages = (result.metadata or {}).get("messages") if result and result.metadata else None
+            if isinstance(meta_messages, list) and meta_messages:
+                first_meta = meta_messages[0]
+                primary_message = (
+                    str(first_meta.get("text") or "").strip() if isinstance(first_meta, dict) else str(first_meta)
+                )
+
+        # Final safety fallback to a friendly default
+        if not primary_message:
+            primary_message = DEFAULT_ERROR_MESSAGE
 
         # Build metadata with messages for downstream channel adapter
         metadata = dict(result.metadata or {})
+        messages_for_metadata = None
         if output.messages:
-            metadata["messages"] = [dict(msg) for msg in output.messages]
+            messages_for_metadata = [dict(msg) for msg in output.messages]
+        elif isinstance(meta_messages, list):
+            messages_for_metadata = meta_messages
+        if messages_for_metadata:
+            metadata["messages"] = messages_for_metadata
 
         return UnifiedFlowResponse(
             result=FlowProcessingResult.CONTINUE
