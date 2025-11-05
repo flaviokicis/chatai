@@ -238,7 +238,7 @@ class FlowTurnRunner:
             # Step 2: Process tool calls
             tool_result = await self._process_tool_calls(llm_response, ctx)
 
-            # Apply updates to context
+            # CRITICAL: Apply updates to context (fixed in commit 263aac9)
             if tool_result.updates:
                 for field, value in tool_result.updates.items():
                     ctx.answers[field] = value
@@ -252,7 +252,7 @@ class FlowTurnRunner:
                             ctx.pending_field = None
                             logger.info(f"✅ Marked node {ctx.current_node_id} as COMPLETED")
 
-            # Apply navigation to context
+            # CRITICAL: Apply navigation to context (fixed in commit 263aac9)
             if tool_result.navigation:
                 if META_NAV_TYPE in tool_result.navigation:
                     target_node = tool_result.navigation[META_NAV_TYPE]
