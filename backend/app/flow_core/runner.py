@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.services.tenant_config_service import ProjectContext
 
 from .actions import ActionRegistry
+from .constants import META_NAV_TYPE, META_RESTART
 from .feedback import FeedbackLoop
 from .services.responder import EnhancedFlowResponder
 from .services.tool_executor import ToolExecutionResult, ToolExecutionService
@@ -236,6 +237,36 @@ class FlowTurnRunner:
 
             # Step 2: Process tool calls
             tool_result = await self._process_tool_calls(llm_response, ctx)
+
+            # Apply updates to context
+            if tool_result.updates:
+                for field, value in tool_result.updates.items():
+                    ctx.answers[field] = value
+                    logger.info(f"✅ Applied update to context: {field} = {value}")
+                    # Mark the current node as completed if it's for this field
+                    if ctx.current_node_id and self._compiled_flow:
+                        current_node = self._compiled_flow.nodes.get(ctx.current_node_id)
+                        if current_node and hasattr(current_node, "data_key") and current_node.data_key == field:
+                            from app.flow_core.state import NodeStatus
+                            ctx.get_node_state(ctx.current_node_id).status = NodeStatus.COMPLETED
+                            ctx.pending_field = None
+                            logger.info(f"✅ Marked node {ctx.current_node_id} as COMPLETED")
+
+            # Apply navigation to context
+            if tool_result.navigation:
+                if META_NAV_TYPE in tool_result.navigation:
+                    target_node = tool_result.navigation[META_NAV_TYPE]
+                    old_node = ctx.current_node_id
+                    ctx.current_node_id = target_node
+                    logger.info(f"✅ Navigated from {old_node} to {target_node}")
+                elif META_RESTART in tool_result.navigation:
+                    logger.info("✅ Restarting flow")
+                    if self._compiled_flow:
+                        ctx.current_node_id = self._compiled_flow.entry
+                        ctx.answers.clear()
+                        ctx.node_states.clear()
+                        ctx.pending_field = None
+                        ctx.clarification_count = 0
 
             # Ensure messages from responder are preserved in tool_result
             if responder_output.messages and not tool_result.metadata.get("messages"):

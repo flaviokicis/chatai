@@ -433,8 +433,20 @@ Ferramenta: PerformAction (única disponível)
 - SEMPRE inclua o campo "messages" com 1–3 mensagens WhatsApp
 - ÚNICA EXCEÇÃO: se o NÓ ATUAL for tipo Decision/Router (veja "kind" no nó atual)
 - Campos obrigatórios: actions, messages, reasoning, confidence
-- Extras quando fizer sentido: updates, target_node_id, clarification_reason
-- Padrão comum: ["update", "navigate"] para salvar e seguir
+- **CRITICAL: Campos condicionalmente obrigatórios (SEM EXCEÇÕES):**
+  * Se actions contém "update": updates é OBRIGATÓRIO (dict com campo:valor)
+    - Use o campo que está sendo coletado (veja "Coletando campo:" ou "pending_field" no ESTADO ATUAL)
+    - CORRETO: actions=["update", "navigate"], updates={"interesse_inicial": "barracão"}
+    - ERRADO: actions=["update"], updates=null ← ISTO CAUSA PERDA DE DADOS CRÍTICA!
+    - ERRADO: actions=["update"], updates={{}} ← Vazio também perde dados!
+  * Se actions contém "navigate": target_node_id é OBRIGATÓRIO
+    - CORRETO: actions=["navigate"], target_node_id="q.nome_posto"
+    - ERRADO: actions=["navigate"], target_node_id=null
+  * Se actions contém "handoff": handoff_reason é OBRIGATÓRIO
+  * Se actions contém "stay": clarification_reason é opcional
+- Padrão comum: ["update", "navigate"] → SEMPRE inclua updates={{campo: valor}} E target_node_id
+- **NUNCA use action="update" sem preencher o campo updates - isso perde a resposta do usuário!**
+- **Se você não sabe qual valor salvar, use actions=["stay"] e peça clarificação**
 
 **CRITICAL: MESSAGES FIELD IS MANDATORY**
 - Se você está em nó Question/Terminal: SEMPRE inclua messages (mesmo quando navegando)
@@ -1133,9 +1145,9 @@ When an admin requests communication style changes:
         if "confidence" not in tool_args:
             tool_args["confidence"] = 0.8
         if "messages" not in tool_args:
-            # Generate default messages based on content (friendly, non-technical)
+            # Generate default messages based on content
             logger.error("[BUG] LLM did not include 'messages' field! This should never happen.")
-            tool_args["messages"] = [{"text": content or DEFAULT_ERROR_MESSAGE, "delay_ms": NO_DELAY_MS}]
+            tool_args["messages"] = [{"text": content or "⚠️ Erro interno: resposta sem mensagem. Contate o administrador.", "delay_ms": 0}]
         else:
             logger.info(f"[DEBUG] Found {len(tool_args['messages'])} messages in tool_args")
 

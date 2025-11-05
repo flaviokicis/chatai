@@ -129,10 +129,35 @@ class ToolExecutionService:
         self, tool_data: dict[str, Any], result: ToolExecutionResult, pending_field: str | None
     ) -> None:
         """Handle answer updates."""
-        updates = tool_data.get("updates", {})
-        if updates and pending_field:
-            result.updates[pending_field] = updates.get(pending_field)
-            logger.info(f"Updated field '{pending_field}' with value")
+        updates = tool_data.get("updates")
+        
+        # CRITICAL BUG FIX: If LLM uses action "update" but provides null updates, this is a SEVERE BUG
+        if updates is None or (isinstance(updates, dict) and not updates):
+            logger.error(
+                f"❌ CRITICAL BUG: LLM used action='update' but provided NO updates! "
+                f"pending_field={pending_field}, tool_data={tool_data}"
+            )
+            # Store error in metadata so it's visible in logs
+            result.metadata["update_error"] = "LLM provided action='update' with null/empty updates"
+            result.metadata["pending_field_at_error"] = pending_field
+            return
+        
+        if pending_field:
+            # Get the value for the pending field
+            value = updates.get(pending_field)
+            if value is not None:
+                result.updates[pending_field] = value
+                logger.info(f"✅ Updated field '{pending_field}' = {value}")
+            else:
+                logger.error(
+                    f"❌ LLM provided updates but missing pending_field '{pending_field}'! "
+                    f"updates={updates}"
+                )
+                result.metadata["update_error"] = f"Missing field '{pending_field}' in updates"
+        else:
+            # No pending field - save all updates
+            result.updates.update(updates)
+            logger.info(f"✅ Updated {len(updates)} fields")
 
     def _handle_navigate_action(
         self, tool_data: dict[str, Any], result: ToolExecutionResult

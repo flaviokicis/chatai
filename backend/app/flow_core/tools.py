@@ -54,22 +54,28 @@ class PerformAction(FlowTool):
     )
 
     updates: dict[str, Any] | None = Field(
-        default=None, description="Field updates when action is 'update'"
+        default=None, 
+        description="REQUIRED when action is 'update'. Dictionary mapping field names to their values (e.g., {'tipo_projeto': 'barracão'})"
     )
 
     target_node_id: str | None = Field(
-        default=None, description="Target node when action is 'navigate'"
+        default=None, 
+        description="REQUIRED when action is 'navigate'. ID of the node to navigate to"
     )
 
     clarification_reason: str | None = Field(
-        default=None, description="Reason when action is 'stay'"
+        default=None, 
+        description="Optional when action is 'stay'. Reason why staying on current node"
     )
 
-    handoff_reason: str | None = Field(default=None, description="Reason when action is 'handoff'")
+    handoff_reason: str | None = Field(
+        default=None, 
+        description="REQUIRED when action is 'handoff'. Explanation for escalating to human agent"
+    )
 
     flow_modification_instruction: str | None = Field(
         default=None,
-        description="Instruction for modifying the flow when action is 'modify_flow' (admin only)",
+        description="REQUIRED when action is 'modify_flow' (admin only). Clear instruction for what to modify in the flow",
     )
 
     flow_modification_target: str | None = Field(
@@ -82,7 +88,7 @@ class PerformAction(FlowTool):
     
     updated_communication_style: str | None = Field(
         default=None,
-        description="COMPLETE new communication style when action is 'update_communication_style' (admin only). This REPLACES the current style entirely.",
+        description="REQUIRED when action is 'update_communication_style' (admin only). COMPLETE new communication style that REPLACES the current style entirely.",
     )
 
     @field_validator("messages")
@@ -95,6 +101,47 @@ class PerformAction(FlowTool):
             if "delay_ms" not in msg:
                 msg["delay_ms"] = 0
         return v
+
+    def model_post_init(self, __context: Any) -> None:
+        """Validate that required fields are provided based on actions.
+        
+        This runs after all fields are set, so we can cross-validate.
+        """
+        # Validate action-specific requirements
+        if "update" in self.actions:
+            if not self.updates:
+                raise ValueError(
+                    "CRITICAL: action='update' requires 'updates' field with at least one field-value pair. "
+                    "You MUST provide the field name and value you're saving."
+                )
+        
+        if "navigate" in self.actions:
+            if not self.target_node_id:
+                raise ValueError(
+                    "CRITICAL: action='navigate' requires 'target_node_id' field. "
+                    "You MUST specify which node to navigate to."
+                )
+        
+        if "handoff" in self.actions:
+            if not self.handoff_reason:
+                raise ValueError(
+                    "CRITICAL: action='handoff' requires 'handoff_reason' field. "
+                    "You MUST explain why you're escalating to a human."
+                )
+        
+        if "modify_flow" in self.actions:
+            if not self.flow_modification_instruction:
+                raise ValueError(
+                    "CRITICAL: action='modify_flow' requires 'flow_modification_instruction' field. "
+                    "You MUST provide clear instructions on what to modify."
+                )
+        
+        if "update_communication_style" in self.actions:
+            if not self.updated_communication_style:
+                raise ValueError(
+                    "CRITICAL: action='update_communication_style' requires 'updated_communication_style' field. "
+                    "You MUST provide the complete new communication style."
+                )
 
 
 # Tool registry - only essential tools
