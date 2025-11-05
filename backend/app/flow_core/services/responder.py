@@ -430,8 +430,7 @@ Confiança e confirmação:
 - Baixa (<0.7): peça confirmação antes de prosseguir (use ["stay"]) 
 
 Ferramenta: PerformAction (única disponível)
-- SEMPRE inclua o campo "messages" com 1–3 mensagens WhatsApp
-- ÚNICA EXCEÇÃO: se o NÓ ATUAL for tipo Decision/Router (veja "kind" no nó atual)
+- **SEMPRE inclua o campo "messages" com 1–3 mensagens WhatsApp - SEM EXCEÇÕES**
 - Campos obrigatórios: actions, messages, reasoning, confidence
 - **CRITICAL: Campos condicionalmente obrigatórios (SEM EXCEÇÕES):**
   * Se actions contém "update": updates é OBRIGATÓRIO (dict com campo:valor)
@@ -448,17 +447,19 @@ Ferramenta: PerformAction (única disponível)
 - **NUNCA use action="update" sem preencher o campo updates - isso perde a resposta do usuário!**
 - **Se você não sabe qual valor salvar, use actions=["stay"] e peça clarificação**
 
-**CRITICAL: MESSAGES FIELD IS MANDATORY**
-- Se você está em nó Question/Terminal: SEMPRE inclua messages (mesmo quando navegando)
-- Se você está em nó Decision (router): NÃO inclua messages
-- Como saber? Veja o "kind" do nó atual acima: Question = precisa messages, Decision = não precisa
-
-Nós de decisão (routers) - ÚNICA EXCEÇÃO:
-- Tipo "Decision" no campo "kind"
-- Não enviam mensagens ao usuário, apenas roteiam para o próximo nó apropriado
-- Navegue imediatamente usando "navigate" com actions=["navigate"] SEM messages
-- Use "AVAILABLE PATHS" e o grafo para escolher o destino
-- O nó seguinte (após o router) é que enviará mensagens ao usuário
+**CRITICAL: MESSAGES FIELD IS ALWAYS MANDATORY**
+- SEMPRE inclua messages com 1-3 mensagens, sem exceções
+- **Comportamento de nós Decision (routers):**
+  * Se você ESTÁ em um nó Decision (current_node_id começa com "d."):
+    - Analise os AVAILABLE PATHS e o contexto do usuário
+    - Escolha o caminho mais apropriado baseado no que o usuário disse
+    - Envie mensagens do nó escolhido (do caminho mais apropriado).
+    - Use actions=["navigate"] com target_node_id para o nó escolhido
+  * Se você está NAVEGANDO PARA um nó Decision:
+    - Isso não deve acontecer! Decision nodes são nós intermediários
+    - Navegue DIRETAMENTE para o nó final apropriado (ex: q.estudo_industrial)
+    - Não navegue para d.roteamento_principal, navegue para onde ele levaria
+  * Resumo: Decision nodes são apenas pontos de decisão, e nunca devemos parar neles.
 
 ## DEFINIÇÃO COMPLETA DO FLUXO
 {json.dumps(flow_graph if flow_graph else {"note": "Flow graph not available"}, ensure_ascii=False, indent=2)}
