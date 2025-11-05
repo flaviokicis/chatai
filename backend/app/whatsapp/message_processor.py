@@ -705,7 +705,9 @@ class WhatsAppMessageProcessor:
         if hasattr(flow_response, "message") and flow_response.message:
             return [{"text": flow_response.message, "delay_ms": 0}]
 
-        return [{"text": "Entendi. Vou te ajudar com isso.", "delay_ms": 0}]
+        # If we get here, something went wrong - use the proper error message
+        from app.flow_core.constants import DEFAULT_ERROR_MESSAGE
+        return [{"text": DEFAULT_ERROR_MESSAGE, "delay_ms": 0}]
 
     async def _save_individual_messages(
         self,
